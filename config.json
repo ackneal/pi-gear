@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "filesystem": {
+    "workspaceDefault": "read-write",
+    "outsideWorkspaceDefault": "ask",
+    "rules": [
+      {
+        "path": "/tmp/**",
+        "access": "read-write",
+        "follow": true
+      },
+      {
+        "path": "~/.pi/agent/skills/**",
+        "access": "read-only",
+        "follow": true
+      },
+      {
+        "path": "**/.env",
+        "access": "deny"
+      },
+      {
+        "path": "**/.env.*",
+        "access": "deny"
+      },
+      {
+        "path": "**/*.pem",
+        "access": "deny"
+      },
+      {
+        "path": "**/*.key",
+        "access": "deny"
+      },
+      {
+        "path": "~/.ssh/**",
+        "access": "deny"
+      },
+      {
+        "path": "~/.aws/**",
+        "access": "deny"
+      },
+      {
+        "path": "~/.gnupg/**",
+        "access": "deny"
+      },
+      {
+        "path": "~/.kube/**",
+        "access": "deny"
+      }
+    ]
+  },
+  "network": {
+    "defaultAccess": "ask",
+    "rules": []
+  }
+}
