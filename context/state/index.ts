@@ -89,14 +89,7 @@ export function formatTaskState(state: TaskState | undefined): string {
   ].join("\n");
 }
 
-export interface TaskStateHandle {
-  /** Latest state, including a completed plan until agent settlement. */
-  getState(): TaskState | undefined;
-  /** Active state only; returns undefined when all todos are done or no state exists. */
-  getActiveState(): TaskState | undefined;
-}
-
-export function setupTaskState(pi: ExtensionAPI): TaskStateHandle {
+export function setupTaskState(pi: ExtensionAPI): void {
   let state: TaskState | undefined;
   const widget = new PlanWidgetController();
   const reconstruct = (ctx: ExtensionContext): void => {
@@ -181,10 +174,6 @@ export function setupTaskState(pi: ExtensionAPI): TaskStateHandle {
         : { content: [{ type: "text", text: `${result.error}\n${rendering}` }], details, isError: true };
     },
   });
-  return {
-    getState: () => cloneTaskState(state),
-    getActiveState: () => state === undefined || isComplete(state) ? undefined : cloneTaskState(state),
-  };
 }
 
 function planUiChange(params: TaskStateParams): PlanUiChange {

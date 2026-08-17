@@ -21,7 +21,7 @@ test("set_plan is atomic, keeps IDs, and reports missing todos before cardinalit
 
 test("registers a flat object schema and runtime validation preserves atomicity", async () => {
   const harness = createHarness();
-  const state = setupTaskState(harness.pi);
+  setupTaskState(harness.pi);
   const schema = JSON.parse(JSON.stringify(harness.registered?.parameters)) as Record<string, unknown>;
   assert.equal(schema.type, "object");
   assert.equal("anyOf" in schema, false);
@@ -37,7 +37,7 @@ test("registers a flat object schema and runtime validation preserves atomicity"
   ]) {
     assert.equal((await harness.tool!.execute("call", valid, undefined, undefined, harness.ctx)).isError, undefined);
   }
-  const before = state.getState();
+  const before = (await harness.tool!.execute("call", { action: "show" }, undefined, undefined, harness.ctx)).details?.state;
   const widgetCalls = harness.widgetCalls.length;
   for (const invalid of [
     { action: "update_goal" },
@@ -47,16 +47,16 @@ test("registers a flat object schema and runtime validation preserves atomicity"
   ]) {
     const result = await harness.tool!.execute("call", invalid, undefined, undefined, harness.ctx);
     assert.equal(result.isError, true);
-    assert.deepEqual(state.getState(), before);
+    assert.deepEqual(result.details.state, before);
   }
   assert.equal(harness.widgetCalls.length, widgetCalls);
 });
 
 test("raw semantic failures retain domain errors and state", async () => {
   const harness = createHarness();
-  const state = setupTaskState(harness.pi);
+  setupTaskState(harness.pi);
   await harness.tool!.execute("call", plan, undefined, undefined, harness.ctx);
-  const before = state.getState();
+  const before = (await harness.tool!.execute("call", { action: "show" }, undefined, undefined, harness.ctx)).details?.state;
   const over = "x".repeat(TASK_STATE_LIMITS.goal + 1);
   const failures = [
     [{ action: "update_todo", id: 1 }, "Provide text, doneWhen, or status to update a todo."],
@@ -70,7 +70,7 @@ test("raw semantic failures retain domain errors and state", async () => {
     const result = await harness.tool!.execute("call", params, undefined, undefined, harness.ctx);
     assert.equal(result.isError, true);
     assert.equal(result.content[0]?.text?.includes(error), true);
-    assert.deepEqual(state.getState(), before);
+    assert.deepEqual(result.details.state, before);
   }
 });
 
@@ -93,18 +93,11 @@ test("semantic validation and reconstruction enforce every shared budget", () =>
   assert.equal(applyAction(undefined, { action: "set_plan", goal: " ", todos: [{ text: "Todo", doneWhen: "Done" }] }).error !== undefined, true);
 });
 
-test("Task State registers no prompt mutator and its handle returns a clone", async () => {
+test("Task State registers no prompt mutator", () => {
   const harness = createHarness();
-  const state = setupTaskState(harness.pi);
+  setupTaskState(harness.pi);
   assert.equal(harness.context, undefined);
   assert.equal(harness.beforeAgentStart, undefined);
-  assert.equal(state.getState(), undefined);
-  await harness.tool!.execute("call", plan, undefined, undefined, harness.ctx);
-  const clone = state.getState()!;
-  clone.goal = "mutated";
-  clone.todos[0]!.status = "done";
-  assert.equal(state.getState()!.goal, "Ship state core");
-  assert.equal(state.getState()!.todos[0]!.status, "in_progress");
 });
 
 test("every result contains the latest complete state and immutable details", async () => {
@@ -134,19 +127,17 @@ test("every result contains the latest complete state and immutable details", as
 
 test("completion deactivates only after settlement and persists one null snapshot", async () => {
   const harness = createHarness();
-  const state = setupTaskState(harness.pi);
+  setupTaskState(harness.pi);
   await harness.tool!.execute("call", plan, undefined, undefined, harness.ctx);
   await harness.tool!.execute("call", { action: "update_todo", id: 1, status: "done" }, undefined, undefined, harness.ctx);
-  assert.notEqual(state.getActiveState(), undefined);
   const completed = await harness.tool!.execute("call", { action: "update_todo", id: 2, status: "done" }, undefined, undefined, harness.ctx);
   assert.match(completed.content[0]?.text ?? "", /#1 \[done\].*#2 \[done\]/);
   assert.equal(completed.details?.state?.todos.every((todo: { status: string }) => todo.status === "done"), true);
-  assert.equal(state.getState()?.todos.every((todo) => todo.status === "done"), true);
-  assert.equal(state.getActiveState(), undefined);
   assert.equal(harness.appended.length, 0);
 
   harness.agentSettled!({} as never, harness.ctx);
-  assert.equal(state.getState(), undefined);
+  const afterSettled = await harness.tool!.execute("call", { action: "show" }, undefined, undefined, harness.ctx);
+  assert.equal(afterSettled.details?.state, null);
   assert.deepEqual(harness.appended, [{ customType: TASK_STATE_ENTRY, data: { version: 1, state: null } }]);
   harness.agentSettled!({} as never, harness.ctx);
   assert.equal(harness.appended.length, 1);
