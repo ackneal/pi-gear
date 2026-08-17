@@ -10,8 +10,8 @@ export default function gear(pi: ExtensionAPI): void {
   setupExecution(pi);
   setupLifecycle(pi);
 
-  const state = setupTaskState(pi);
-  setupPromptComposer(pi, state);
+  setupTaskState(pi);
+  setupPromptComposer(pi);
 
   setupThinkingDisplay(pi);
   setupSubagents(pi);

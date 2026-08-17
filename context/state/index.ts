@@ -92,7 +92,7 @@ export function formatTaskState(state: TaskState | undefined): string {
 export interface TaskStateHandle {
   /** Latest state, including a completed plan until agent settlement. */
   getState(): TaskState | undefined;
-  /** State eligible for a subsequent agent run's prompt snapshot. */
+  /** Active state only; returns undefined when all todos are done or no state exists. */
   getActiveState(): TaskState | undefined;
 }
 
