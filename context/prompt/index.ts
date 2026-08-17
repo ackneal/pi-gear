@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { TaskStateHandle } from "../state/index.ts";
 import type { TaskState } from "../state/types.ts";
 
-const PLAN_POLICY = "Use task_state to externalize a plan for non-trivial work: one goal; 3–7 outcome-based todos, each with a verifiable doneWhen. Capture requirements and boundaries as constraints, and evidence that affects decisions as findings. Update the plan as work progresses. Replan when evidence changes. Clear only for a new task.";
+const PLAN_POLICY = "Use task_state to externalize a plan for non-trivial work: one goal; 3–7 outcome-based todos, each with a verifiable doneWhen. Capture requirements and boundaries as constraints, and evidence that affects decisions as findings. Mark each todo done as soon as its doneWhen is verified; update plan state as you go rather than in one end-of-plan batch. Replan when evidence changes. Clear only for a new task.";
 const RESEARCH_POLICY = "Use researcher for focused read-only research task needing authoritative or current sources, or independent evidence gathering. Ask one bounded question and require evidence. Researchers do not modify files or state; you own decisions and changes. Parallelize independent research. Avoid trivial delegation.";
 
 export function setupPromptComposer(pi: ExtensionAPI, state: TaskStateHandle): void {

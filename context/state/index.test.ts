@@ -60,8 +60,8 @@ test("raw semantic failures retain domain errors and state", async () => {
   const over = "x".repeat(TASK_STATE_LIMITS.goal + 1);
   const failures = [
     [{ action: "update_todo", id: 1 }, "Provide text, doneWhen, or status to update a todo."],
-    [{ action: "set_plan", goal: "Empty", todos: [] }, "A task state must have 1–7 todos."],
-    [{ action: "set_plan", goal: "Many", todos: Array.from({ length: TASK_STATE_LIMITS.todos + 1 }, () => ({ text: "Todo", doneWhen: "Done" })) }, "A task state must have 1–7 todos."],
+    [{ action: "set_plan", goal: "Empty", todos: [] }, "A task state must have 1–10 todos."],
+    [{ action: "set_plan", goal: "Many", todos: Array.from({ length: TASK_STATE_LIMITS.todos + 1 }, () => ({ text: "Todo", doneWhen: "Done" })) }, "A task state must have 1–10 todos."],
     [{ action: "update_goal", goal: " " }, "Text values cannot be blank or exceed their limit."],
     [{ action: "update_goal", goal: over }, "Text values cannot be blank or exceed their limit."],
   ] as const;
@@ -81,7 +81,7 @@ test("semantic validation and reconstruction enforce every shared budget", () =>
   assert.match(applyAction(valid, { action: "add_todo", todo: { text: over(TASK_STATE_LIMITS.todoText), doneWhen: "Done" } }).error ?? "", /limit/);
   assert.match(applyAction(valid, { action: "update_todo", id: 1, doneWhen: over(TASK_STATE_LIMITS.doneWhen) }).error ?? "", /limit/);
   const fullPlan = applyAction(undefined, { action: "set_plan", goal: "Full", todos: Array.from({ length: TASK_STATE_LIMITS.todos }, (_, index) => ({ text: `todo ${index}`, doneWhen: "Done" })) }).state!;
-  assert.match(applyAction(fullPlan, { action: "add_todo", todo: { text: "extra", doneWhen: "Done" } }).error ?? "", /at most 7/);
+  assert.match(applyAction(fullPlan, { action: "add_todo", todo: { text: "extra", doneWhen: "Done" } }).error ?? "", /at most 10/);
   let constrained = valid;
   for (let index = 0; index < TASK_STATE_LIMITS.constraints; index += 1) constrained = applyAction(constrained, { action: "add_constraint", constraint: `c${index}` }).state!;
   assert.match(applyAction(constrained, { action: "add_constraint", constraint: "extra" }).error ?? "", /at most 10/);

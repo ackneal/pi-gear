@@ -4,7 +4,7 @@ export const TASK_STATE_LIMITS = {
   goal: 500,
   todoText: 300,
   doneWhen: 300,
-  todos: 7,
+  todos: 10,
   constraints: 10,
   constraint: 300,
   findings: 10,

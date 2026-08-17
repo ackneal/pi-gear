@@ -240,7 +240,7 @@ function parseTaskStateParams(value: unknown): TaskStateParams | undefined {
 
 function applySetPlan(current: TaskState | undefined, params: SetPlanParams): ActionResult {
   if (params.todos.length < 1 || params.todos.length > TASK_STATE_LIMITS.todos) {
-    return { state: current, error: "A task state must have 1–7 todos." };
+    return { state: current, error: "A task state must have 1–10 todos." };
   }
 
   const invalidTodo = params.todos.some((todo) =>
@@ -278,7 +278,7 @@ function applyAddTodo(current: TaskState, state: TaskState, params: AddTodoParam
     return { state: current, error: "Text values cannot be blank or exceed their limit." };
   }
   if (state.todos.length === TASK_STATE_LIMITS.todos) {
-    return { state: current, error: "A task state can have at most 7 todos." };
+    return { state: current, error: "A task state can have at most 10 todos." };
   }
 
   state.todos.push({

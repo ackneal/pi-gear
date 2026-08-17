@@ -92,7 +92,7 @@ Use `task_state` for non-trivial work:
 set_plan → update_todo → add_constraint / add_finding → show → clear
 ```
 
-A plan contains one goal and 1–7 todos. Each todo has a status and a `doneWhen` verification condition. Active state is reconstructed from session history and preserved through compaction.
+A plan contains one goal and 1–10 todos. Each todo has a status and a `doneWhen` verification condition. Active state is reconstructed from session history and preserved through compaction.
 
 ### `researcher`
 
