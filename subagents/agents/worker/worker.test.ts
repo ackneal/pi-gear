@@ -82,6 +82,7 @@ test("setupSubagents registers researcher and worker tools", async () => {
     }) => {
       tools.set(tool.name, tool);
     },
+    registerCommand: () => {},
   } as unknown as ExtensionAPI;
 
   setupSubagents(mockPi);

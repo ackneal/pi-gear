@@ -1,5 +1,10 @@
 import { Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  openSubagentDetailOverlay,
+  recordSubagentStart,
+  recordSubagentUpdate,
+} from "../ui/subagent/detail/index.ts";
 import { renderSubagentCall, renderSubagentResult } from "../ui/subagent/renderer.ts";
 import { RESEARCHER_TOOL_NAME, researcherProfile, runResearcher } from "./agents/researcher/index.ts";
 import { WORKER_TOOL_NAME, workerProfile, runWorker } from "./agents/worker/index.ts";
@@ -12,7 +17,9 @@ export function setupSubagents(pi: ExtensionAPI): void {
     description: researcherProfile.description,
     parameters: Type.Object({ task: Type.String() }),
     executionMode: "parallel",
-    async execute(_id, { task }, signal, onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
+    async execute(toolCallId, { task }, signal, onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
+      const id = toolCallId || `researcher_${Date.now()}`;
+      recordSubagentStart(id, researcherProfile, task);
       let latest: SubagentRun | undefined;
       const run = await runResearcher({
         task,
@@ -20,12 +27,15 @@ export function setupSubagents(pi: ExtensionAPI): void {
         ...(signal ? { signal } : {}),
         onUpdate: (next) => {
           latest = next;
+          recordSubagentUpdate(id, next);
           onUpdate?.({
             content: [{ type: "text", text: next.result ?? "Researching…" }],
             details: next,
           });
         },
       });
+
+      recordSubagentUpdate(id, run);
 
       return {
         content: [{ type: "text", text: run.result ?? run.error ?? "Research did not return a result." }],
@@ -45,7 +55,9 @@ export function setupSubagents(pi: ExtensionAPI): void {
     description: workerProfile.description,
     parameters: Type.Object({ task: Type.String() }),
     executionMode: "parallel",
-    async execute(_id, { task }, signal, onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
+    async execute(toolCallId, { task }, signal, onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
+      const id = toolCallId || `worker_${Date.now()}`;
+      recordSubagentStart(id, workerProfile, task);
       let latest: SubagentRun | undefined;
       const run = await runWorker({
         task,
@@ -53,12 +65,15 @@ export function setupSubagents(pi: ExtensionAPI): void {
         ...(signal ? { signal } : {}),
         onUpdate: (next) => {
           latest = next;
+          recordSubagentUpdate(id, next);
           onUpdate?.({
             content: [{ type: "text", text: next.result ?? "Working…" }],
             details: next,
           });
         },
       });
+
+      recordSubagentUpdate(id, run);
 
       return {
         content: [{ type: "text", text: run.result ?? run.error ?? "Worker did not return a result." }],
@@ -71,7 +86,15 @@ export function setupSubagents(pi: ExtensionAPI): void {
       renderSubagentResult(workerProfile, result, options, theme, context),
     renderShell: "self",
   });
+
+  pi.registerCommand("subagent", {
+    description: "Inspect subagent detail overlay",
+    handler: async (args, ctx) =>
+      openSubagentDetailOverlay(ctx, args.trim() || undefined),
+  });
 }
 
 export { RESEARCHER_TOOL_NAME, researcherProfile, runResearcher } from "./agents/researcher/index.ts";
 export { WORKER_TOOL_NAME, workerProfile, runWorker } from "./agents/worker/index.ts";
+export { openSubagentDetailOverlay } from "../ui/subagent/detail/index.ts";
+
