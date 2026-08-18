@@ -1,5 +1,10 @@
+import {
+  AssistantMessageComponent,
+  ToolExecutionComponent,
+} from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { SubagentItem, SubagentRun } from "../../../subagents/runtime/types.ts";
+import { getCustomToolDefinition } from "../../tools/index.ts";
 import {
   formatDuration,
   formatUsage,
@@ -102,23 +107,14 @@ export function formatDetailContent(
   theme: Theme,
   innerWidth: number,
   now: number = Date.now(),
+  toolsExpanded: boolean = false,
 ): string[] {
   const lines: string[] = [];
   const agentLabel = titleCase(
     entry.profile.label || entry.profile.id || "Subagent",
   );
 
-  // 1. Header: Agent label
-  lines.push(theme.bold(theme.fg("toolTitle", agentLabel)));
-
-  // 2. Task summary
-  const taskClean = cleanPlainText(entry.task) || entry.task;
-  const wrappedTask = wrapTextWithAnsi(`Task: ${taskClean}`, innerWidth);
-  for (const tLine of wrappedTask) {
-    lines.push(theme.fg("text", tLine));
-  }
-
-  // 3. Status line
+  // 1. Header: Agent label and status
   const { run } = entry;
   const elapsed = Math.max(0, (run.finishedAt ?? now) - run.startedAt);
   const dur = formatDuration(elapsed);
@@ -126,41 +122,61 @@ export function formatDetailContent(
   const usageStr = formatUsage(run.usage);
   const usageSuffix = usageStr ? ` · ${usageStr}` : "";
 
+  let statusBadge = "";
   if (run.status === "running") {
-    if (idle >= STALLED_THRESHOLD_MS) {
-      lines.push(
-        theme.fg("muted", `Running${usageSuffix} · ${dur} · No activity for ${formatDuration(idle)}`),
-      );
-    } else {
-      lines.push(theme.fg("muted", `Running${usageSuffix} · ${dur}`));
-    }
+    statusBadge =
+      idle >= STALLED_THRESHOLD_MS
+        ? theme.fg(
+            "muted",
+            `Running${usageSuffix} · ${dur} · No activity for ${formatDuration(idle)}`,
+          )
+        : theme.fg("muted", `Running${usageSuffix} · ${dur}`);
   } else if (run.status === "success") {
-    lines.push(
-      theme.fg("toolOutput", "✓ Complete") + theme.fg("muted", `${usageSuffix} · ${dur}`),
-    );
+    statusBadge =
+      theme.fg("toolOutput", "✓ Complete") +
+      theme.fg("muted", `${usageSuffix} · ${dur}`);
   } else if (run.status === "error") {
-    lines.push(
-      theme.fg("error", "✗ Failed") + theme.fg("muted", `${usageSuffix} · ${dur}`),
-    );
+    statusBadge =
+      theme.fg("error", "✗ Failed") +
+      theme.fg("muted", `${usageSuffix} · ${dur}`);
   } else if (run.status === "aborted") {
-    lines.push(
-      theme.fg("error", "■ Aborted") + theme.fg("muted", `${usageSuffix} · ${dur}`),
-    );
+    statusBadge =
+      theme.fg("error", "■ Aborted") +
+      theme.fg("muted", `${usageSuffix} · ${dur}`);
   }
 
-  // Header separator
-  lines.push(theme.fg("muted", "─".repeat(Math.max(1, Math.min(innerWidth, 40)))));
+  lines.push(
+    ` ${theme.bold(theme.fg("accent", agentLabel))} · ${statusBadge}`,
+  );
 
-  // 4. Activity list in chronological order
+  // 2. Task summary (User message style)
+  const taskClean = cleanPlainText(entry.task) || entry.task;
+  const wrappedTask = wrapTextWithAnsi(`Task: ${taskClean}`, innerWidth - 2);
+  for (const tLine of wrappedTask) {
+    lines.push(theme.fg("muted", ` ${tLine}`));
+  }
+
+  // 3. Activity list matching Main conversation UI
   for (const item of run.items) {
     if (item.kind === "thinking") {
       const thought = usefulText(item.text);
       if (thought) {
-        for (const tLine of thought.split("\n")) {
-          const wrapped = wrapTextWithAnsi(tLine, Math.max(10, innerWidth - 4));
-          for (let i = 0; i < wrapped.length; i++) {
-            const prefix = i === 0 ? "│ ✦ " : "│   ";
-            lines.push(theme.fg("thinkingText", `${prefix}${wrapped[i]}`));
+        try {
+          const assistantComp = new AssistantMessageComponent(
+            { role: "assistant", content: [{ type: "thinking", thinking: thought }] } as unknown as any,
+            false,
+            undefined,
+            "Thinking...",
+            1,
+          );
+          lines.push(...assistantComp.render(innerWidth));
+        } catch {
+          lines.push(theme.fg("thinkingText", " + Thought"));
+          for (const tLine of thought.split("\n")) {
+            const wrapped = wrapTextWithAnsi(tLine, Math.max(10, innerWidth - 4));
+            for (const wLine of wrapped) {
+              lines.push(theme.fg("thinkingText", `   ${wLine}`));
+            }
           }
         }
       }
@@ -168,27 +184,54 @@ export function formatDetailContent(
     }
 
     if (item.kind === "tool") {
-      const icon =
-        item.status === "success"
-          ? "✓"
-          : item.status === "error"
-            ? "✗"
-            : "●";
-      const color =
-        item.status === "error"
-          ? "error"
-          : item.status === "success"
-            ? "toolOutput"
-            : "muted";
-      const provider = readableProvider(item.name);
-      lines.push(theme.fg(color, `│ ${icon} ${provider}`));
+      try {
+        const customDef = getCustomToolDefinition(item.name, process.cwd());
+        const toolComp = new ToolExecutionComponent(
+          item.name,
+          item.id ?? "tool",
+          item.args ?? {},
+          { showImages: true, imageWidthCells: Math.max(10, innerWidth - 4) },
+          customDef,
+          { requestRender: () => {} } as unknown as any,
+          process.cwd(),
+        );
+        const isRunning = item.status === "running" && run.status === "running";
+        if (!isRunning || item.result) {
+          toolComp.updateResult({
+            content: [{ type: "text", text: item.result ?? "" }],
+            isError: item.status === "error",
+          } as unknown as any, isRunning);
+        }
+        toolComp.setExpanded(toolsExpanded);
+        lines.push(...toolComp.render(innerWidth));
+      } catch {
+        const icon =
+          item.status === "success"
+            ? "✓"
+            : item.status === "error"
+              ? "✗"
+              : "●";
+        const color =
+          item.status === "error"
+            ? "error"
+            : item.status === "success"
+              ? "toolOutput"
+              : "muted";
+        const provider = readableProvider(item.name);
+        lines.push(theme.fg(color, ` ${icon} ${provider}`));
 
-      const detail = usefulText(item.result);
-      if (detail) {
-        for (const dLine of detail.split("\n")) {
-          const wrapped = wrapTextWithAnsi(dLine, Math.max(10, innerWidth - 4));
-          for (const wLine of wrapped) {
-            lines.push(theme.fg(color, `│   ${wLine}`));
+        const detail = usefulText(item.result);
+        if (detail && toolsExpanded) {
+          const detailLines = detail.split("\n");
+          for (let i = 0; i < detailLines.length; i++) {
+            const wrapped = wrapTextWithAnsi(
+              detailLines[i] ?? "",
+              Math.max(10, innerWidth - 6),
+            );
+            for (let j = 0; j < wrapped.length; j++) {
+              const prefix = i === 0 && j === 0 ? "   ↳ " : "     ";
+              lines.push(theme.fg("muted", `${prefix}${wrapped[j]}`));
+            }
           }
         }
       }
@@ -197,13 +240,12 @@ export function formatDetailContent(
 
   // Stalled indication during running
   if (run.status === "running" && idle >= STALLED_THRESHOLD_MS) {
-    lines.push(theme.fg("muted", `│ No activity for ${formatDuration(idle)}`));
+    lines.push(theme.fg("muted", `   ↳ No activity for ${formatDuration(idle)}`));
   }
 
-  // 5. Final result / error block
+  // 4. Final Assistant Response / Error
   if (run.status !== "running" || run.result || run.error) {
     if (run.error) {
-      lines.push(theme.bold(theme.fg("error", "╰ Error")));
       const errText =
         usefulText(run.error) ||
         (run.status === "aborted" ? "Subagent aborted" : "Subagent failed");
@@ -213,21 +255,29 @@ export function formatDetailContent(
           lines.push(theme.fg("error", `   ${wLine}`));
         }
       }
+    } else if (run.status === "aborted") {
+      lines.push(theme.fg("error", `   ${agentLabel} aborted`));
     } else if (run.result) {
-      lines.push(theme.bold(theme.fg("text", "╰ Result")));
       const resText = usefulText(run.result);
-      for (const rLine of resText.split("\n")) {
-        const wrapped = wrapTextWithAnsi(rLine, Math.max(10, innerWidth - 4));
-        for (const wLine of wrapped) {
-          lines.push(theme.fg("toolOutput", `   ${wLine}`));
+      try {
+        const assistantComp = new AssistantMessageComponent(
+          { role: "assistant", content: [{ type: "text", text: resText }] } as unknown as any,
+          false,
+          undefined,
+          "Thinking...",
+          1,
+        );
+        lines.push(...assistantComp.render(innerWidth));
+      } catch {
+        for (const rLine of resText.split("\n")) {
+          const wrapped = wrapTextWithAnsi(rLine, Math.max(10, innerWidth - 4));
+          for (const wLine of wrapped) {
+            lines.push(theme.fg("text", `   ${wLine}`));
+          }
         }
       }
     } else if (run.status === "success") {
-      lines.push(theme.bold(theme.fg("text", "╰ Result")));
       lines.push(theme.fg("toolOutput", `   ${agentLabel} complete`));
-    } else if (run.status === "aborted") {
-      lines.push(theme.bold(theme.fg("error", "╰ Error")));
-      lines.push(theme.fg("error", `   ${agentLabel} aborted`));
     }
   }
 
@@ -236,91 +286,51 @@ export function formatDetailContent(
 
 export function frameDetailBox(
   contentLines: string[],
-  title: string,
+  _title: string,
   width: number,
   height: number,
   scrollTop: number,
   theme: Theme,
+  toolsExpanded: boolean = false,
 ): string[] {
-  const boxWidth = Math.max(20, width);
-  const boxHeight = Math.max(4, height);
-  const innerHeight = Math.max(1, boxHeight - 2);
-  const innerWidth = Math.max(1, boxWidth - 4);
+  const panelWidth = Math.max(20, width);
+  const borderLine = theme.fg("border", "─".repeat(panelWidth));
+  const totalContent = contentLines.length;
 
-  // Top border: ┌─ Title ─────── Esc ─┐
-  const escLabel = "Esc ─┐";
-  const topPrefix = "┌─ ";
-  const titleText = title ? `${title} ` : "";
-  const titleWidth = visibleWidth(titleText);
-  const prefixWidth = visibleWidth(topPrefix);
-  const escWidth = visibleWidth(escLabel);
-  const dashesNeeded = boxWidth - prefixWidth - titleWidth - escWidth;
-
-  let topBorder = "";
-  if (dashesNeeded >= 0) {
-    topBorder =
-      theme.fg("muted", topPrefix) +
-      theme.bold(theme.fg("toolTitle", titleText)) +
-      theme.fg("muted", "─".repeat(dashesNeeded) + escLabel);
-  } else {
-    const truncatedTitle =
-      truncateToWidth(
-        title,
-        Math.max(1, boxWidth - prefixWidth - escWidth - 2),
-        "…",
-      ) + " ";
-    const remDashes = Math.max(
-      0,
-      boxWidth - prefixWidth - visibleWidth(truncatedTitle) - escWidth,
-    );
-    topBorder =
-      theme.fg("muted", topPrefix) +
-      theme.bold(theme.fg("toolTitle", truncatedTitle)) +
-      theme.fg("muted", "─".repeat(remDashes) + escLabel);
-  }
-
-  // Bottom border with scroll indicator if scrollable
-  const isScrollable = contentLines.length > innerHeight;
-  let bottomBorder = "";
-  if (isScrollable) {
-    const startNum = Math.min(contentLines.length, scrollTop + 1);
-    const endNum = Math.min(contentLines.length, scrollTop + innerHeight);
-    const scrollIndicator = ` [${startNum}-${endNum}/${contentLines.length}] ─┘`;
-    const botPrefix = "└─";
-    const botDashes = Math.max(
-      0,
-      boxWidth - visibleWidth(botPrefix) - visibleWidth(scrollIndicator),
-    );
-    bottomBorder = theme.fg(
-      "muted",
-      botPrefix + "─".repeat(botDashes) + scrollIndicator,
-    );
-  } else {
-    bottomBorder = theme.fg(
-      "muted",
-      "└" + "─".repeat(Math.max(0, boxWidth - 2)) + "┘",
-    );
-  }
-
-  // Content slice
-  const maxScroll = Math.max(0, contentLines.length - innerHeight);
+  const innerHeight = Math.max(1, height - 3);
+  const maxScroll = Math.max(0, totalContent - innerHeight);
   const clampedScroll = Math.max(0, Math.min(scrollTop, maxScroll));
-  const resultLines: string[] = [topBorder];
+
+  let scrollInfo = "";
+  if (totalContent > innerHeight) {
+    const startNum = clampedScroll + 1;
+    const endNum = Math.min(totalContent, clampedScroll + innerHeight);
+    scrollInfo = `  ${theme.fg("muted", `[${startNum}-${endNum}/${totalContent}]`)}`;
+  }
+
+  const expandHint = toolsExpanded ? "collapse tools" : "expand tools";
+  const hintLine =
+    theme.fg("dim", "esc") +
+    theme.fg("muted", " close  ") +
+    theme.fg("dim", "ctrl+o") +
+    theme.fg("muted", ` ${expandHint}`) +
+    scrollInfo;
+
+  const resultLines: string[] = [borderLine];
 
   for (let i = 0; i < innerHeight; i++) {
     const rawLine = contentLines[clampedScroll + i] ?? "";
     const visLen = visibleWidth(rawLine);
     let lineContent = rawLine;
-    if (visLen > innerWidth) {
-      lineContent = truncateToWidth(rawLine, innerWidth);
+    if (visLen > panelWidth) {
+      lineContent = truncateToWidth(rawLine, panelWidth);
     }
-    const currentVis = visibleWidth(lineContent);
-    const padding = " ".repeat(Math.max(0, innerWidth - currentVis));
-    resultLines.push(
-      theme.fg("muted", "│ ") + lineContent + padding + theme.fg("muted", " │"),
-    );
+    const padLen = Math.max(0, panelWidth - visibleWidth(lineContent));
+    resultLines.push(lineContent + " ".repeat(padLen));
   }
 
-  resultLines.push(bottomBorder);
+  resultLines.push(borderLine);
+  const hintPadLen = Math.max(0, panelWidth - visibleWidth(hintLine));
+  resultLines.push(hintLine + " ".repeat(hintPadLen));
   return resultLines;
 }

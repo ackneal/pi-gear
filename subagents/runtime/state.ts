@@ -76,11 +76,24 @@ export function reduceSubagentEvent(
 
   if (event.type === "thinking") {
     items.push({ kind: "thinking", text: truncateRetainedText(event.text) });
-  } else if (
-    event.type === "tool_start"
-    && !items.some((item) => item.kind === "tool" && item.id === event.id)
-  ) {
-    items.push({ kind: "tool", id: event.id, name: event.name, status: "running" });
+  } else if (event.type === "tool_start") {
+    const existing = items.find((item) => item.kind === "tool" && item.id === event.id);
+    if (existing && existing.kind === "tool") {
+      if (event.args && Object.keys(event.args).length > 0) {
+        existing.args = event.args;
+      }
+      if (event.name && existing.name === "tool") {
+        existing.name = event.name;
+      }
+    } else {
+      items.push({
+        kind: "tool",
+        id: event.id,
+        name: event.name,
+        ...(event.args !== undefined ? { args: event.args } : {}),
+        status: "running",
+      });
+    }
   } else if (event.type === "tool_end") {
     applyToolEnd(items, event);
   }

@@ -1,6 +1,22 @@
 import type { SubagentItem, SubagentPresentation, SubagentRun } from "../../subagents/runtime/types.ts";
 
-export type Theme = { fg(color: "toolTitle" | "muted" | "error" | "thinkingText" | "toolOutput" | "text", text: string): string; bold(text: string): string };
+export type Theme = {
+  fg(
+    color:
+      | "toolTitle"
+      | "muted"
+      | "error"
+      | "thinkingText"
+      | "toolOutput"
+      | "text"
+      | "accent"
+      | "border"
+      | "dim"
+      | "warning",
+    text: string,
+  ): string;
+  bold(text: string): string;
+};
 export type SubagentRendererProfile = { id: string; label: string; presentation?: SubagentPresentation };
 
 export const STALLED_THRESHOLD_MS = 15_000;

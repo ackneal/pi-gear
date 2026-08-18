@@ -1,6 +1,8 @@
 import type { CapabilitySpec } from "../../capabilities/index.ts";
 
-export type SubagentItem = { kind: "thinking"; text: string } | { kind: "tool"; id?: string; name: string; status: "running" | "success" | "error"; result?: string };
+export type SubagentItem =
+  | { kind: "thinking"; text: string }
+  | { kind: "tool"; id?: string; name: string; args?: Record<string, unknown>; status: "running" | "success" | "error"; result?: string };
 export interface SubagentRun {
   status: "running" | "success" | "error" | "aborted";
   startedAt: number;

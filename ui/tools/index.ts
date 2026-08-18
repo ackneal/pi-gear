@@ -88,11 +88,22 @@ function header(marker: "+" | "-", label: string, target: string, theme: Theme):
   return new CompactText(headerText(marker, label, target, theme));
 }
 
+function parseArgsObject(rawArgs: unknown): Record<string, unknown> {
+  if (rawArgs && typeof rawArgs === "object") return rawArgs as Record<string, unknown>;
+  if (typeof rawArgs === "string") {
+    try {
+      const parsed = JSON.parse(rawArgs);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {}
+  }
+  return {};
+}
+
 function fileCall(label: string) {
   return (rawArgs: unknown, theme: Theme, context: AnyContext) => {
-    const args = (rawArgs && typeof rawArgs === "object" ? rawArgs : {}) as Record<string, unknown>;
+    const args = parseArgsObject(rawArgs ?? context?.args);
     const suffix = label === "READ" ? readRange(args) : "";
-    return header(context.expanded ? "-" : "+", label, ` ${displayPath(args.file_path ?? args.path, context.cwd)}${suffix}`, theme);
+    return header(context.expanded ? "-" : "+", label, ` ${displayPath(args.file_path ?? args.path ?? args.filepath, context.cwd)}${suffix}`, theme);
   };
 }
 
@@ -122,7 +133,7 @@ function fileResult(kind: "read" | "edit" | "write", base: AnyDefinition) {
 function formatWriteContent(args: Record<string, unknown>, theme: Theme, context: AnyContext): string {
   if (typeof args.content !== "string" || !args.content) return "";
   const content = args.content.replace(/\r\n?/g, "\n").replace(/\t/g, "  ");
-  const language = getLanguageFromPath(clean(args.file_path ?? args.path));
+  const language = getLanguageFromPath(clean(args.file_path ?? args.path ?? args.filepath));
   const lines = language
     ? highlightCode(content, language)
     : content.split("\n").map((line) => theme.fg("toolOutput", line));
@@ -132,11 +143,11 @@ function formatWriteContent(args: Record<string, unknown>, theme: Theme, context
 }
 
 function writeCall(rawArgs: unknown, theme: Theme, context: AnyContext) {
-  const args = (rawArgs && typeof rawArgs === "object" ? rawArgs : {}) as Record<string, unknown>;
+  const args = parseArgsObject(rawArgs ?? context?.args);
   const title = headerText(
     context.expanded ? "-" : "+",
     "WRITE",
-    ` ${displayPath(args.file_path ?? args.path, context.cwd)}`,
+    ` ${displayPath(args.file_path ?? args.path ?? args.filepath, context.cwd)}`,
     theme,
   );
   if (!context.expanded) return new CompactText(title);
@@ -147,8 +158,8 @@ function writeCall(rawArgs: unknown, theme: Theme, context: AnyContext) {
 
 function executionCall(sandbox: boolean) {
   return (rawArgs: unknown, theme: Theme, context: AnyContext) => {
-    const args = (rawArgs && typeof rawArgs === "object" ? rawArgs : {}) as Record<string, unknown>;
-    const command = clean(args.command) || "...";
+    const args = parseArgsObject(rawArgs ?? context?.args);
+    const command = clean(args.command ?? args.cmd) || "...";
     const label = sandbox ? "BASH(SANDBOX)" : "BASH";
     const marker = context.expanded ? "-" : "+";
     return new CompactText(theme.fg("muted", `${marker} `) + theme.fg(sandbox ? "success" : "toolTitle", theme.bold(label.padEnd(16))) + theme.fg("text", command));
@@ -183,6 +194,33 @@ export function createSandboxBashTool(cwd: string, operations: BashOperations): 
     name: "bash",
     label: "bash (sandboxed)",
   };
+}
+
+export function getCustomToolDefinition(name: string, cwd: string = process.cwd()): AnyDefinition | undefined {
+  if (name === "read") {
+    const read = createReadToolDefinition(cwd);
+    return { ...read, renderShell: "default", renderCall: fileCall("READ"), renderResult: fileResult("read", read) };
+  }
+  if (name === "edit") {
+    const edit = createEditToolDefinition(cwd);
+    return { ...edit, renderShell: "default", renderCall: fileCall("EDIT"), renderResult: fileResult("edit", edit) };
+  }
+  if (name === "write") {
+    const write = createWriteToolDefinition(cwd);
+    return { ...write, renderShell: "default", renderCall: writeCall, renderResult: fileResult("write", write) };
+  }
+  if (name === "bash") {
+    const bash = createBashToolDefinition(cwd);
+    return {
+      ...bash,
+      renderShell: "default",
+      renderCall: executionCall(true),
+      renderResult: executionResult(bash),
+      name: "bash",
+      label: "bash (sandboxed)",
+    };
+  }
+  return undefined;
 }
 
 export function setupFileToolUi(pi: ExtensionAPI): void {

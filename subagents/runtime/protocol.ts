@@ -12,8 +12,27 @@ const textContent = (content: unknown): string => truncateRetainedText(
     : typeof content === "string" ? content : "",
 );
 
+function parseToolArguments(raw: unknown): Record<string, unknown> | undefined {
+  if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {}
+  }
+  return undefined;
+}
+
 function decodeMessageEnd(event: Record<string, unknown>): SubagentEvent[] {
   const message = event.message as Record<string, unknown> | undefined;
+  if (message?.role === "tool" && typeof message.toolCallId === "string") {
+    const isError = message.isError === true;
+    return [{ type: "tool_end", id: message.toolCallId, isError, result: textContent(message.content) }];
+  }
   if (message?.role !== "assistant") return [];
 
   const usageEvents: SubagentEvent[] = [];
@@ -44,7 +63,13 @@ function decodeMessageEnd(event: Record<string, unknown>): SubagentEvent[] {
     if (value.type === "thinking" && typeof value.text === "string") return [{ type: "thinking", text: value.text }];
     if (value.type === "text" && typeof value.text === "string") return [{ type: "result", text: value.text }];
     if (value.type === "toolCall" && typeof value.id === "string" && typeof value.name === "string") {
-      return [{ type: "tool_start", id: value.id, name: value.name }];
+      const args = parseToolArguments(value.arguments ?? value.args);
+      return [{
+        type: "tool_start",
+        id: value.id,
+        name: value.name,
+        ...(args !== undefined ? { args } : {}),
+      }];
     }
     return [];
   });
@@ -78,10 +103,15 @@ export function decodePiEvent(value: unknown): SubagentEvent[] {
   }
 
   const event = value as Record<string, unknown>;
+  if (event.type === "message_update") {
+    const message = event.message as Record<string, unknown> | undefined;
+    if (message?.role === "assistant" || message?.role === "tool") return decodeMessageEnd(event);
+    return [];
+  }
   if (event.type === "message_end") return decodeMessageEnd(event);
   if (event.type === "turn_end") {
     const message = event.message as Record<string, unknown> | undefined;
-    if (message?.role === "assistant") {
+    if (message?.role === "assistant" || message?.role === "tool") {
       return decodeMessageEnd(event);
     }
     const rawUsage = (typeof message?.usage === "object" && message.usage !== null)
@@ -95,19 +125,34 @@ export function decodePiEvent(value: unknown): SubagentEvent[] {
     return [];
   }
   if (event.type === "agent_end" && Array.isArray(event.messages)) {
+    const events: SubagentEvent[] = [];
+    for (const msg of event.messages) {
+      if (typeof msg === "object" && msg !== null) {
+        if (msg.role === "tool" && typeof msg.toolCallId === "string") {
+          events.push({
+            type: "tool_end",
+            id: msg.toolCallId,
+            isError: msg.isError === true,
+            result: textContent(msg.content),
+          });
+        }
+      }
+    }
     const lastAssistant = [...event.messages]
       .reverse()
       .find((m): m is Record<string, unknown> => typeof m === "object" && m !== null && m.role === "assistant");
     if (lastAssistant) {
-      return decodeMessageEnd({ type: "message_end", message: lastAssistant });
+      events.push(...decodeMessageEnd({ type: "message_end", message: lastAssistant }));
     }
-    return [];
+    return events;
   }
   if (event.type === "tool_execution_start" && typeof event.toolCallId === "string") {
+    const args = parseToolArguments(event.args ?? event.arguments);
     return [{
       type: "tool_start",
       id: event.toolCallId,
       name: typeof event.toolName === "string" ? event.toolName : "tool",
+      ...(args !== undefined ? { args } : {}),
     }];
   }
   if (event.type === "tool_execution_end" || event.type === "tool_result_end") {

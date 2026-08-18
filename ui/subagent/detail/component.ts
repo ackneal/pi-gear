@@ -25,6 +25,7 @@ export class SubagentDetailComponent implements Component {
 
   public scrollTop: number = 0;
   public autoScroll: boolean = true;
+  public toolsExpanded: boolean = false;
   private lastContentLinesCount: number = 0;
   private lastInnerHeight: number = 10;
 
@@ -42,17 +43,17 @@ export class SubagentDetailComponent implements Component {
 
   render(width: number): string[] {
     const termRows = process.stdout?.rows || 24;
-    const innerWidth = Math.max(10, width - 4);
+    const innerWidth = Math.max(10, width);
     const contentLines = formatDetailContent(
       this.entry,
       this.theme,
       innerWidth,
       this.now(),
+      this.toolsExpanded,
     );
 
-    const maxAllowedHeight = Math.max(8, Math.min(28, Math.floor(termRows * 0.85)));
-    const targetHeight = Math.min(maxAllowedHeight, Math.max(8, contentLines.length + 2));
-    const innerHeight = Math.max(1, targetHeight - 2);
+    const targetHeight = Math.max(10, termRows);
+    const innerHeight = Math.max(1, targetHeight - 3);
     this.lastContentLinesCount = contentLines.length;
     this.lastInnerHeight = innerHeight;
 
@@ -73,12 +74,27 @@ export class SubagentDetailComponent implements Component {
       targetHeight,
       this.scrollTop,
       this.theme,
+      this.toolsExpanded,
     );
   }
 
   handleInput(data: string): void {
     if (data === "\x1b" || data === "escape" || matchesKey(data, Key.escape) || data === "q") {
       this.onClose();
+      return;
+    }
+
+    // Toggle tool output expansion with Ctrl+O or 'o'
+    if (
+      data === "\x0f" ||
+      data === "ctrl+o" ||
+      data === "o" ||
+      data === "O" ||
+      matchesKey(data, Key.ctrl("o")) ||
+      matchesKey(data, "ctrl+o")
+    ) {
+      this.toolsExpanded = !this.toolsExpanded;
+      this.requestRedraw();
       return;
     }
 

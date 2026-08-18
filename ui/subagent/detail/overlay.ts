@@ -106,9 +106,9 @@ export async function openSubagentDetailOverlay(
       overlay: true,
       overlayOptions: {
         width: "100%",
-        maxHeight: "85%",
+        maxHeight: "100%",
         anchor: "center",
-        margin: { left: 0, right: 0, top: 1, bottom: 1 },
+        margin: 0,
       },
     },
   );

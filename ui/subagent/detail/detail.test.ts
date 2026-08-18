@@ -247,7 +247,6 @@ test("Test 5: completed, failed, and aborted states format and render correctly"
     15_000,
   ).join("\n");
   assert.match(successLines, /✓ Complete · 10s/);
-  assert.match(successLines, /╰ Result/);
   assert.match(successLines, /All queries optimized successfully/);
 
   // 4. Failed / Error
@@ -267,7 +266,6 @@ test("Test 5: completed, failed, and aborted states format and render correctly"
     10_000,
   ).join("\n");
   assert.match(errorLines, /✗ Failed · 4s/);
-  assert.match(errorLines, /╰ Error/);
   assert.match(errorLines, /Network connection refused/);
 
   // 5. Aborted
@@ -286,7 +284,6 @@ test("Test 5: completed, failed, and aborted states format and render correctly"
     10_000,
   ).join("\n");
   assert.match(abortedLines, /■ Aborted · 3s/);
-  assert.match(abortedLines, /╰ Error/);
   assert.match(abortedLines, /aborted/i);
 });
 
