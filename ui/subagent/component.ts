@@ -14,7 +14,7 @@ export class SubagentResultComponent extends Text {
   private format: (run: SubagentRun | undefined, options: ToolRenderResultOptions, icon?: string) => string;
 
   constructor(redraw: () => void, format: (run: SubagentRun | undefined, options: ToolRenderResultOptions, icon?: string) => string) {
-    super("");
+    super("", 0, 0);
     this.redraw = redraw;
     this.format = format;
   }
