@@ -45,8 +45,8 @@ export function setupSubagents(pi: ExtensionAPI): void {
       };
     },
     renderCall: renderSubagentCall,
-    renderResult: (result, options, theme, context) =>
-      renderSubagentResult(researcherProfile, result, options, theme, context),
+    renderResult: (result: AgentToolResult<any>, options, theme, context) =>
+      renderSubagentResult(researcherProfile, result as AgentToolResult<SubagentRun>, options, theme, context as any),
     renderShell: "self",
   });
 
@@ -84,8 +84,8 @@ export function setupSubagents(pi: ExtensionAPI): void {
       };
     },
     renderCall: renderSubagentCall,
-    renderResult: (result, options, theme, context) =>
-      renderSubagentResult(workerProfile, result, options, theme, context),
+    renderResult: (result: AgentToolResult<any>, options, theme, context) =>
+      renderSubagentResult(workerProfile, result as AgentToolResult<SubagentRun>, options, theme, context as any),
     renderShell: "self",
   });
 

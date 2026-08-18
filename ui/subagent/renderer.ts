@@ -12,7 +12,14 @@ type ToolRenderContext = {
   args?: { task?: string };
 };
 
-export function renderSubagentCall(_args: { task: string }, _theme: Theme, _context: ToolRenderContext): Text { return new Text(""); }
+import type { Component } from "@earendil-works/pi-tui";
+
+export function renderSubagentCall(_args: { task: string }, _theme: Theme, _context: ToolRenderContext): Component {
+  return {
+    render: () => [],
+    invalidate: () => {},
+  };
+}
 
 export function renderSubagentResult(
   profile: SubagentRendererProfile,
