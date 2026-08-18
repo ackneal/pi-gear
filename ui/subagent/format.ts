@@ -152,7 +152,7 @@ export function collapsed(run: SubagentRun | undefined, profile: SubagentRendere
   const iconColor = status === "error" || status === "aborted" ? "error" : status === "success" ? "toolOutput" : "muted";
   const idle = idleDuration(run, now);
   const idleSuffix = status === "running" && idle >= STALLED_THRESHOLD_MS ? ` · idle ${formatDuration(idle)}` : "";
-  return `${theme.fg(iconColor, icon)} ${title}${theme.fg("muted", ` · ${compact(activity(run, profile))}`)}\n${theme.fg("muted", `  ↳ ${metadata(run, profile, now)}${idleSuffix}`)}`;
+  return ` ${theme.fg(iconColor, icon)} ${title}${theme.fg("muted", ` · ${compact(activity(run, profile))}`)}\n${theme.fg("muted", `   ↳ ${metadata(run, profile, now)}${idleSuffix}`)}`;
 }
 
 export function expanded(run: SubagentRun, profile: SubagentRendererProfile, theme: Theme, icon?: string, now = Date.now()): string {
@@ -160,22 +160,22 @@ export function expanded(run: SubagentRun, profile: SubagentRendererProfile, the
   for (const item of run.items) {
     if (item.kind === "thinking") {
       const thought = usefulText(item.text);
-      if (thought) lines.push(...connected(thought, "  │ ✦ ", theme, "thinkingText"));
+      if (thought) lines.push(...connected(thought, "   │ ✦ ", theme, "thinkingText"));
       continue;
     }
     const color = item.status === "error" ? "error" : "toolOutput";
-    lines.push(theme.fg(color, `  │ ${STATUS_ICON[item.status]} ${readableProvider(item.name)}`));
+    lines.push(theme.fg(color, `   │ ${STATUS_ICON[item.status]} ${readableProvider(item.name)}`));
     const detail = usefulText(item.result);
-    if (detail) lines.push(...connected(detail, "  │   ", theme, color));
+    if (detail) lines.push(...connected(detail, "   │   ", theme, color));
   }
   const idle = idleDuration(run, now);
   if (run.status === "running" && idle >= STALLED_THRESHOLD_MS) {
-    lines.push(theme.fg("muted", `  │ No activity for ${formatDuration(idle)}`));
+    lines.push(theme.fg("muted", `   │ No activity for ${formatDuration(idle)}`));
   }
   if (run.status !== "running" || run.result || run.error) {
     const finalAnswer = usefulText(run.result) || usefulText(run.error) || (run.status === "success" ? activityPhrase(profile, "complete", `${profileLabel(profile)} complete`) : failure(run, profile));
-    lines.push(theme.bold(theme.fg("text", "  ╰ Result")));
-    lines.push(...connected(finalAnswer, "     ", theme, run.error ? "error" : "toolOutput"));
+    lines.push(theme.bold(theme.fg("text", "   ╰ Result")));
+    lines.push(...connected(finalAnswer, "      ", theme, run.error ? "error" : "toolOutput"));
   }
   return lines.join("\n");
 }
