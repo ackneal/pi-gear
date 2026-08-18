@@ -3,7 +3,8 @@ import type { SubagentItem, SubagentPresentation, SubagentRun } from "../../suba
 export type Theme = { fg(color: "toolTitle" | "muted" | "error" | "thinkingText" | "toolOutput" | "text", text: string): string; bold(text: string): string };
 export type SubagentRendererProfile = { id: string; label: string; presentation?: SubagentPresentation };
 
-const STATUS_ICON = { running: "◌", success: "✓", error: "✗", aborted: "✗" } as const;
+export const STALLED_THRESHOLD_MS = 15_000;
+export const STATUS_ICON = { running: "●", success: "✓", error: "✗", aborted: "✗" } as const;
 const INTERNAL_ID = /\b(?:call|toolu|tool|msg|run)_[A-Za-z0-9_-]+\b|\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b|\b[0-9a-f]{24,}\b/gi;
 const JSON_FENCE = /^```(?:json)?\s*([\s\S]*?)\s*```$/i;
 const USEFUL_JSON_KEYS = new Set(["text", "content", "result", "output", "message", "detail", "details", "summary", "answer", "title", "snippet", "description"]);
@@ -85,40 +86,51 @@ function activity(run: SubagentRun | undefined, profile: SubagentRendererProfile
   return run.result ? activityPhrase(profile, "drafting", `Drafting ${label.toLowerCase()}`) : activityPhrase(profile, "starting", `Starting ${label.toLowerCase()}`);
 }
 
-function formatDuration(run: SubagentRun | undefined): string {
-  const elapsed = Math.max(0, (run?.finishedAt ?? Date.now()) - (run?.startedAt ?? Date.now()));
+export function idleDuration(run: SubagentRun | undefined, now = Date.now()): number {
+  if (run?.status !== "running") return 0;
+  return Math.max(0, now - (run.lastActivityAt ?? run.startedAt));
+}
+
+function runDuration(run: SubagentRun | undefined, now = Date.now()): number {
+  return Math.max(0, (run?.finishedAt ?? now) - (run?.startedAt ?? now));
+}
+
+export function formatDuration(durationMs: number): string {
+  const elapsed = Math.max(0, durationMs);
   if (elapsed < 1_000) return `${elapsed}ms`;
   if (elapsed < 60_000) return `${(elapsed / 1_000).toFixed(elapsed < 10_000 ? 1 : 0).replace(/\.0$/, "")}s`;
   const seconds = Math.floor(elapsed / 1_000);
   return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 }
 
-function metadata(run: SubagentRun | undefined, profile: SubagentRendererProfile): string {
+function metadata(run: SubagentRun | undefined, profile: SubagentRendererProfile, now = Date.now()): string {
   const tools = run?.items.filter((item): item is Extract<SubagentItem, { kind: "tool" }> => item.kind === "tool") ?? [];
   if (!tools.length) {
     const hasThought = run?.items.some((item) => item.kind === "thinking" && Boolean(usefulText(item.text)));
     const name = profileLabel(profile);
     const label = hasThought ? "Thinking" : run?.status === "success" ? activityPhrase(profile, "complete", `${name} complete`) : run?.status === "error" || run?.status === "aborted" ? failure(run, profile) : activityPhrase(profile, "starting", `Starting ${name.toLowerCase()}`);
-    return `${compact(label)} · ${formatDuration(run)}`;
+    return `${compact(label)} · ${formatDuration(runDuration(run, now))}`;
   }
   const completed = tools.filter((item) => item.status === "success").length;
   const failed = tools.filter((item) => item.status === "error").length;
-  return [`${tools.length} tools`, `${completed} ok`, ...(failed ? [`${failed} failed`] : []), formatDuration(run)].join(" · ");
+  return [`${tools.length} tools`, `${completed} ok`, ...(failed ? [`${failed} failed`] : []), formatDuration(runDuration(run, now))].join(" · ");
 }
 
 function connected(text: string, prefix: string, theme: Theme, color: "thinkingText" | "toolOutput" | "error"): string[] {
   return text.split("\n").map((line) => theme.fg(color, `${prefix}${line}`));
 }
 
-export function collapsed(run: SubagentRun | undefined, profile: SubagentRendererProfile, theme: Theme, icon: string = STATUS_ICON[run?.status ?? "running"]): string {
+export function collapsed(run: SubagentRun | undefined, profile: SubagentRendererProfile, theme: Theme, icon: string = STATUS_ICON[run?.status ?? "running"], now = Date.now()): string {
   const status = run?.status ?? "running";
   const title = theme.bold(theme.fg("toolTitle", `${titleCase(profile.label) || titleCase(profile.id) || "Subagent"} Task`));
   const iconColor = status === "error" || status === "aborted" ? "error" : status === "success" ? "toolOutput" : "muted";
-  return `${theme.fg(iconColor, icon)} ${title}${theme.fg("muted", ` · ${compact(activity(run, profile))}`)}\n${theme.fg("muted", `  ↳ ${metadata(run, profile)}`)}`;
+  const idle = idleDuration(run, now);
+  const idleSuffix = status === "running" && idle >= STALLED_THRESHOLD_MS ? ` · idle ${formatDuration(idle)}` : "";
+  return `${theme.fg(iconColor, icon)} ${title}${theme.fg("muted", ` · ${compact(activity(run, profile))}`)}\n${theme.fg("muted", `  ↳ ${metadata(run, profile, now)}${idleSuffix}`)}`;
 }
 
-export function expanded(run: SubagentRun, profile: SubagentRendererProfile, theme: Theme, icon?: string): string {
-  const lines = collapsed(run, profile, theme, icon).split("\n");
+export function expanded(run: SubagentRun, profile: SubagentRendererProfile, theme: Theme, icon?: string, now = Date.now()): string {
+  const lines = collapsed(run, profile, theme, icon, now).split("\n");
   for (const item of run.items) {
     if (item.kind === "thinking") {
       const thought = usefulText(item.text);
@@ -130,8 +142,14 @@ export function expanded(run: SubagentRun, profile: SubagentRendererProfile, the
     const detail = usefulText(item.result);
     if (detail) lines.push(...connected(detail, "  │   ", theme, color));
   }
-  const finalAnswer = usefulText(run.result) || usefulText(run.error) || (run.status === "success" ? activityPhrase(profile, "complete", `${profileLabel(profile)} complete`) : failure(run, profile));
-  lines.push(theme.bold(theme.fg("text", "  ╰ Result")));
-  lines.push(...connected(finalAnswer, "     ", theme, run.error ? "error" : "toolOutput"));
+  const idle = idleDuration(run, now);
+  if (run.status === "running" && idle >= STALLED_THRESHOLD_MS) {
+    lines.push(theme.fg("muted", `  │ No activity for ${formatDuration(idle)}`));
+  }
+  if (run.status !== "running" || run.result || run.error) {
+    const finalAnswer = usefulText(run.result) || usefulText(run.error) || (run.status === "success" ? activityPhrase(profile, "complete", `${profileLabel(profile)} complete`) : failure(run, profile));
+    lines.push(theme.bold(theme.fg("text", "  ╰ Result")));
+    lines.push(...connected(finalAnswer, "     ", theme, run.error ? "error" : "toolOutput"));
+  }
   return lines.join("\n");
 }

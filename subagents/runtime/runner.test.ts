@@ -29,11 +29,21 @@ test("protocol handles fragmented JSON, trailing data, malformed diagnostics, an
   assert.deepEqual(decoder.push('{"type":"tool_execution_start","toolCallId":"x","toolName":"read"}\n{"bad"'), [{ type: "tool_start", id: "x", name: "read" }]);
   assert.equal(decoder.push('', true)[0]?.type, "diagnostic");
 
-  let run: SubagentRun = { status: "running", startedAt: 0, items: [] };
-  run = reduceSubagentEvent(run, { type: "tool_start", id: "x", name: "read" });
-  run = reduceSubagentEvent(run, { type: "tool_start", id: "x", name: "read" });
-  run = reduceSubagentEvent(run, { type: "tool_end", id: "x", isError: false, result: "ok" });
+  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, items: [] };
+  run = reduceSubagentEvent(run, { type: "tool_start", id: "x", name: "read" }, 1_000);
+  assert.equal(run.lastActivityAt, 1_000);
+  run = reduceSubagentEvent(run, { type: "tool_start", id: "x", name: "read" }, 2_000);
+  assert.equal(run.lastActivityAt, 2_000);
+  run = reduceSubagentEvent(run, { type: "diagnostic", message: "warn" }, 3_000);
+  assert.equal(run.lastActivityAt, 2_000);
+  run = reduceSubagentEvent(run, { type: "tool_end", id: "x", isError: false, result: "ok" }, 4_000);
+  assert.equal(run.lastActivityAt, 4_000);
   assert.deepEqual(run.items, [{ kind: "tool", id: "x", name: "read", status: "success", result: "ok" }]);
+  run = reduceSubagentEvent(run, { type: "thinking", text: "hmm" }, 5_000);
+  assert.equal(run.lastActivityAt, 5_000);
+  run = reduceSubagentEvent(run, { type: "result", text: "done" }, 6_000);
+  assert.equal(run.lastActivityAt, 6_000);
+  assert.equal(run.result, "done");
 });
 
 test("resolver follows official script, generic, Bun virtual, and packaged paths", () => {

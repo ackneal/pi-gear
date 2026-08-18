@@ -13,7 +13,15 @@ function applyToolEnd(
   if (event.result) item.result = truncateRetainedText(event.result);
 }
 
-export function reduceSubagentEvent(run: SubagentRun, event: SubagentEvent): SubagentRun {
+export function reduceSubagentEvent(
+  run: SubagentRun,
+  event: SubagentEvent,
+  now = Date.now(),
+): SubagentRun {
+  if (event.type === "diagnostic") {
+    return run;
+  }
+
   const items = run.items.map((item) => ({ ...item }));
 
   if (event.type === "thinking") {
@@ -29,6 +37,6 @@ export function reduceSubagentEvent(run: SubagentRun, event: SubagentEvent): Sub
 
   const retainedItems = items.slice(-MAX_RETAINED_ITEMS);
   return event.type === "result"
-    ? { ...run, items: retainedItems, result: truncateRetainedText(event.text) }
-    : { ...run, items: retainedItems };
+    ? { ...run, lastActivityAt: now, items: retainedItems, result: truncateRetainedText(event.text) }
+    : { ...run, lastActivityAt: now, items: retainedItems };
 }
