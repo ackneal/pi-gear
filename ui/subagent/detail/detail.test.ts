@@ -476,7 +476,7 @@ test("Test 9: main transcript formatting / rendering remains completely unchange
   const collapsedOutput = collapsed(run, researcherProfile, testTheme, "✓", 1_000);
   assert.match(collapsedOutput, /Researcher Task/);
   assert.match(collapsedOutput, /Research complete/);
-  assert.match(collapsedOutput, /2 tools · 2 ok · 1s/);
+  assert.match(collapsedOutput, /2\/2 tools · 1s/);
 
   const expandedOutput = expanded(run, researcherProfile, testTheme, "✓", 1_000);
   assert.match(expandedOutput, /│ ✦ inspect/);
@@ -486,4 +486,47 @@ test("Test 9: main transcript formatting / rendering remains completely unchange
   assert.match(expandedOutput, /│   Context finding/);
   assert.match(expandedOutput, /╰ Result/);
   assert.match(expandedOutput, /Final report/);
+});
+
+test("Test 10: detail view status line formats usage when available", () => {
+  const baseEntry: SubagentViewEntry = {
+    toolCallId: "call_usage",
+    task: "Usage detail task",
+    profile: researcherProfile,
+    run: {
+      status: "running",
+      startedAt: 0,
+      items: [],
+      usage: {
+        input: 1_200,
+        output: 450,
+        cost: { total: 0.002 },
+      },
+    },
+    updatedAt: 0,
+  };
+
+  const runningLines = formatDetailContent(
+    baseEntry,
+    testTheme,
+    80,
+    5_000,
+  ).join("\n");
+  assert.match(runningLines, /Running · ↑1.2k ↓450 · \$0\.002 · 5s/);
+
+  const completedLines = formatDetailContent(
+    {
+      ...baseEntry,
+      run: {
+        ...baseEntry.run,
+        status: "success",
+        finishedAt: 10_000,
+        result: "Done",
+      },
+    },
+    testTheme,
+    80,
+    15_000,
+  ).join("\n");
+  assert.match(completedLines, /✓ Complete · ↑1.2k ↓450 · \$0\.002 · 10s/);
 });

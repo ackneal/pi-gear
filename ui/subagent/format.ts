@@ -95,6 +95,27 @@ function runDuration(run: SubagentRun | undefined, now = Date.now()): number {
   return Math.max(0, (run?.finishedAt ?? now) - (run?.startedAt ?? now));
 }
 
+export function formatTokens(count: number): string {
+  if (count < 1000) return `${count}`;
+  if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
+  if (count < 1000000) return `${Math.round(count / 1000)}k`;
+  return `${(count / 1000000).toFixed(1)}M`;
+}
+
+export function formatCost(cost: number): string {
+  if (cost <= 0) return "$0.000";
+  if (cost < 1) return `$${cost.toFixed(3)}`;
+  return `$${cost.toFixed(2)}`;
+}
+
+export function formatUsage(usage: SubagentRun["usage"]): string | undefined {
+  if (!usage) return undefined;
+  const inTokens = (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+  const outTokens = usage.output ?? 0;
+  const totalCost = usage.cost?.total ?? 0;
+  return `↑${formatTokens(inTokens)} ↓${formatTokens(outTokens)} · ${formatCost(totalCost)}`;
+}
+
 export function formatDuration(durationMs: number): string {
   const elapsed = Math.max(0, durationMs);
   if (elapsed < 1_000) return `${elapsed}ms`;
@@ -105,15 +126,20 @@ export function formatDuration(durationMs: number): string {
 
 function metadata(run: SubagentRun | undefined, profile: SubagentRendererProfile, now = Date.now()): string {
   const tools = run?.items.filter((item): item is Extract<SubagentItem, { kind: "tool" }> => item.kind === "tool") ?? [];
+  let toolStr: string;
   if (!tools.length) {
     const hasThought = run?.items.some((item) => item.kind === "thinking" && Boolean(usefulText(item.text)));
     const name = profileLabel(profile);
     const label = hasThought ? "Thinking" : run?.status === "success" ? activityPhrase(profile, "complete", `${name} complete`) : run?.status === "error" || run?.status === "aborted" ? failure(run, profile) : activityPhrase(profile, "starting", `Starting ${name.toLowerCase()}`);
-    return `${compact(label)} · ${formatDuration(runDuration(run, now))}`;
+    toolStr = compact(label);
+  } else {
+    const completed = tools.filter((item) => item.status === "success").length;
+    const failed = tools.filter((item) => item.status === "error").length;
+    toolStr = failed > 0 ? `${completed}/${tools.length} tools · ${failed} failed` : `${completed}/${tools.length} tools`;
   }
-  const completed = tools.filter((item) => item.status === "success").length;
-  const failed = tools.filter((item) => item.status === "error").length;
-  return [`${tools.length} tools`, `${completed} ok`, ...(failed ? [`${failed} failed`] : []), formatDuration(runDuration(run, now))].join(" · ");
+  const usageStr = formatUsage(run?.usage);
+  const durStr = formatDuration(runDuration(run, now));
+  return [toolStr, ...(usageStr ? [usageStr] : []), durStr].join(" · ");
 }
 
 function connected(text: string, prefix: string, theme: Theme, color: "thinkingText" | "toolOutput" | "error"): string[] {

@@ -162,3 +162,95 @@ test("nonzero stderr is bounded and abort escalates then cleans listeners", asyn
   assert.equal(hanging.stdout.listenerCount("data"), 0);
   assert.equal(hanging.stderr.listenerCount("data"), 0);
 });
+
+test("decoder emits usage event on message_end and turn_end", () => {
+  const decoder = new PiJsonDecoder();
+  const messageEndEvents = decoder.push(
+    JSON.stringify({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "report" }],
+        usage: { input: 100, output: 50, cacheRead: 20, cacheWrite: 10, totalTokens: 180, cost: { total: 0.005, input: 0.001, output: 0.004 } },
+      },
+    }) + "\n",
+  );
+  assert.deepEqual(messageEndEvents, [
+    { type: "result", text: "report" },
+    {
+      type: "usage",
+      usage: {
+        input: 100,
+        output: 50,
+        cacheRead: 20,
+        cacheWrite: 10,
+        totalTokens: 180,
+        cost: { total: 0.005, input: 0.001, output: 0.004 },
+      },
+    },
+  ]);
+
+  const turnEndEvents = decoder.push(
+    JSON.stringify({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        usage: { input: 50, output: 25 },
+      },
+    }) + "\n",
+  );
+  assert.deepEqual(turnEndEvents, [
+    {
+      type: "usage",
+      usage: { input: 50, output: 25 },
+    },
+  ]);
+});
+
+test("reduceSubagentEvent aggregates usage across multiple events", () => {
+  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, items: [] };
+
+  run = reduceSubagentEvent(run, {
+    type: "usage",
+    usage: {
+      input: 1000,
+      output: 500,
+      cacheRead: 200,
+      cacheWrite: 100,
+      totalTokens: 1800,
+      cost: { total: 1.5, input: 0.5, output: 1.0 },
+    },
+  }, 1000);
+
+  assert.equal(run.lastActivityAt, 1000);
+  assert.deepEqual(run.usage, {
+    input: 1000,
+    output: 500,
+    cacheRead: 200,
+    cacheWrite: 100,
+    totalTokens: 1800,
+    cost: { total: 1.5, input: 0.5, output: 1.0 },
+  });
+
+  run = reduceSubagentEvent(run, {
+    type: "usage",
+    usage: {
+      input: 500,
+      output: 250,
+      cacheRead: 100,
+      totalTokens: 850,
+      cost: { total: 2.25, input: 0.75, output: 1.5 },
+    },
+  }, 2000);
+
+  assert.equal(run.lastActivityAt, 2000);
+  assert.deepEqual(run.usage, {
+    input: 1500,
+    output: 750,
+    cacheRead: 300,
+    cacheWrite: 100,
+    totalTokens: 2650,
+    cost: { total: 3.75, input: 1.25, output: 2.5 },
+  });
+});
+

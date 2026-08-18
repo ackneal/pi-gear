@@ -41,6 +41,7 @@ export function setupSubagents(pi: ExtensionAPI): void {
         content: [{ type: "text", text: run.result ?? run.error ?? "Research did not return a result." }],
         details: latest ?? run,
         ...(run.status === "error" ? { isError: true } : {}),
+        ...(run.usage ? { usage: run.usage as any } : {}),
       };
     },
     renderCall: renderSubagentCall,
@@ -79,6 +80,7 @@ export function setupSubagents(pi: ExtensionAPI): void {
         content: [{ type: "text", text: run.result ?? run.error ?? "Worker did not return a result." }],
         details: latest ?? run,
         ...(run.status === "error" ? { isError: true } : {}),
+        ...(run.usage ? { usage: run.usage as any } : {}),
       };
     },
     renderCall: renderSubagentCall,

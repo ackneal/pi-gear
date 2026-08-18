@@ -2,13 +2,14 @@ import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works
 import type { SubagentItem, SubagentRun } from "../../../subagents/runtime/types.ts";
 import {
   formatDuration,
+  formatUsage,
   idleDuration,
   STALLED_THRESHOLD_MS,
   type Theme,
 } from "../format.ts";
 import type { SubagentViewEntry } from "./registry.ts";
 
-export { STALLED_THRESHOLD_MS, formatDuration, idleDuration };
+export { STALLED_THRESHOLD_MS, formatDuration, formatUsage, idleDuration };
 export type { Theme };
 
 const INTERNAL_ID = /\b(?:call|toolu|tool|msg|run)_[A-Za-z0-9_-]+\b|\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b|\b[0-9a-f]{24,}\b/gi;
@@ -122,26 +123,28 @@ export function formatDetailContent(
   const elapsed = Math.max(0, (run.finishedAt ?? now) - run.startedAt);
   const dur = formatDuration(elapsed);
   const idle = idleDuration(run, now);
+  const usageStr = formatUsage(run.usage);
+  const usageSuffix = usageStr ? ` · ${usageStr}` : "";
 
   if (run.status === "running") {
     if (idle >= STALLED_THRESHOLD_MS) {
       lines.push(
-        theme.fg("muted", `Running · ${dur} · No activity for ${formatDuration(idle)}`),
+        theme.fg("muted", `Running${usageSuffix} · ${dur} · No activity for ${formatDuration(idle)}`),
       );
     } else {
-      lines.push(theme.fg("muted", `Running · ${dur}`));
+      lines.push(theme.fg("muted", `Running${usageSuffix} · ${dur}`));
     }
   } else if (run.status === "success") {
     lines.push(
-      theme.fg("toolOutput", "✓ Complete") + theme.fg("muted", ` · ${dur}`),
+      theme.fg("toolOutput", "✓ Complete") + theme.fg("muted", `${usageSuffix} · ${dur}`),
     );
   } else if (run.status === "error") {
     lines.push(
-      theme.fg("error", "✗ Failed") + theme.fg("muted", ` · ${dur}`),
+      theme.fg("error", "✗ Failed") + theme.fg("muted", `${usageSuffix} · ${dur}`),
     );
   } else if (run.status === "aborted") {
     lines.push(
-      theme.fg("error", "■ Aborted") + theme.fg("muted", ` · ${dur}`),
+      theme.fg("error", "■ Aborted") + theme.fg("muted", `${usageSuffix} · ${dur}`),
     );
   }
 

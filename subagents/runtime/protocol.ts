@@ -1,4 +1,5 @@
 import type { SubagentEvent } from "./events.ts";
+import type { SubagentRun } from "./types.ts";
 import { MAX_DECODER_BUFFER_CHARS, truncateRetainedText } from "./limits.ts";
 
 const textContent = (content: unknown): string => truncateRetainedText(
@@ -31,9 +32,20 @@ function decodeMessageEnd(event: Record<string, unknown>): SubagentEvent[] {
     .map((item) => item.text)
     .join("");
 
+  const usageEvents: SubagentEvent[] = [];
+  const rawUsage = (typeof message.usage === "object" && message.usage !== null)
+    ? message.usage
+    : (typeof event.usage === "object" && event.usage !== null)
+      ? event.usage
+      : undefined;
+  if (rawUsage && typeof rawUsage === "object") {
+    usageEvents.push({ type: "usage", usage: rawUsage as NonNullable<SubagentRun["usage"]> });
+  }
+
   return [
     ...events.filter((item) => item.type !== "result"),
     ...(text ? [{ type: "result" as const, text: truncateRetainedText(text) }] : []),
+    ...usageEvents,
   ];
 }
 
@@ -56,6 +68,18 @@ export function decodePiEvent(value: unknown): SubagentEvent[] {
 
   const event = value as Record<string, unknown>;
   if (event.type === "message_end") return decodeMessageEnd(event);
+  if (event.type === "turn_end") {
+    const message = event.message as Record<string, unknown> | undefined;
+    const rawUsage = (typeof message?.usage === "object" && message.usage !== null)
+      ? message.usage
+      : (typeof event.usage === "object" && event.usage !== null)
+        ? event.usage
+        : undefined;
+    if (rawUsage && typeof rawUsage === "object") {
+      return [{ type: "usage", usage: rawUsage as NonNullable<SubagentRun["usage"]> }];
+    }
+    return [];
+  }
   if (event.type === "tool_execution_start" && typeof event.toolCallId === "string") {
     return [{
       type: "tool_start",
