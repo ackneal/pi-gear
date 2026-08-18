@@ -7,6 +7,17 @@ import { setupSubagents } from "./subagents/index.ts";
 import { setupThinkingDisplay } from "./ui/thinking/index.ts";
 
 export default function gear(pi: ExtensionAPI): void {
+  pi.on("session_start", (_event, ctx) => {
+    if (typeof ctx.ui?.setWidget === "function") {
+      ctx.ui.setWidget("__tui_clear_on_shrink", (tui) => {
+        if (typeof (tui as unknown as { setClearOnShrink?: (val: boolean) => void }).setClearOnShrink === "function") {
+          (tui as unknown as { setClearOnShrink: (val: boolean) => void }).setClearOnShrink(true);
+        }
+        return { render: () => [], invalidate: () => {} };
+      });
+    }
+  });
+
   setupExecution(pi);
   setupLifecycle(pi);
 
