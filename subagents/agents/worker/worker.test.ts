@@ -1,0 +1,125 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { EventEmitter } from "node:events";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { childArgs } from "../../runtime/process.ts";
+import type { SubagentRun } from "../../runtime/types.ts";
+import { WORKER_CAPABILITIES, workerProfile } from "./profile.ts";
+import { WORKER_SYSTEM_PROMPT } from "./prompt.ts";
+import workerExtension from "./extension.ts";
+import { WORKER_TOOL_NAME, runWorker } from "./index.ts";
+import { setupSubagents } from "../../index.ts";
+
+test("worker profile, prompt, and capabilities match specification", () => {
+  assert.equal(WORKER_TOOL_NAME, "worker");
+  assert.equal(workerProfile.id, "worker");
+  assert.equal(workerProfile.label, "worker");
+  assert.equal(workerProfile.description, "Delegate a bounded implementation task to an isolated Pi subprocess.");
+  assert.equal(workerProfile.systemPrompt, WORKER_SYSTEM_PROMPT);
+  assert.deepEqual(workerProfile.capabilities, WORKER_CAPABILITIES);
+  assert.deepEqual(WORKER_CAPABILITIES, [
+    { kind: "builtin", name: "read" },
+    { kind: "builtin", name: "edit" },
+    { kind: "builtin", name: "write" },
+    { kind: "builtin", name: "bash" },
+  ]);
+  assert.deepEqual(workerProfile.presentation, {
+    activity: {
+      starting: "Working",
+      complete: "Work complete",
+      drafting: "Preparing result",
+      failed: "Work failed",
+      aborted: "Work aborted",
+    },
+  });
+});
+
+test("worker child arguments configure isolation, capabilities, and system prompt", () => {
+  const extensionUrl = new URL("./extension.ts", import.meta.url);
+  const args = childArgs(workerProfile, "implement feature", extensionUrl);
+  assert.ok(args.includes("--no-session") && args.includes("--no-extensions"));
+  assert.equal(args[args.indexOf("--tools") + 1], "read,edit,write,bash");
+  assert.equal(args[args.indexOf("--append-system-prompt") + 1], WORKER_SYSTEM_PROMPT);
+  assert.equal(args[args.indexOf("--extension") + 1]?.endsWith("subagents/agents/worker/extension.ts"), true);
+  assert.equal(args[args.length - 1], "Task: implement feature");
+});
+
+test("worker extension configures filesystem guard and sandbox", () => {
+  const registeredTools: string[] = [];
+  const registeredCommands: string[] = [];
+  const registeredEvents: string[] = [];
+
+  const mockPi = {
+    registerTool: (tool: { name: string }) => { registeredTools.push(tool.name); },
+    registerCommand: (name: string) => { registeredCommands.push(name); },
+    on: (event: string) => { registeredEvents.push(event); },
+    sendMessage: () => {},
+  } as unknown as ExtensionAPI;
+
+  workerExtension(mockPi);
+
+  assert.ok(registeredEvents.includes("tool_call")); // filesystem guard
+  assert.ok(registeredEvents.includes("session_start")); // sandbox
+  assert.ok(registeredCommands.includes("doctor")); // sandbox doctor
+  assert.ok(registeredTools.includes("bash")); // sandbox bash
+});
+
+test("setupSubagents registers researcher and worker tools", async () => {
+  const tools = new Map<string, {
+    label: string;
+    description: string;
+    executionMode: string;
+    execute: (id: string, args: { task: string }, signal: AbortSignal | undefined, onUpdate: (update: unknown) => void, ctx: { cwd: string }) => Promise<unknown>;
+  }>();
+
+  const mockPi = {
+    registerTool: (tool: {
+      name: string;
+      label: string;
+      description: string;
+      executionMode: string;
+      execute: (id: string, args: { task: string }, signal: AbortSignal | undefined, onUpdate: (update: unknown) => void, ctx: { cwd: string }) => Promise<unknown>;
+    }) => {
+      tools.set(tool.name, tool);
+    },
+  } as unknown as ExtensionAPI;
+
+  setupSubagents(mockPi);
+
+  assert.ok(tools.has("researcher"));
+  assert.ok(tools.has("worker"));
+
+  const workerTool = tools.get("worker")!;
+  assert.equal(workerTool.label, "worker");
+  assert.equal(workerTool.executionMode, "parallel");
+  assert.equal(workerTool.description, "Delegate a bounded implementation task to an isolated Pi subprocess.");
+});
+
+test("runWorker executes via child runner with worker profile and emits updates", async () => {
+  const child = Object.assign(new EventEmitter(), {
+    stdout: new EventEmitter(),
+    stderr: new EventEmitter(),
+    kill: () => true,
+  });
+
+  const updates: SubagentRun[] = [];
+  const promise = runWorker({
+    task: "build feature",
+    cwd: "/workspace",
+    spawnChild: () => child as never,
+    onUpdate: (update) => {
+      updates.push(update);
+    },
+  });
+
+  child.stdout.emit(
+    "data",
+    Buffer.from('{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Implemented"}]}}\n'),
+  );
+  child.emit("close", 0);
+
+  const result = await promise;
+  assert.equal(result.status, "success");
+  assert.equal(result.result, "Implemented");
+  assert.ok(updates.length > 0);
+});
