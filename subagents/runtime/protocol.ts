@@ -14,7 +14,28 @@ const textContent = (content: unknown): string => truncateRetainedText(
 
 function decodeMessageEnd(event: Record<string, unknown>): SubagentEvent[] {
   const message = event.message as Record<string, unknown> | undefined;
-  if (message?.role !== "assistant" || !Array.isArray(message.content)) return [];
+  if (message?.role !== "assistant") return [];
+
+  const usageEvents: SubagentEvent[] = [];
+  const rawUsage = (typeof message.usage === "object" && message.usage !== null)
+    ? message.usage
+    : (typeof event.usage === "object" && event.usage !== null)
+      ? event.usage
+      : undefined;
+  if (rawUsage && typeof rawUsage === "object") {
+    usageEvents.push({ type: "usage", usage: rawUsage as NonNullable<SubagentRun["usage"]> });
+  }
+
+  if (typeof message.content === "string" && message.content.trim()) {
+    return [
+      { type: "result" as const, text: truncateRetainedText(message.content) },
+      ...usageEvents,
+    ];
+  }
+
+  if (!Array.isArray(message.content)) {
+    return usageEvents;
+  }
 
   const events = message.content.flatMap((part): SubagentEvent[] => {
     if (typeof part !== "object" || part === null) return [];
@@ -31,16 +52,6 @@ function decodeMessageEnd(event: Record<string, unknown>): SubagentEvent[] {
     .filter((item): item is Extract<SubagentEvent, { type: "result" }> => item.type === "result")
     .map((item) => item.text)
     .join("");
-
-  const usageEvents: SubagentEvent[] = [];
-  const rawUsage = (typeof message.usage === "object" && message.usage !== null)
-    ? message.usage
-    : (typeof event.usage === "object" && event.usage !== null)
-      ? event.usage
-      : undefined;
-  if (rawUsage && typeof rawUsage === "object") {
-    usageEvents.push({ type: "usage", usage: rawUsage as NonNullable<SubagentRun["usage"]> });
-  }
 
   return [
     ...events.filter((item) => item.type !== "result"),
@@ -70,6 +81,9 @@ export function decodePiEvent(value: unknown): SubagentEvent[] {
   if (event.type === "message_end") return decodeMessageEnd(event);
   if (event.type === "turn_end") {
     const message = event.message as Record<string, unknown> | undefined;
+    if (message?.role === "assistant") {
+      return decodeMessageEnd(event);
+    }
     const rawUsage = (typeof message?.usage === "object" && message.usage !== null)
       ? message.usage
       : (typeof event.usage === "object" && event.usage !== null)
@@ -77,6 +91,15 @@ export function decodePiEvent(value: unknown): SubagentEvent[] {
         : undefined;
     if (rawUsage && typeof rawUsage === "object") {
       return [{ type: "usage", usage: rawUsage as NonNullable<SubagentRun["usage"]> }];
+    }
+    return [];
+  }
+  if (event.type === "agent_end" && Array.isArray(event.messages)) {
+    const lastAssistant = [...event.messages]
+      .reverse()
+      .find((m): m is Record<string, unknown> => typeof m === "object" && m !== null && m.role === "assistant");
+    if (lastAssistant) {
+      return decodeMessageEnd({ type: "message_end", message: lastAssistant });
     }
     return [];
   }
