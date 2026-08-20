@@ -16,9 +16,12 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
 import * as PiTui from "@earendil-works/pi-tui";
 
-const { truncateToWidth, wrapTextWithAnsi } = PiTui as unknown as {
+const LABEL_WIDTH = 16;
+
+const { truncateToWidth, wrapTextWithAnsi, visibleWidth } = PiTui as unknown as {
   truncateToWidth(text: string, maxWidth: number, ellipsis?: string): string;
   wrapTextWithAnsi(text: string, width: number): string[];
+  visibleWidth(text: string): number;
 };
 
 type AnyDefinition = ToolDefinition<any, any, any>;
@@ -38,22 +41,58 @@ type AnyContext = {
 };
 type AnyResult = AgentToolResult<any>;
 
-type TextMode = "compact" | "detail";
-type TextBlock = { value: string; mode: TextMode };
+type TextMode = "compact" | "detail" | "raw";
+type TextBlock = { value: string; mode: TextMode; truncatedHint: string | undefined };
 
 class CompactText {
   private blocks: TextBlock[];
-  constructor(value: string, mode: TextMode = "compact") { this.blocks = [{ value, mode }]; }
-  static headerAndDetail(header: string, detail: string): CompactText {
+  constructor(value: string, mode: TextMode = "compact", truncatedHint?: string) {
+    this.blocks = [{ value, mode, truncatedHint }];
+  }
+  static headerAndDetail(header: string, detail: string, headerHint?: string): CompactText {
     const component = new CompactText("");
-    component.blocks = [{ value: header, mode: "compact" }, { value: detail, mode: "detail" }];
+    component.blocks = [
+      { value: header, mode: "compact", truncatedHint: headerHint },
+      { value: detail, mode: "detail", truncatedHint: undefined },
+    ];
+    return component;
+  }
+  static headerAndLines(header: string, raw: string, headerHint?: string): CompactText {
+    const component = new CompactText("");
+    component.blocks = [
+      { value: header, mode: "compact", truncatedHint: headerHint },
+      { value: raw, mode: "raw", truncatedHint: undefined },
+    ];
     return component;
   }
   render(width: number): string[] {
     const lineWidth = Math.max(1, width);
-    return this.blocks.flatMap(({ value, mode }) => !value.trim() ? [] : value.split("\n").flatMap((line) => mode === "compact" ? [truncateToWidth(line, lineWidth, "…")] : wrapTextWithAnsi(line, lineWidth)));
+    return this.blocks.flatMap(({ value, mode, truncatedHint }) => {
+      if (!value.trim()) return [];
+      // Raw: keep each original line intact (段行), but bound width so a runaway
+      // line can't exceed the terminal and crash the renderer.
+      if (mode === "raw") {
+        return value.split("\n").map((line) => truncateToWidth(line, lineWidth, "…"));
+      }
+      return value.split("\n").flatMap((line) =>
+        mode === "compact"
+          ? truncateOneLine(line, lineWidth, truncatedHint)
+          : line === ""
+            ? [""]
+            : wrapTextWithAnsi(line, lineWidth),
+      );
+    });
   }
   invalidate(): void {}
+}
+
+function truncateOneLine(line: string, lineWidth: number, hint?: string): string[] {
+  if (visibleWidth(line) <= lineWidth) return [line];
+  // Default: single ellipsized line. With a hint (e.g. "(truncated)"), reserve
+  // room for it so the marker stays visible instead of being cut off.
+  if (!hint) return [truncateToWidth(line, lineWidth, "…")];
+  const hintWidth = visibleWidth(hint);
+  return [truncateToWidth(line, Math.max(1, lineWidth - hintWidth), "…") + hint];
 }
 
 function empty(): CompactText { return new CompactText(""); }
@@ -81,7 +120,7 @@ function readRange(args: Record<string, unknown>): string {
 }
 
 function headerText(marker: "+" | "-", label: string, target: string, theme: Theme): string {
-  return `${theme.fg("muted", marker)} ${theme.fg("toolTitle", theme.bold(label.padEnd(7)))}${theme.fg("text", target)}`;
+  return `${theme.fg("muted", marker)} ${theme.fg("toolTitle", theme.bold(label.padEnd(LABEL_WIDTH)))}${theme.fg("text", target)}`;
 }
 
 function header(marker: "+" | "-", label: string, target: string, theme: Theme): CompactText {
@@ -162,7 +201,19 @@ function executionCall(sandbox: boolean) {
     const command = clean(args.command ?? args.cmd) || "...";
     const label = sandbox ? "BASH(SANDBOX)" : "BASH";
     const marker = context.expanded ? "-" : "+";
-    return new CompactText(theme.fg("muted", `${marker} `) + theme.fg(sandbox ? "success" : "toolTitle", theme.bold(label.padEnd(16))) + theme.fg("text", command));
+    const head =
+      theme.fg("muted", `${marker} `) +
+      theme.fg(sandbox ? "success" : "toolTitle", theme.bold(label.padEnd(LABEL_WIDTH)));
+    if (!context.expanded) {
+      return new CompactText(
+        head + theme.fg("text", ` ${command}`),
+        "compact",
+        theme.fg("muted", "(truncated)"),
+      );
+    }
+    // Expanded: full command as raw line(s) (break only on newlines, no mid-token
+    // wrapping), with a trailing blank separating it from the result.
+    return CompactText.headerAndLines(head, `${theme.fg("text", command)}\n`);
   };
 }
 
@@ -196,9 +247,9 @@ export function createSandboxBashTool(cwd: string, operations: BashOperations): 
   };
 }
 
-function mcpProvider(name: string): string {
-  const first = (name.split(/[_/:]/, 1)[0] ?? name) || name;
-  return first.replace(/-/g, " ").toUpperCase();
+function mcpToolName(name: string): string {
+  const i = name.indexOf("_");
+  return i === -1 ? name : name.slice(i + 1);
 }
 
 const MCP_TARGET_KEYS = ["query", "search", "keyword", "text", "message", "prompt", "term", "url", "path", "id", "name"];
@@ -207,8 +258,7 @@ function mcpTarget(args: Record<string, unknown>, name: string): string {
   for (const key of MCP_TARGET_KEYS) {
     const v = args?.[key];
     if (typeof v === "string" && v.trim()) {
-      const one = v.trim().replace(/\s+/g, " ");
-      return one.length > 60 ? `${one.slice(0, 57)}…` : one;
+      return v.trim().replace(/\s+/g, " ");
     }
   }
   return name;
@@ -225,18 +275,27 @@ function createMcpDefinition(name: string, cwd: string): AnyDefinition {
     renderCall: (rawArgs: unknown, theme: Theme, context: AnyContext) => {
       const args = parseArgsObject(rawArgs ?? context?.args);
       const marker = context.expanded ? "-" : "+";
-      return new CompactText(
+      const label = `MCP(${mcpToolName(name)})`;
+      const head =
         theme.fg("muted", marker) +
-          " " +
-          theme.fg("toolTitle", theme.bold(mcpProvider(name).padEnd(7))) +
-          theme.fg("text", ` ${mcpTarget(args, name)}`),
-      );
+        " " +
+        theme.fg("toolTitle", theme.bold(label.padEnd(LABEL_WIDTH)));
+      const target = mcpTarget(args, name);
+      if (!context.expanded) {
+        return new CompactText(
+          head + theme.fg("text", ` ${target}`),
+          "compact",
+          theme.fg("muted", "(truncated)"),
+        );
+      }
+      // Expanded: full target as a raw line (no mid-token wrapping).
+      return CompactText.headerAndLines(head, theme.fg("text", target));
     },
     renderResult: (result: AnyResult, options: ToolRenderResultOptions, theme: Theme, _context: AnyContext) => {
       if (!options.expanded) return empty();
       const text = textResult(result);
       return text
-        ? new CompactText(theme.fg("toolOutput", text), "detail")
+        ? new CompactText(`\n${theme.fg("toolOutput", text)}`, "detail")
         : empty();
     },
   };

@@ -912,7 +912,7 @@ test("Test 20: MCP tool call renders a compact tool-style header", () => {
   const header = (def as unknown as { renderCall: (a: unknown, t: Theme, c: unknown) => { render(w: number): string[] } })
     .renderCall({ query: "hello world" }, testTheme, {});
   const output = header.render(80).join("\n");
-  assert.match(output, /EXA/);
+  assert.match(output, /MCP\(web_search_exa\)/);
   assert.match(output, /hello world/);
 });
 
