@@ -1,4 +1,3 @@
-import { Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   openSubagentDetailOverlay,
@@ -6,8 +5,20 @@ import {
   recordSubagentUpdate,
 } from "../ui/subagent/detail/index.ts";
 import { renderSubagentCall, renderSubagentResult } from "../ui/subagent/renderer.ts";
-import { RESEARCHER_TOOL_NAME, researcherProfile, runResearcher } from "./agents/researcher/index.ts";
-import { WORKER_TOOL_NAME, workerProfile, runWorker } from "./agents/worker/index.ts";
+import {
+  formatResearcherInput,
+  RESEARCHER_TOOL_NAME,
+  researcherParameters,
+  researcherProfile,
+  runResearcher,
+} from "./agents/researcher/index.ts";
+import {
+  formatWorkerInput,
+  WORKER_TOOL_NAME,
+  workerParameters,
+  workerProfile,
+  runWorker,
+} from "./agents/worker/index.ts";
 import type { SubagentRun } from "./runtime/types.ts";
 
 export function setupSubagents(pi: ExtensionAPI): void {
@@ -15,29 +26,33 @@ export function setupSubagents(pi: ExtensionAPI): void {
     name: RESEARCHER_TOOL_NAME,
     label: researcherProfile.label,
     description: researcherProfile.description,
-    parameters: Type.Object({ task: Type.String() }),
+    parameters: researcherParameters,
     executionMode: "parallel",
-    async execute(toolCallId, { task }, signal, onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
+    async execute(toolCallId, { question, scope }, signal, onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
+      const researcherInput = formatResearcherInput({ question, scope });
       if (toolCallId) {
-        recordSubagentStart(toolCallId, researcherProfile, task);
+        recordSubagentStart(toolCallId, researcherProfile, researcherInput);
       }
       let latest: SubagentRun | undefined;
-      const run = await runResearcher({
-        task,
-        cwd: ctx.cwd,
-        ...(signal ? { signal } : {}),
-        onUpdate: (next) => {
-          latest = next;
-          if (toolCallId) {
-            recordSubagentUpdate(toolCallId, next);
-          }
-          onUpdate?.({
-            content: [{ type: "text", text: next.result ?? "Researching…" }],
-            details: next,
-          });
+      const run = await runResearcher(
+        researcherInput,
+        {
+          cwd: ctx.cwd,
+          ...(signal ? { signal } : {}),
+          onUpdate: (next) => {
+            latest = next;
+            if (toolCallId) {
+              recordSubagentUpdate(toolCallId, next);
+            }
+            onUpdate?.({
+              content: [{ type: "text", text: next.result ?? "Researching…" }],
+              details: next,
+            });
+          },
         },
-      });
-
+      );
+      run.task = researcherInput;
+      if (latest) latest.task = researcherInput;
       if (toolCallId) {
         recordSubagentUpdate(toolCallId, run);
       }
@@ -59,29 +74,33 @@ export function setupSubagents(pi: ExtensionAPI): void {
     name: WORKER_TOOL_NAME,
     label: workerProfile.label,
     description: workerProfile.description,
-    parameters: Type.Object({ task: Type.String() }),
+    parameters: workerParameters,
     executionMode: "parallel",
-    async execute(toolCallId, { task }, signal, onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
+    async execute(toolCallId, { task, targetFiles, findings, verification }, signal, onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
+      const workerInput = formatWorkerInput({ task, targetFiles, findings, verification });
       if (toolCallId) {
-        recordSubagentStart(toolCallId, workerProfile, task);
+        recordSubagentStart(toolCallId, workerProfile, workerInput);
       }
       let latest: SubagentRun | undefined;
-      const run = await runWorker({
-        task,
-        cwd: ctx.cwd,
-        ...(signal ? { signal } : {}),
-        onUpdate: (next) => {
-          latest = next;
-          if (toolCallId) {
-            recordSubagentUpdate(toolCallId, next);
-          }
-          onUpdate?.({
-            content: [{ type: "text", text: next.result ?? "Working…" }],
-            details: next,
-          });
+      const run = await runWorker(
+        workerInput,
+        {
+          cwd: ctx.cwd,
+          ...(signal ? { signal } : {}),
+          onUpdate: (next) => {
+            latest = next;
+            if (toolCallId) {
+              recordSubagentUpdate(toolCallId, next);
+            }
+            onUpdate?.({
+              content: [{ type: "text", text: next.result ?? "Working…" }],
+              details: next,
+            });
+          },
         },
-      });
-
+      );
+      run.task = workerInput;
+      if (latest) latest.task = workerInput;
       if (toolCallId) {
         recordSubagentUpdate(toolCallId, run);
       }

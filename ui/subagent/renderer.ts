@@ -9,12 +9,12 @@ type ToolRenderContext = {
   invalidate: () => void;
   lastComponent?: unknown;
   toolCallId?: string;
-  args?: { task?: string };
+  args?: Record<string, unknown>;
 };
 
 import type { Component } from "@earendil-works/pi-tui";
 
-export function renderSubagentCall(_args: { task: string }, _theme: Theme, _context: ToolRenderContext): Component {
+export function renderSubagentCall(_args: Record<string, unknown>, _theme: Theme, _context: ToolRenderContext): Component {
   return {
     render: () => [],
     invalidate: () => {},
@@ -32,7 +32,8 @@ export function renderSubagentResult(
     recordSubagentStart(
       context.toolCallId,
       profile as unknown as SubagentProfile,
-      context.args?.task ?? "",
+      // The same formatted brief that was sent to the child pi, carried on the run.
+      result.details.task ?? "",
       result.details,
     );
   }

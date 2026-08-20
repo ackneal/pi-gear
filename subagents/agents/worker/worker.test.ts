@@ -7,7 +7,8 @@ import type { SubagentRun } from "../../runtime/types.ts";
 import { WORKER_CAPABILITIES, workerProfile } from "./profile.ts";
 import { WORKER_SYSTEM_PROMPT } from "./prompt.ts";
 import workerExtension from "./extension.ts";
-import { WORKER_TOOL_NAME, runWorker } from "./index.ts";
+import { formatWorkerInput, WORKER_TOOL_NAME, runWorker } from "./index.ts";
+import type { WorkerSubagentInput } from "./index.ts";
 import { setupSubagents } from "../../index.ts";
 
 test("worker profile, prompt, and capabilities match specification", () => {
@@ -102,6 +103,27 @@ test("setupSubagents registers researcher and worker tools", async () => {
   assert.equal(workerTool.description, "Delegate a bounded implementation task to an isolated Pi subprocess.");
 });
 
+test("formatWorkerInput serializes structured fields into the child user input", () => {
+  const brief = formatWorkerInput({
+    task: "build feature",
+    targetFiles: ["src/a.ts", "src/b.ts"],
+    findings: "the interval is already wired",
+    verification: "npm test",
+  });
+  assert.match(brief, /Task: build feature/);
+  assert.match(brief, /Target files:\n- src\/a\.ts\n- src\/b\.ts/);
+  assert.match(brief, /Findings: the interval is already wired/);
+  assert.match(brief, /Verification: npm test/);
+
+  const minimal = formatWorkerInput({
+    task: "just do it",
+    targetFiles: undefined,
+    findings: undefined,
+    verification: undefined,
+  } satisfies WorkerSubagentInput);
+  assert.equal(minimal, "Task: just do it");
+});
+
 test("runWorker executes via child runner with worker profile and emits updates", async () => {
   const child = Object.assign(new EventEmitter(), {
     stdout: new EventEmitter(),
@@ -110,11 +132,16 @@ test("runWorker executes via child runner with worker profile and emits updates"
   });
 
   const updates: SubagentRun[] = [];
-  const promise = runWorker({
+  const brief = formatWorkerInput({
     task: "build feature",
+    targetFiles: ["src/a.ts"],
+    findings: "wired already",
+    verification: "npm test",
+  });
+  const promise = runWorker(brief, {
     cwd: "/workspace",
     spawnChild: () => child as never,
-    onUpdate: (update) => {
+    onUpdate: (update: SubagentRun) => {
       updates.push(update);
     },
   });

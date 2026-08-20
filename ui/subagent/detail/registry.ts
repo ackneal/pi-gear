@@ -50,7 +50,9 @@ export function recordSubagentStart(
 
   registry.set(toolCallId, {
     toolCallId,
-    task: task || existing?.task || "Subagent task",
+    // Keep an already-recorded task (the formatted brief) over a later plain
+    // re-registration from the result renderer.
+    task: (existing?.task ?? task) || "Subagent task",
     profile: profile || existing?.profile,
     run,
     updatedAt: now,

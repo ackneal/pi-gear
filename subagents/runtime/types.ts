@@ -11,6 +11,7 @@ export interface SubagentRun {
   items: SubagentItem[];
   result?: string;
   error?: string;
+  task?: string;
   usage?: {
     input: number;
     output: number;
