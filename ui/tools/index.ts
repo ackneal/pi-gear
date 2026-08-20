@@ -196,6 +196,52 @@ export function createSandboxBashTool(cwd: string, operations: BashOperations): 
   };
 }
 
+function mcpProvider(name: string): string {
+  const first = (name.split(/[_/:]/, 1)[0] ?? name) || name;
+  return first.replace(/-/g, " ").toUpperCase();
+}
+
+const MCP_TARGET_KEYS = ["query", "search", "keyword", "text", "message", "prompt", "term", "url", "path", "id", "name"];
+
+function mcpTarget(args: Record<string, unknown>, name: string): string {
+  for (const key of MCP_TARGET_KEYS) {
+    const v = args?.[key];
+    if (typeof v === "string" && v.trim()) {
+      const one = v.trim().replace(/\s+/g, " ");
+      return one.length > 60 ? `${one.slice(0, 57)}…` : one;
+    }
+  }
+  return name;
+}
+
+/** Compact tool-style header for an MCP call, matching the built-in file/exec tools. */
+function createMcpDefinition(name: string, cwd: string): AnyDefinition {
+  const base = createReadToolDefinition(cwd);
+  return {
+    ...base,
+    name,
+    label: name,
+    renderShell: "default",
+    renderCall: (rawArgs: unknown, theme: Theme, context: AnyContext) => {
+      const args = parseArgsObject(rawArgs ?? context?.args);
+      const marker = context.expanded ? "-" : "+";
+      return new CompactText(
+        theme.fg("muted", marker) +
+          " " +
+          theme.fg("toolTitle", theme.bold(mcpProvider(name).padEnd(7))) +
+          theme.fg("text", ` ${mcpTarget(args, name)}`),
+      );
+    },
+    renderResult: (result: AnyResult, options: ToolRenderResultOptions, theme: Theme, _context: AnyContext) => {
+      if (!options.expanded) return empty();
+      const text = textResult(result);
+      return text
+        ? new CompactText(theme.fg("toolOutput", text), "detail")
+        : empty();
+    },
+  };
+}
+
 export function getCustomToolDefinition(name: string, cwd: string = process.cwd()): AnyDefinition | undefined {
   if (name === "read") {
     const read = createReadToolDefinition(cwd);
@@ -220,7 +266,8 @@ export function getCustomToolDefinition(name: string, cwd: string = process.cwd(
       label: "bash (sandboxed)",
     };
   }
-  return undefined;
+  // MCP capability tools: render with a compact tool-style header like the built-ins.
+  return createMcpDefinition(name, cwd);
 }
 
 export function setupFileToolUi(pi: ExtensionAPI): void {

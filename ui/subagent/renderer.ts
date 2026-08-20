@@ -3,7 +3,7 @@ import { Text } from "@earendil-works/pi-tui";
 import type { SubagentProfile, SubagentRun } from "../../subagents/runtime/types.ts";
 import { SubagentResultComponent } from "./component.ts";
 import { recordSubagentStart } from "./detail/index.ts";
-import { collapsed, expanded, type SubagentRendererProfile, type Theme } from "./format.ts";
+import { collapsed, type SubagentRendererProfile, type Theme } from "./format.ts";
 
 type ToolRenderContext = {
   invalidate: () => void;
@@ -37,10 +37,8 @@ export function renderSubagentResult(
     );
   }
 
-  const format = (run: SubagentRun | undefined, currentOptions: ToolRenderResultOptions, icon?: string) =>
-    currentOptions.expanded && run
-      ? expanded(run, profile, theme, icon)
-      : collapsed(run, profile, theme, icon);
+  const format = (run: SubagentRun | undefined, _currentOptions: ToolRenderResultOptions, icon?: string) =>
+    collapsed(run, profile, theme, icon);
   const component =
     context.lastComponent instanceof SubagentResultComponent
       ? context.lastComponent

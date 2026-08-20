@@ -30,17 +30,17 @@ export function recordSubagentStart(
   task: string,
   initialRun?: SubagentRun,
 ): void {
+  if (!toolCallId) return;
   const now = Date.now();
-  const id = toolCallId || `subagent_${now}_${Math.random().toString(36).slice(2, 6)}`;
-  const existing = registry.get(id);
+  const existing = registry.get(toolCallId);
   const run: SubagentRun = initialRun ?? existing?.run ?? {
     status: "running",
     startedAt: now,
     items: [],
   };
 
-  if (registry.has(id)) {
-    registry.delete(id);
+  if (registry.has(toolCallId)) {
+    registry.delete(toolCallId);
   } else if (registry.size >= MAX_REGISTRY_ENTRIES) {
     const oldestKey = registry.keys().next().value;
     if (oldestKey !== undefined) {
@@ -48,15 +48,15 @@ export function recordSubagentStart(
     }
   }
 
-  registry.set(id, {
-    toolCallId: id,
+  registry.set(toolCallId, {
+    toolCallId,
     task: task || existing?.task || "Subagent task",
     profile: profile || existing?.profile,
     run,
     updatedAt: now,
   });
 
-  notifySubscribers(id, run);
+  notifySubscribers(toolCallId, run);
 }
 
 export function recordSubagentUpdate(toolCallId: string, run: SubagentRun): void {
@@ -77,6 +77,7 @@ export function recordSubagentUpdate(toolCallId: string, run: SubagentRun): void
 }
 
 export function getSubagentEntry(toolCallId: string): SubagentViewEntry | undefined {
+  if (!toolCallId) return undefined;
   return registry.get(toolCallId);
 }
 
@@ -88,6 +89,7 @@ export function subscribeSubagent(
   toolCallId: string,
   listener: (run: SubagentRun) => void,
 ): () => void {
+  if (!toolCallId) return () => {};
   let listeners = subscribers.get(toolCallId);
   if (!listeners) {
     listeners = new Set();

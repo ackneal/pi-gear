@@ -18,8 +18,9 @@ export function setupSubagents(pi: ExtensionAPI): void {
     parameters: Type.Object({ task: Type.String() }),
     executionMode: "parallel",
     async execute(toolCallId, { task }, signal, onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
-      const id = toolCallId || `researcher_${Date.now()}`;
-      recordSubagentStart(id, researcherProfile, task);
+      if (toolCallId) {
+        recordSubagentStart(toolCallId, researcherProfile, task);
+      }
       let latest: SubagentRun | undefined;
       const run = await runResearcher({
         task,
@@ -27,7 +28,9 @@ export function setupSubagents(pi: ExtensionAPI): void {
         ...(signal ? { signal } : {}),
         onUpdate: (next) => {
           latest = next;
-          recordSubagentUpdate(id, next);
+          if (toolCallId) {
+            recordSubagentUpdate(toolCallId, next);
+          }
           onUpdate?.({
             content: [{ type: "text", text: next.result ?? "Researching…" }],
             details: next,
@@ -35,7 +38,9 @@ export function setupSubagents(pi: ExtensionAPI): void {
         },
       });
 
-      recordSubagentUpdate(id, run);
+      if (toolCallId) {
+        recordSubagentUpdate(toolCallId, run);
+      }
 
       return {
         content: [{ type: "text", text: run.result ?? run.error ?? "Research did not return a result." }],
@@ -57,8 +62,9 @@ export function setupSubagents(pi: ExtensionAPI): void {
     parameters: Type.Object({ task: Type.String() }),
     executionMode: "parallel",
     async execute(toolCallId, { task }, signal, onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
-      const id = toolCallId || `worker_${Date.now()}`;
-      recordSubagentStart(id, workerProfile, task);
+      if (toolCallId) {
+        recordSubagentStart(toolCallId, workerProfile, task);
+      }
       let latest: SubagentRun | undefined;
       const run = await runWorker({
         task,
@@ -66,7 +72,9 @@ export function setupSubagents(pi: ExtensionAPI): void {
         ...(signal ? { signal } : {}),
         onUpdate: (next) => {
           latest = next;
-          recordSubagentUpdate(id, next);
+          if (toolCallId) {
+            recordSubagentUpdate(toolCallId, next);
+          }
           onUpdate?.({
             content: [{ type: "text", text: next.result ?? "Working…" }],
             details: next,
@@ -74,7 +82,9 @@ export function setupSubagents(pi: ExtensionAPI): void {
         },
       });
 
-      recordSubagentUpdate(id, run);
+      if (toolCallId) {
+        recordSubagentUpdate(toolCallId, run);
+      }
 
       return {
         content: [{ type: "text", text: run.result ?? run.error ?? "Worker did not return a result." }],

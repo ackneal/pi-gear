@@ -65,7 +65,13 @@ test("child process inherits the active session cwd", () => {
 
 test("researcher child arguments isolate the child and use exactly its allowlist", () => {
   const args = childArgs(researcherProfile, "inspect", new URL("../agents/researcher/extension.ts", import.meta.url));
-  assert.ok(args.includes("--no-session") && args.includes("--no-extensions"));
+  assert.ok(
+    args.includes("--no-session") &&
+    args.includes("--no-extensions") &&
+    args.includes("--no-skills") &&
+    args.includes("--no-context-files") &&
+    args.includes("--no-prompt-templates"),
+  );
   assert.equal(args[args.indexOf("--extension") + 1]?.endsWith("subagents/agents/researcher/extension.ts"), true);
   assert.equal(args[args.indexOf("--tools") + 1], "read,exa_web_search_exa,exa_get_code_context_exa,exa_research_paper_exa,exa_crawling_exa,context7_resolve_library_id,context7_query_docs,gh_grep_searchGitHub");
   assert.equal(args.join(",").match(/\b(?:bash|edit|write)\b/), null);
@@ -78,8 +84,176 @@ test("decoder and reducer bound retained data and aggregate multipart reports", 
   const events = decodeMessage("one", "two");
   assert.deepEqual(events.filter((event) => event.type === "result"), [{ type: "result", text: "onetwo" }]);
   let run: SubagentRun = { status: "running", startedAt: 0, items: [] };
-  for (let i = 0; i < MAX_RETAINED_ITEMS + 2; i++) run = reduceSubagentEvent(run, { type: "thinking", text: "x".repeat(MAX_RETAINED_TEXT_CHARS + 1) });
-  assert.equal(run.items.length, MAX_RETAINED_ITEMS); assert.ok(run.items[0]?.kind === "thinking" && run.items[0].text.endsWith(TRUNCATION_MARKER));
+  for (let i = 0; i < MAX_RETAINED_ITEMS + 2; i++) run = reduceSubagentEvent(run, { type: "tool_start", id: `t_${i}`, name: "read" });
+  assert.equal(run.items.length, MAX_RETAINED_ITEMS);
+  run = reduceSubagentEvent(run, { type: "thinking", text: "x".repeat(MAX_RETAINED_TEXT_CHARS + 1) });
+  const lastItem = run.items[run.items.length - 1];
+  assert.ok(lastItem && lastItem.kind === "thinking" && lastItem.text.endsWith(TRUNCATION_MARKER));
+});
+
+test("decoder streams assistantMessageEvent deltas (thinking, text, tool calls) and message_end authoritative snapshot", () => {
+  const decoder = new PiJsonDecoder();
+  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, items: [] };
+
+  // message_start clears state
+  let events = decoder.push(JSON.stringify({ type: "message_start" }) + "\n");
+  assert.deepEqual(events, []);
+
+  // thinking stream
+  events = decoder.push(JSON.stringify({
+    type: "message_update",
+    assistantMessageEvent: { type: "thinking_start", contentIndex: 0 },
+  }) + "\n");
+  assert.deepEqual(events, []);
+
+  events = decoder.push(JSON.stringify({
+    type: "message_update",
+    assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "Inspecting codebase" },
+  }) + "\n");
+  assert.deepEqual(events, [{ type: "thinking", text: "Inspecting codebase" }]);
+  for (const ev of events) run = reduceSubagentEvent(run, ev);
+  assert.equal(run.items.length, 1);
+  const thought1 = run.items[0];
+  assert.equal(thought1?.kind, "thinking");
+  if (thought1?.kind === "thinking") {
+    assert.equal(thought1.text, "Inspecting codebase");
+  }
+
+  events = decoder.push(JSON.stringify({
+    type: "message_update",
+    assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: " for patterns" },
+  }) + "\n");
+  assert.deepEqual(events, [{ type: "thinking", text: "Inspecting codebase for patterns" }]);
+  for (const ev of events) run = reduceSubagentEvent(run, ev);
+  assert.equal(run.items.length, 1);
+  const thought2 = run.items[0];
+  assert.equal(thought2?.kind, "thinking");
+  if (thought2?.kind === "thinking") {
+    assert.equal(thought2.text, "Inspecting codebase for patterns");
+  }
+
+  events = decoder.push(JSON.stringify({
+    type: "message_update",
+    assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "Inspecting codebase for patterns - done" },
+  }) + "\n");
+  assert.deepEqual(events, [{ type: "thinking", text: "Inspecting codebase for patterns - done" }]);
+  for (const ev of events) run = reduceSubagentEvent(run, ev);
+  assert.equal(run.items.length, 1);
+  const thought3 = run.items[0];
+  assert.equal(thought3?.kind, "thinking");
+  if (thought3?.kind === "thinking") {
+    assert.equal(thought3.text, "Inspecting codebase for patterns - done");
+  }
+
+  // toolcall stream
+  events = decoder.push(JSON.stringify({
+    type: "message_update",
+    assistantMessageEvent: { type: "toolcall_start", contentIndex: 1, id: "call_42", name: "mcp__exa__search" },
+  }) + "\n");
+  assert.deepEqual(events, [{ type: "tool_start", id: "call_42", name: "mcp__exa__search" }]);
+  for (const ev of events) run = reduceSubagentEvent(run, ev);
+  assert.equal(run.items.length, 2);
+  const tool1 = run.items[1];
+  assert.equal(tool1?.kind, "tool");
+  if (tool1?.kind === "tool") {
+    assert.equal(tool1.status, "running");
+  }
+
+  events = decoder.push(JSON.stringify({
+    type: "message_update",
+    assistantMessageEvent: { type: "toolcall_delta", contentIndex: 1, delta: '{"query": "antigravity"}' },
+  }) + "\n");
+  assert.deepEqual(events, [{ type: "tool_start", id: "call_42", name: "mcp__exa__search", args: { query: "antigravity" } }]);
+  for (const ev of events) run = reduceSubagentEvent(run, ev);
+  const tool2 = run.items[1];
+  assert.equal(tool2?.kind, "tool");
+  if (tool2?.kind === "tool") {
+    assert.deepEqual(tool2.args, { query: "antigravity" });
+  }
+
+  events = decoder.push(JSON.stringify({
+    type: "message_update",
+    assistantMessageEvent: { type: "toolcall_end", contentIndex: 1, toolCall: { id: "call_42", name: "mcp__exa__search", arguments: { query: "antigravity" } } },
+  }) + "\n");
+  assert.deepEqual(events, [{ type: "tool_start", id: "call_42", name: "mcp__exa__search", args: { query: "antigravity" } }]);
+
+  // text stream
+  events = decoder.push(JSON.stringify({
+    type: "message_update",
+    assistantMessageEvent: { type: "text_start", contentIndex: 2 },
+  }) + "\n");
+  assert.deepEqual(events, []);
+
+  events = decoder.push(JSON.stringify({
+    type: "message_update",
+    assistantMessageEvent: { type: "text_delta", contentIndex: 2, delta: "Analysis" },
+  }) + "\n");
+  assert.deepEqual(events, [{ type: "result", text: "Analysis" }]);
+  for (const ev of events) run = reduceSubagentEvent(run, ev);
+  assert.equal(run.result, "Analysis");
+
+  events = decoder.push(JSON.stringify({
+    type: "message_update",
+    assistantMessageEvent: { type: "text_delta", contentIndex: 2, delta: " complete" },
+  }) + "\n");
+  assert.deepEqual(events, [{ type: "result", text: "Analysis complete" }]);
+  for (const ev of events) run = reduceSubagentEvent(run, ev);
+  assert.equal(run.result, "Analysis complete");
+
+  events = decoder.push(JSON.stringify({
+    type: "message_update",
+    assistantMessageEvent: { type: "text_end", contentIndex: 2, content: "Analysis complete." },
+  }) + "\n");
+  assert.deepEqual(events, [{ type: "result", text: "Analysis complete." }]);
+  for (const ev of events) run = reduceSubagentEvent(run, ev);
+  assert.equal(run.result, "Analysis complete.");
+
+  // message_end authoritative snapshot with usage
+  events = decoder.push(JSON.stringify({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [
+        { type: "thinking", text: "Inspecting codebase for patterns - done" },
+        { type: "toolCall", id: "call_42", name: "mcp__exa__search", arguments: { query: "antigravity" } },
+        { type: "text", text: "Analysis complete." },
+      ],
+      usage: { input: 100, output: 50 },
+    },
+  }) + "\n");
+
+  assert.deepEqual(events, [
+    { type: "thinking", text: "Inspecting codebase for patterns - done" },
+    { type: "tool_start", id: "call_42", name: "mcp__exa__search", args: { query: "antigravity" } },
+    { type: "result", text: "Analysis complete." },
+    { type: "usage", usage: { input: 100, output: 50 } },
+  ]);
+
+  for (const ev of events) run = reduceSubagentEvent(run, ev);
+  assert.equal(run.result, "Analysis complete.");
+  assert.equal(run.items.length, 3); // 2 thinking items, 1 tool item
+  assert.deepEqual(run.usage, { input: 100, output: 50 });
+});
+
+test("in-flight blocks are reset on turn_end, message_start, and agent_end", () => {
+  const decoder = new PiJsonDecoder();
+
+  // Partial thinking delta
+  decoder.push(JSON.stringify({
+    type: "message_update",
+    assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "abandoned thought" },
+  }) + "\n");
+
+  // turn_end resets in-flight state
+  decoder.push(JSON.stringify({ type: "turn_end" }) + "\n");
+
+  // Next message starts fresh
+  const events = decoder.push(JSON.stringify({
+    type: "message_update",
+    assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "fresh thought" },
+  }) + "\n");
+
+  assert.deepEqual(events, [{ type: "thinking", text: "fresh thought" }]);
 });
 
 test("compatibility tool result keeps message error state", () => {

@@ -75,7 +75,12 @@ export function reduceSubagentEvent(
   const items = run.items.map((item) => ({ ...item }));
 
   if (event.type === "thinking") {
-    items.push({ kind: "thinking", text: truncateRetainedText(event.text) });
+    const lastItem = items[items.length - 1];
+    if (lastItem && lastItem.kind === "thinking") {
+      lastItem.text = truncateRetainedText(event.text);
+    } else {
+      items.push({ kind: "thinking", text: truncateRetainedText(event.text) });
+    }
   } else if (event.type === "tool_start") {
     const existing = items.find((item) => item.kind === "tool" && item.id === event.id);
     if (existing && existing.kind === "tool") {

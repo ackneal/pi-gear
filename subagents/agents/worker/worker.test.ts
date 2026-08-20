@@ -37,11 +37,17 @@ test("worker profile, prompt, and capabilities match specification", () => {
 test("worker child arguments configure isolation, capabilities, and system prompt", () => {
   const extensionUrl = new URL("./extension.ts", import.meta.url);
   const args = childArgs(workerProfile, "implement feature", extensionUrl);
-  assert.ok(args.includes("--no-session") && args.includes("--no-extensions"));
+  assert.ok(
+    args.includes("--no-session") &&
+    args.includes("--no-extensions") &&
+    args.includes("--no-skills") &&
+    args.includes("--no-context-files") &&
+    args.includes("--no-prompt-templates"),
+  );
   assert.equal(args[args.indexOf("--tools") + 1], "read,edit,write,bash");
   assert.equal(args[args.indexOf("--append-system-prompt") + 1], WORKER_SYSTEM_PROMPT);
   assert.equal(args[args.indexOf("--extension") + 1]?.endsWith("subagents/agents/worker/extension.ts"), true);
-  assert.equal(args[args.length - 1], "Task: implement feature");
+  assert.equal(args[args.length - 1], "implement feature");
 });
 
 test("worker extension configures filesystem guard and sandbox", () => {

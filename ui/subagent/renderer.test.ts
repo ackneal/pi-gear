@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   collapsed,
-  expanded,
   formatCost,
   formatDuration,
   formatTokens,
@@ -58,30 +57,6 @@ test("spinner invalidates while running, stops for terminal state, and disposes 
   }
 });
 
-test("expanded output keeps ordered, readable, sanitized subagent details", () => {
-  const output = expanded({
-    status: "success",
-    startedAt: 0,
-    finishedAt: 1_000,
-    items: [
-      { kind: "thinking", text: "Thinking: inspect call_secret_123" },
-      { kind: "tool", id: "tool_1", name: "mcp__exa__search", status: "success", result: '{"result":{"summary":"Exa finding"},"toolCallId":"call_hidden"}' },
-      { kind: "tool", id: "tool_2", name: "mcp__context7__query", status: "success", result: "Context finding" },
-      { kind: "tool", id: "tool_3", name: "mcp__gh_grep__search", status: "error", result: "GitHub finding" },
-    ],
-    result: "Final report",
-  }, researcher, theme);
-
-  const thinking = output.indexOf("inspect");
-  const exa = output.indexOf("✓ Exa");
-  const context7 = output.indexOf("✓ Context7");
-  const github = output.indexOf("✗ GitHub grep");
-  const result = output.indexOf("╰ Result");
-  assert.ok(thinking < exa && exa < context7 && context7 < github && github < result);
-  assert.match(output, /Exa finding/);
-  assert.doesNotMatch(output, /Thinking:|call_secret_123|call_hidden|tool_1|\{"result"/);
-});
-
 test("formatDuration and idleDuration handle units and running state", () => {
   assert.equal(STALLED_THRESHOLD_MS, 15_000);
   assert.equal(formatDuration(500), "500ms");
@@ -108,7 +83,7 @@ test("formatDuration and idleDuration handle units and running state", () => {
   assert.equal(idleDuration(undefined, 50_000), 0);
 });
 
-test("collapsed and expanded include idle indication when stalled", () => {
+test("collapsed includes idle indication when stalled", () => {
   const stalledRun = {
     status: "running" as const,
     startedAt: 0,
@@ -121,24 +96,6 @@ test("collapsed and expanded include idle indication when stalled", () => {
 
   const stalledCollapsed = collapsed(stalledRun, researcher, theme, "●", 25_000);
   assert.match(stalledCollapsed, /· idle 20s/);
-
-  const activeExpanded = expanded(stalledRun, researcher, theme, "●", 10_000);
-  assert.doesNotMatch(activeExpanded, /No activity for/);
-  assert.doesNotMatch(activeExpanded, /╰ Result/);
-
-  const stalledExpanded = expanded(stalledRun, researcher, theme, "●", 25_000);
-  assert.match(stalledExpanded, /│ No activity for 20s/);
-  assert.doesNotMatch(stalledExpanded, /╰ Result/);
-
-  const completedExpanded = expanded({
-    ...stalledRun,
-    status: "success",
-    finishedAt: 30_000,
-    result: "Done",
-  }, researcher, theme, "✓", 35_000);
-  assert.doesNotMatch(completedExpanded, /No activity for/);
-  assert.match(completedExpanded, /╰ Result/);
-  assert.match(completedExpanded, /Done/);
 });
 
 test("formatTokens formats token counts according to threshold rules", () => {

@@ -1,6 +1,7 @@
-import { Key, matchesKey, type Component } from "@earendil-works/pi-tui";
+import { Key, matchesKey, type Component, type KeyId } from "@earendil-works/pi-tui";
 import type { SubagentRun } from "../../../subagents/runtime/types.ts";
 import {
+  BOTTOM_SECTION_HEIGHT,
   formatDetailContent,
   frameDetailBox,
   titleCase,
@@ -8,12 +9,22 @@ import {
 } from "./format.ts";
 import type { SubagentViewEntry } from "./registry.ts";
 
+function keyHit(data: string, ...keys: (KeyId | string)[]): boolean {
+  return keys.some((key) => data === key || matchesKey(data, key as KeyId));
+}
+
 export interface SubagentDetailComponentOptions {
   entry: SubagentViewEntry;
   theme: Theme;
   onClose: () => void;
   invalidate: () => void;
   now?: () => number;
+  entries?: SubagentViewEntry[];
+  index?: number;
+  subscribe?: (
+    toolCallId: string,
+    listener: (run: SubagentRun) => void,
+  ) => () => void;
 }
 
 export class SubagentDetailComponent implements Component {
@@ -22,78 +33,137 @@ export class SubagentDetailComponent implements Component {
   public onClose: () => void;
   private readonly requestRedraw: () => void;
   private readonly now: () => number;
+  private readonly subscribeFn:
+    | ((toolCallId: string, listener: (run: SubagentRun) => void) => () => void)
+    | undefined;
+  private readonly entries: SubagentViewEntry[];
+  private index: number;
+  private unsubscribe: (() => void) | undefined;
 
   public scrollTop: number = 0;
   public autoScroll: boolean = true;
   public toolsExpanded: boolean = false;
+  public thinkingExpanded: boolean = false;
+  public statusText: string = "";
   private lastContentLinesCount: number = 0;
   private lastInnerHeight: number = 10;
 
   constructor(options: SubagentDetailComponentOptions) {
-    this.entry = options.entry;
     this.theme = options.theme;
     this.onClose = options.onClose;
     this.requestRedraw = options.invalidate;
     this.now = options.now ?? Date.now;
-
-    if (process.stdout?.isTTY) {
-      process.stdout.write("\x1b[?1000h\x1b[?1002h\x1b[?1006h");
+    this.subscribeFn = options.subscribe;
+    this.entries =
+      options.entries && options.entries.length > 0
+        ? options.entries
+        : options.entry
+          ? [options.entry]
+          : [];
+    this.index = Math.min(
+      Math.max(0, options.index ?? 0),
+      Math.max(0, this.entries.length - 1),
+    );
+    this.entry = this.entries[this.index] ?? options.entry;
+    if (this.subscribeFn) {
+      this.unsubscribe = this.subscribeFn(this.entry.toolCallId, (run) =>
+        this.update(run),
+      );
     }
+  }
+
+  private select(delta: number): void {
+    const i = this.index + delta;
+    if (i < 0 || i >= this.entries.length || !this.entries[i]) return;
+    this.unsubscribe?.();
+    this.index = i;
+    this.entry = this.entries[i]!;
+    // Keep toolsExpanded / thinkingExpanded / statusText across windows.
+    this.scrollTop = 0;
+    this.autoScroll = true;
+    if (this.subscribeFn) {
+      this.unsubscribe = this.subscribeFn(this.entry.toolCallId, (run) =>
+        this.update(run),
+      );
+    }
+    this.requestRedraw();
   }
 
   render(width: number): string[] {
     const termRows = process.stdout?.rows || 24;
     const innerWidth = Math.max(10, width);
+    const innerHeight = Math.max(
+      1,
+      Math.max(10, termRows) - BOTTOM_SECTION_HEIGHT,
+    );
+
     const contentLines = formatDetailContent(
       this.entry,
       this.theme,
       innerWidth,
       this.now(),
       this.toolsExpanded,
+      this.thinkingExpanded,
+      this.statusText,
     );
 
-    const targetHeight = Math.max(10, termRows);
-    const innerHeight = Math.max(1, targetHeight - 3);
     this.lastContentLinesCount = contentLines.length;
     this.lastInnerHeight = innerHeight;
-
     const maxScroll = Math.max(0, contentLines.length - innerHeight);
-    if (this.autoScroll) {
-      this.scrollTop = maxScroll;
-    } else {
-      this.scrollTop = Math.max(0, Math.min(this.scrollTop, maxScroll));
-    }
+    this.scrollTop = this.autoScroll
+      ? maxScroll
+      : Math.max(0, Math.min(this.scrollTop, maxScroll));
 
-    const title = titleCase(
-      this.entry.profile.label || this.entry.profile.id || "Subagent",
-    );
     return frameDetailBox(
       contentLines,
-      title,
+      this.entry,
       width,
-      targetHeight,
+      Math.max(10, termRows),
       this.scrollTop,
       this.theme,
-      this.toolsExpanded,
+      this.now(),
+      this.prevLabel(),
+      this.nextLabel(),
     );
   }
 
+  private prevLabel(): string {
+    return this.entries[this.index - 1]?.profile.label || this.entries[this.index - 1]?.profile.id || "";
+  }
+
+  private nextLabel(): string {
+    return this.entries[this.index + 1]?.profile.label || this.entries[this.index + 1]?.profile.id || "";
+  }
+
   handleInput(data: string): void {
-    if (data === "\x1b" || data === "escape" || matchesKey(data, Key.escape) || data === "q") {
+    if (keyHit(data, "\x1b[D", "left", "h", Key.left)) {
+      this.select(-1);
+      return;
+    }
+    if (keyHit(data, "\x1b[C", "right", "l", Key.right)) {
+      this.select(1);
+      return;
+    }
+
+    if (keyHit(data, "\x1b", "escape", "q", Key.escape)) {
       this.onClose();
       return;
     }
 
-    // Toggle tool output expansion with Ctrl+O or 'o'
-    if (
-      data === "\x0f" ||
-      data === "ctrl+o" ||
-      data === "o" ||
-      data === "O" ||
-      matchesKey(data, Key.ctrl("o")) ||
-      matchesKey(data, "ctrl+o")
-    ) {
+    if (keyHit(data, "\x0f", "ctrl+o")) {
       this.toolsExpanded = !this.toolsExpanded;
+      this.statusText = this.toolsExpanded
+        ? "Tool output: expanded"
+        : "Tool output: collapsed";
+      this.requestRedraw();
+      return;
+    }
+
+    if (keyHit(data, "\x14", "ctrl+t")) {
+      this.thinkingExpanded = !this.thinkingExpanded;
+      this.statusText = this.thinkingExpanded
+        ? "Thinking blocks: visible"
+        : "Thinking blocks: hidden";
       this.requestRedraw();
       return;
     }
@@ -102,78 +172,56 @@ export class SubagentDetailComponent implements Component {
       0,
       this.lastContentLinesCount - this.lastInnerHeight,
     );
-    const pageSize = Math.max(1, this.lastInnerHeight - 2);
+    const halfPage = Math.max(1, Math.floor(Math.max(1, this.lastInnerHeight - 2) / 2));
 
-    // 1. Mouse wheel handling (SGR & X10 tracking)
-    const wheelUpMatches = data.match(/\x1b\[<(?:64|68|72|80);\d+;\d+[Mm]|\x1b\[M[`@]/g);
-    if (wheelUpMatches) {
-      this.autoScroll = false;
-      this.scrollTop = Math.max(0, this.scrollTop - wheelUpMatches.length * 2);
-      this.requestRedraw();
+    if (keyHit(data, "up", "k", Key.up)) {
+      this.scrollByLines(-1);
+      return;
+    }
+    if (keyHit(data, "down", "j", Key.down)) {
+      this.scrollByLines(1);
       return;
     }
 
-    const wheelDownMatches = data.match(/\x1b\[<(?:65|69|73|81);\d+;\d+[Mm]|\x1b\[M[aA]/g);
-    if (wheelDownMatches) {
-      this.scrollTop = Math.min(maxScroll, this.scrollTop + wheelDownMatches.length * 2);
-      if (this.scrollTop >= maxScroll) {
-        this.autoScroll = true;
-      }
-      this.requestRedraw();
+    if (keyHit(data, "\x15", "ctrl+u")) {
+      this.scrollByLines(-halfPage);
+      return;
+    }
+    if (keyHit(data, "\x04", "ctrl+d")) {
+      this.scrollByLines(halfPage);
       return;
     }
 
-    // Swallow other mouse interactions while overlay is focused to lock focus inside
-    if (/^\x1b\[<\d+;\d+;\d+[Mm]|^\x1b\[M.../.test(data)) {
-      return;
-    }
-
-    // 2. Keyboard scrolling navigation
-    if (matchesKey(data, Key.up) || data === "up" || data === "k") {
-      this.autoScroll = false;
-      this.scrollTop = Math.max(0, this.scrollTop - 1);
-      this.requestRedraw();
-      return;
-    }
-
-    if (matchesKey(data, Key.down) || data === "down" || data === "j") {
-      this.scrollTop = Math.min(maxScroll, this.scrollTop + 1);
-      if (this.scrollTop >= maxScroll) {
-        this.autoScroll = true;
-      }
-      this.requestRedraw();
-      return;
-    }
-
-    if (matchesKey(data, Key.pageUp) || data === "pageUp") {
-      this.autoScroll = false;
-      this.scrollTop = Math.max(0, this.scrollTop - pageSize);
-      this.requestRedraw();
-      return;
-    }
-
-    if (matchesKey(data, Key.pageDown) || data === "pageDown") {
-      this.scrollTop = Math.min(maxScroll, this.scrollTop + pageSize);
-      if (this.scrollTop >= maxScroll) {
-        this.autoScroll = true;
-      }
-      this.requestRedraw();
-      return;
-    }
-
-    if (matchesKey(data, Key.home) || data === "home" || data === "g") {
+    // Vim top/bottom (Home/End omitted: macOS has no such keys)
+    if (data === "g") {
       this.autoScroll = false;
       this.scrollTop = 0;
       this.requestRedraw();
       return;
     }
-
-    if (matchesKey(data, Key.end) || data === "end" || data === "G") {
+    if (data === "G") {
       this.scrollTop = maxScroll;
       this.autoScroll = true;
       this.requestRedraw();
       return;
     }
+  }
+
+  public scrollByLines(lines: number): void {
+    const maxScroll = Math.max(
+      0,
+      this.lastContentLinesCount - this.lastInnerHeight,
+    );
+    if (lines < 0) {
+      this.autoScroll = false;
+      this.scrollTop = Math.max(0, this.scrollTop + lines);
+    } else if (lines > 0) {
+      this.scrollTop = Math.min(maxScroll, this.scrollTop + lines);
+      if (this.scrollTop >= maxScroll) {
+        this.autoScroll = true;
+      }
+    }
+    this.requestRedraw();
   }
 
   update(run: SubagentRun): void {
@@ -192,8 +240,6 @@ export class SubagentDetailComponent implements Component {
   invalidate(): void {}
 
   dispose(): void {
-    if (process.stdout?.isTTY) {
-      process.stdout.write("\x1b[?1000l\x1b[?1002l\x1b[?1006l");
-    }
+    this.unsubscribe?.();
   }
 }

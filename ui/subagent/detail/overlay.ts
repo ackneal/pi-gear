@@ -1,6 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SubagentDetailComponent } from "./component.ts";
-import { formatDuration, titleCase } from "./format.ts";
+import { enableClearOnShrink, formatDuration, titleCase } from "./format.ts";
 import {
   getAllSubagentEntries,
   getSubagentEntry,
@@ -12,15 +12,6 @@ export async function openSubagentDetailOverlay(
   ctx: ExtensionContext,
   toolCallId?: string,
 ): Promise<void> {
-  if (typeof ctx.ui?.setWidget === "function") {
-    ctx.ui.setWidget("__tui_clear_on_shrink", (tui) => {
-      if (typeof (tui as unknown as { setClearOnShrink?: (val: boolean) => void }).setClearOnShrink === "function") {
-        (tui as unknown as { setClearOnShrink: (val: boolean) => void }).setClearOnShrink(true);
-      }
-      return { render: () => [], invalidate: () => {} };
-    });
-  }
-
   let targetEntry: SubagentViewEntry | undefined;
 
   if (toolCallId) {
@@ -71,21 +62,21 @@ export async function openSubagentDetailOverlay(
 
   await ctx.ui.custom(
     (tui, theme, _keybindings, done) => {
-      if (typeof (tui as unknown as { setClearOnShrink?: (val: boolean) => void }).setClearOnShrink === "function") {
-        (tui as unknown as { setClearOnShrink: (val: boolean) => void }).setClearOnShrink(true);
-      }
+      enableClearOnShrink(tui);
 
-      let unsubscribe: (() => void) | undefined;
-
+      const allEntries = getAllSubagentEntries();
+      const startIndex = Math.max(
+        0,
+        allEntries.findIndex((e) => e.toolCallId === entryToDisplay.toolCallId),
+      );
       const component = new SubagentDetailComponent({
         entry: entryToDisplay,
         theme,
         onClose: () => done(undefined),
         invalidate: () => tui.requestRender(),
-      });
-
-      unsubscribe = subscribeSubagent(entryToDisplay.toolCallId, (run) => {
-        component.update(run);
+        entries: allEntries,
+        index: startIndex,
+        subscribe: subscribeSubagent,
       });
 
       return {
@@ -93,11 +84,7 @@ export async function openSubagentDetailOverlay(
         handleInput: (data: string) => component.handleInput(data),
         invalidate: () => component.invalidate(),
         dispose: () => {
-          unsubscribe?.();
           component.dispose();
-          if (typeof (tui as unknown as { setClearOnShrink?: (val: boolean) => void }).setClearOnShrink === "function") {
-            (tui as unknown as { setClearOnShrink: (val: boolean) => void }).setClearOnShrink(true);
-          }
           tui.requestRender();
         },
       };
