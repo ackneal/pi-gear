@@ -121,7 +121,7 @@ test("decoder streams assistantMessageEvent deltas (thinking, text, tool calls) 
 
   events = decoder.push(JSON.stringify({
     type: "message_update",
-    assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "Inspecting codebase for patterns" },
+    assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: " for patterns" },
   }) + "\n");
   assert.deepEqual(events, [{ type: "thinking", text: "Inspecting codebase for patterns", contentIndex: 0 }]);
   for (const ev of events) run = reduceSubagentEvent(run, ev);
@@ -401,13 +401,14 @@ test("reduceSubagentEvent keeps the latest cumulative usage snapshot instead of 
   assert.deepEqual(run.usage, usage);
 });
 
-test("separate thinking blocks stay separate but repeated deltas update one item", () => {
+test("thinking deltas are incremental and accumulate into one retained item", () => {
   const decoder = new PiJsonDecoder();
   let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, items: [] };
 
-  // Block A: several cumulative deltas collapse into a single item.
+  // thinking_delta "Hel" + thinking_delta "lo" must accumulate to "Hello"
+  // in a single retained thinking item.
   decoder.push(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } }) + "\n");
-  for (const delta of ["H", "He", "Hel", "Hello"]) {
+  for (const delta of ["Hel", "lo"]) {
     const events = decoder.push(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta } }) + "\n");
     for (const ev of events) run = reduceSubagentEvent(run, ev);
   }

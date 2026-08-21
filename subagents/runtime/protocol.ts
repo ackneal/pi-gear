@@ -115,14 +115,16 @@ function decodeAssistantMessageEvent(
       return [];
     }
     case "thinking_delta": {
-      // Pi streams cumulative thinking snapshots; set (not append) the block text.
+      // thinking_delta is an incremental delta, not a cumulative snapshot. The
+      // decoder accumulates the full in-flight block; the reducer keeps only
+      // one retained item per contentIndex.
       const delta = typeof ame.delta === "string" ? ame.delta : "";
       let block = inFlightBlocks?.get(contentIndex);
       if (!block || block.type !== "thinking") {
         block = { type: "thinking", text: "" };
         inFlightBlocks?.set(contentIndex, block);
       }
-      block.text = delta;
+      block.text += delta;
       return [{ type: "thinking", text: block.text, contentIndex }];
     }
     case "thinking_end": {
