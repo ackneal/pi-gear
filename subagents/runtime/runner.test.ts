@@ -75,7 +75,7 @@ test("researcher child arguments isolate the child and use exactly its allowlist
   assert.equal(args[args.indexOf("--extension") + 1]?.endsWith("subagents/agents/researcher/extension.ts"), true);
   assert.equal(args[args.indexOf("--tools") + 1], "read,exa_web_search_exa,exa_get_code_context_exa,exa_research_paper_exa,exa_crawling_exa,context7_resolve_library_id,context7_query_docs,gh_grep_searchGitHub");
   assert.equal(args.join(",").match(/\b(?:bash|edit|write)\b/), null);
-  assert.equal(RESEARCHER_SYSTEM_PROMPT, "Investigate the assigned task read-only using available tools. Return concise, evidence-backed findings. Do not modify files or task state.");
+  assert.equal(RESEARCHER_SYSTEM_PROMPT, "Investigate the delegated research question and return concise, evidence-backed findings.");
 });
 
 test("decoder and reducer bound retained data and aggregate multipart reports", () => {
@@ -110,7 +110,7 @@ test("decoder streams assistantMessageEvent deltas (thinking, text, tool calls) 
     type: "message_update",
     assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "Inspecting codebase" },
   }) + "\n");
-  assert.deepEqual(events, [{ type: "thinking", text: "Inspecting codebase" }]);
+  assert.deepEqual(events, [{ type: "thinking", text: "Inspecting codebase", contentIndex: 0 }]);
   for (const ev of events) run = reduceSubagentEvent(run, ev);
   assert.equal(run.items.length, 1);
   const thought1 = run.items[0];
@@ -121,9 +121,9 @@ test("decoder streams assistantMessageEvent deltas (thinking, text, tool calls) 
 
   events = decoder.push(JSON.stringify({
     type: "message_update",
-    assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: " for patterns" },
+    assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "Inspecting codebase for patterns" },
   }) + "\n");
-  assert.deepEqual(events, [{ type: "thinking", text: "Inspecting codebase for patterns" }]);
+  assert.deepEqual(events, [{ type: "thinking", text: "Inspecting codebase for patterns", contentIndex: 0 }]);
   for (const ev of events) run = reduceSubagentEvent(run, ev);
   assert.equal(run.items.length, 1);
   const thought2 = run.items[0];
@@ -136,7 +136,7 @@ test("decoder streams assistantMessageEvent deltas (thinking, text, tool calls) 
     type: "message_update",
     assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "Inspecting codebase for patterns - done" },
   }) + "\n");
-  assert.deepEqual(events, [{ type: "thinking", text: "Inspecting codebase for patterns - done" }]);
+  assert.deepEqual(events, [{ type: "thinking", text: "Inspecting codebase for patterns - done", contentIndex: 0 }]);
   for (const ev of events) run = reduceSubagentEvent(run, ev);
   assert.equal(run.items.length, 1);
   const thought3 = run.items[0];
@@ -223,7 +223,7 @@ test("decoder streams assistantMessageEvent deltas (thinking, text, tool calls) 
   }) + "\n");
 
   assert.deepEqual(events, [
-    { type: "thinking", text: "Inspecting codebase for patterns - done" },
+    { type: "thinking", text: "Inspecting codebase for patterns - done", contentIndex: 0 },
     { type: "tool_start", id: "call_42", name: "mcp__exa__search", args: { query: "antigravity" } },
     { type: "result", text: "Analysis complete." },
     { type: "usage", usage: { input: 100, output: 50 } },
@@ -231,7 +231,7 @@ test("decoder streams assistantMessageEvent deltas (thinking, text, tool calls) 
 
   for (const ev of events) run = reduceSubagentEvent(run, ev);
   assert.equal(run.result, "Analysis complete.");
-  assert.equal(run.items.length, 3); // 2 thinking items, 1 tool item
+  assert.equal(run.items.length, 2); // 1 thinking item, 1 tool item
   assert.deepEqual(run.usage, { input: 100, output: 50 });
 });
 
@@ -253,7 +253,7 @@ test("in-flight blocks are reset on turn_end, message_start, and agent_end", () 
     assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "fresh thought" },
   }) + "\n");
 
-  assert.deepEqual(events, [{ type: "thinking", text: "fresh thought" }]);
+  assert.deepEqual(events, [{ type: "thinking", text: "fresh thought", contentIndex: 0 }]);
 });
 
 test("compatibility tool result keeps message error state", () => {
@@ -381,50 +381,59 @@ test("decoder emits usage event on message_end and turn_end", () => {
   ]);
 });
 
-test("reduceSubagentEvent aggregates usage across multiple events", () => {
+test("reduceSubagentEvent keeps the latest cumulative usage snapshot instead of summing", () => {
   let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, items: [] };
-
-  run = reduceSubagentEvent(run, {
-    type: "usage",
-    usage: {
-      input: 1000,
-      output: 500,
-      cacheRead: 200,
-      cacheWrite: 100,
-      totalTokens: 1800,
-      cost: { total: 1.5, input: 0.5, output: 1.0 },
-    },
-  }, 1000);
-
-  assert.equal(run.lastActivityAt, 1000);
-  assert.deepEqual(run.usage, {
+  const usage = {
     input: 1000,
     output: 500,
     cacheRead: 200,
     cacheWrite: 100,
     totalTokens: 1800,
     cost: { total: 1.5, input: 0.5, output: 1.0 },
-  });
+  };
 
-  run = reduceSubagentEvent(run, {
-    type: "usage",
-    usage: {
-      input: 500,
-      output: 250,
-      cacheRead: 100,
-      totalTokens: 850,
-      cost: { total: 2.25, input: 0.75, output: 1.5 },
-    },
-  }, 2000);
+  // The same cumulative snapshot is surfaced at several lifecycle events.
+  for (let i = 0; i < 3; i++) {
+    run = reduceSubagentEvent(run, { type: "usage", usage }, i * 1000);
+  }
 
-  assert.equal(run.lastActivityAt, 2000);
-  assert.deepEqual(run.usage, {
-    input: 1500,
-    output: 750,
-    cacheRead: 300,
-    cacheWrite: 100,
-    totalTokens: 2650,
-    cost: { total: 3.75, input: 1.25, output: 2.5 },
-  });
+  assert.equal(run.usage?.input, 1000); // not 3000
+  assert.deepEqual(run.usage, usage);
+});
+
+test("separate thinking blocks stay separate but repeated deltas update one item", () => {
+  const decoder = new PiJsonDecoder();
+  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, items: [] };
+
+  // Block A: several cumulative deltas collapse into a single item.
+  decoder.push(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } }) + "\n");
+  for (const delta of ["H", "He", "Hel", "Hello"]) {
+    const events = decoder.push(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta } }) + "\n");
+    for (const ev of events) run = reduceSubagentEvent(run, ev);
+  }
+  assert.equal(run.items.length, 1);
+  if (run.items[0]?.kind === "thinking") assert.equal(run.items[0].text, "Hello");
+
+  // Block B: a new contentIndex creates a separate item.
+  decoder.push(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_start", contentIndex: 1 } }) + "\n");
+  const events = decoder.push(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 1, delta: "Another reasoning block" } }) + "\n");
+  for (const ev of events) run = reduceSubagentEvent(run, ev);
+
+  assert.deepEqual(run.items, [
+    { kind: "thinking", text: "Hello", contentIndex: 0 },
+    { kind: "thinking", text: "Another reasoning block", contentIndex: 1 },
+  ]);
+});
+
+test("cumulative streaming snapshots do not consume retained history", () => {
+  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, items: [] };
+  for (let i = 0; i < 5; i++) run = reduceSubagentEvent(run, { type: "tool_start", id: `t_${i}`, name: "read" });
+
+  // Stream many cumulative snapshots for a single in-flight block.
+  for (let i = 0; i < 50; i++) run = reduceSubagentEvent(run, { type: "thinking", text: `snapshot ${i}`, contentIndex: 7 });
+
+  const kinds = run.items.map((item) => item.kind);
+  assert.equal(kinds.filter((kind) => kind === "thinking").length, 1);
+  assert.equal(kinds.filter((kind) => kind === "tool").length, 5);
 });
 

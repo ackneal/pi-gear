@@ -56,11 +56,11 @@ function decodeMessageEnd(event: Record<string, unknown>): SubagentEvent[] {
     return usageEvents;
   }
 
-  const events = message.content.flatMap((part): SubagentEvent[] => {
+  const events = message.content.flatMap((part, contentIndex): SubagentEvent[] => {
     if (typeof part !== "object" || part === null) return [];
 
     const value = part as Record<string, unknown>;
-    if (value.type === "thinking" && typeof value.text === "string") return [{ type: "thinking", text: value.text }];
+    if (value.type === "thinking" && typeof value.text === "string") return [{ type: "thinking", text: value.text, contentIndex }];
     if (value.type === "text" && typeof value.text === "string") return [{ type: "result", text: value.text }];
     if (value.type === "toolCall" && typeof value.id === "string" && typeof value.name === "string") {
       const args = parseToolArguments(value.arguments ?? value.args);
@@ -115,14 +115,15 @@ function decodeAssistantMessageEvent(
       return [];
     }
     case "thinking_delta": {
+      // Pi streams cumulative thinking snapshots; set (not append) the block text.
       const delta = typeof ame.delta === "string" ? ame.delta : "";
       let block = inFlightBlocks?.get(contentIndex);
       if (!block || block.type !== "thinking") {
         block = { type: "thinking", text: "" };
         inFlightBlocks?.set(contentIndex, block);
       }
-      block.text += delta;
-      return [{ type: "thinking", text: block.text }];
+      block.text = delta;
+      return [{ type: "thinking", text: block.text, contentIndex }];
     }
     case "thinking_end": {
       let block = inFlightBlocks?.get(contentIndex);
@@ -135,7 +136,7 @@ function decodeAssistantMessageEvent(
       }
       const text = block?.type === "thinking" ? block.text : (typeof ame.content === "string" ? ame.content : "");
       inFlightBlocks?.delete(contentIndex);
-      return [{ type: "thinking", text }];
+      return [{ type: "thinking", text, contentIndex }];
     }
     case "text_start": {
       inFlightBlocks?.set(contentIndex, { type: "text", text: "" });

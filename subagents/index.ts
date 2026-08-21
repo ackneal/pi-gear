@@ -51,8 +51,6 @@ export function setupSubagents(pi: ExtensionAPI): void {
           },
         },
       );
-      run.task = researcherInput;
-      if (latest) latest.task = researcherInput;
       if (toolCallId) {
         recordSubagentUpdate(toolCallId, run);
       }
@@ -99,8 +97,6 @@ export function setupSubagents(pi: ExtensionAPI): void {
           },
         },
       );
-      run.task = workerInput;
-      if (latest) latest.task = workerInput;
       if (toolCallId) {
         recordSubagentUpdate(toolCallId, run);
       }

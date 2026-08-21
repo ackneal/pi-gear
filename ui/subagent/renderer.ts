@@ -32,8 +32,7 @@ export function renderSubagentResult(
     recordSubagentStart(
       context.toolCallId,
       profile as unknown as SubagentProfile,
-      // The same formatted brief that was sent to the child pi, carried on the run.
-      result.details.task ?? "",
+      "",
       result.details,
     );
   }
