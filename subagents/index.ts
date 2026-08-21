@@ -33,14 +33,12 @@ export function setupSubagents(pi: ExtensionAPI): void {
       if (toolCallId) {
         recordSubagentStart(toolCallId, researcherProfile, researcherInput);
       }
-      let latest: SubagentRun | undefined;
       const run = await runResearcher(
         researcherInput,
         {
           cwd: ctx.cwd,
           ...(signal ? { signal } : {}),
           onUpdate: (next) => {
-            latest = next;
             if (toolCallId) {
               recordSubagentUpdate(toolCallId, next);
             }
@@ -51,14 +49,13 @@ export function setupSubagents(pi: ExtensionAPI): void {
           },
         },
       );
-      if (toolCallId) {
-        recordSubagentUpdate(toolCallId, run);
+      if (run.status !== "success") {
+        throw new Error(run.error ?? (run.status === "aborted" ? "Research aborted." : "Research did not complete."));
       }
 
       return {
-        content: [{ type: "text", text: run.result ?? run.error ?? "Research did not return a result." }],
-        details: latest ?? run,
-        ...(run.status === "error" ? { isError: true } : {}),
+        content: [{ type: "text", text: run.result ?? "Research did not return a result." }],
+        details: run,
         ...(run.usage ? { usage: run.usage as any } : {}),
       };
     },
@@ -79,14 +76,12 @@ export function setupSubagents(pi: ExtensionAPI): void {
       if (toolCallId) {
         recordSubagentStart(toolCallId, workerProfile, workerInput);
       }
-      let latest: SubagentRun | undefined;
       const run = await runWorker(
         workerInput,
         {
           cwd: ctx.cwd,
           ...(signal ? { signal } : {}),
           onUpdate: (next) => {
-            latest = next;
             if (toolCallId) {
               recordSubagentUpdate(toolCallId, next);
             }
@@ -97,14 +92,13 @@ export function setupSubagents(pi: ExtensionAPI): void {
           },
         },
       );
-      if (toolCallId) {
-        recordSubagentUpdate(toolCallId, run);
+      if (run.status !== "success") {
+        throw new Error(run.error ?? (run.status === "aborted" ? "Worker aborted." : "Worker did not complete."));
       }
 
       return {
-        content: [{ type: "text", text: run.result ?? run.error ?? "Worker did not return a result." }],
-        details: latest ?? run,
-        ...(run.status === "error" ? { isError: true } : {}),
+        content: [{ type: "text", text: run.result ?? "Worker did not return a result." }],
+        details: run,
         ...(run.usage ? { usage: run.usage as any } : {}),
       };
     },

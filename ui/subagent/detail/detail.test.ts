@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Key } from "@earendil-works/pi-tui";
+import { Key, visibleWidth } from "@earendil-works/pi-tui";
 import { researcherProfile } from "../../../subagents/agents/researcher/index.ts";
 import { workerProfile } from "../../../subagents/agents/worker/index.ts";
 import { setupLifecycle } from "../../../lifecycle/index.ts";
@@ -640,6 +640,13 @@ test("Test 13: Key Hint Box renders framed with top/bottom borders and correct s
     linesExpanded[7] ?? "",
     /esc close │ ↑\/↓ scroll │ ←\/→ switch │ g\/G top\/bottom/,
   );
+});
+
+test("frameDetailBox respects widths below 20 cells", () => {
+  for (const width of [1, 8, 19]) {
+    const lines = frameDetailBox(["content wider than the panel"], "researcher", width, 6, 0, testTheme);
+    assert.ok(lines.every((line) => visibleWidth(line) <= width));
+  }
 });
 
 test("Test 14: Single Footer line renders subagent label, tool counts, scroll info, and duration", () => {

@@ -27,7 +27,7 @@ function parseToolArguments(raw: unknown): Record<string, unknown> | undefined {
   return undefined;
 }
 
-function decodeMessageEnd(event: Record<string, unknown>): SubagentEvent[] {
+function decodeMessageEnd(event: Record<string, unknown>, messageId?: number, includeUsage = true): SubagentEvent[] {
   const message = event.message as Record<string, unknown> | undefined;
   if (message?.role === "tool" && typeof message.toolCallId === "string") {
     const isError = message.isError === true;
@@ -41,7 +41,7 @@ function decodeMessageEnd(event: Record<string, unknown>): SubagentEvent[] {
     : (typeof event.usage === "object" && event.usage !== null)
       ? event.usage
       : undefined;
-  if (rawUsage && typeof rawUsage === "object") {
+  if (includeUsage && rawUsage && typeof rawUsage === "object") {
     usageEvents.push({ type: "usage", usage: rawUsage as NonNullable<SubagentRun["usage"]> });
   }
 
@@ -60,7 +60,7 @@ function decodeMessageEnd(event: Record<string, unknown>): SubagentEvent[] {
     if (typeof part !== "object" || part === null) return [];
 
     const value = part as Record<string, unknown>;
-    if (value.type === "thinking" && typeof value.text === "string") return [{ type: "thinking", text: value.text, contentIndex }];
+    if (value.type === "thinking" && typeof value.text === "string") return [{ type: "thinking", text: value.text, contentIndex, ...(messageId !== undefined && messageId > 1 ? { messageId } : {}) }];
     if (value.type === "text" && typeof value.text === "string") return [{ type: "result", text: value.text }];
     if (value.type === "toolCall" && typeof value.id === "string" && typeof value.name === "string") {
       const args = parseToolArguments(value.arguments ?? value.args);
@@ -105,6 +105,7 @@ export type InFlightBlock =
 function decodeAssistantMessageEvent(
   ame: Record<string, unknown>,
   inFlightBlocks?: Map<number, InFlightBlock>,
+  messageId?: number,
 ): SubagentEvent[] {
   const contentIndex = typeof ame.contentIndex === "number" ? ame.contentIndex : 0;
   const ameType = typeof ame.type === "string" ? ame.type : "";
@@ -125,7 +126,7 @@ function decodeAssistantMessageEvent(
         inFlightBlocks?.set(contentIndex, block);
       }
       block.text += delta;
-      return [{ type: "thinking", text: block.text, contentIndex }];
+      return [{ type: "thinking", text: block.text, contentIndex, ...(messageId !== undefined && messageId > 1 ? { messageId } : {}) }];
     }
     case "thinking_end": {
       let block = inFlightBlocks?.get(contentIndex);
@@ -138,7 +139,7 @@ function decodeAssistantMessageEvent(
       }
       const text = block?.type === "thinking" ? block.text : (typeof ame.content === "string" ? ame.content : "");
       inFlightBlocks?.delete(contentIndex);
-      return [{ type: "thinking", text, contentIndex }];
+      return [{ type: "thinking", text, contentIndex, ...(messageId !== undefined && messageId > 1 ? { messageId } : {}) }];
     }
     case "text_start": {
       inFlightBlocks?.set(contentIndex, { type: "text", text: "" });
@@ -225,6 +226,7 @@ function decodeAssistantMessageEvent(
 export function decodePiEvent(
   value: unknown,
   inFlightBlocks?: Map<number, InFlightBlock>,
+  messageId?: number,
 ): SubagentEvent[] {
   if (typeof value !== "object" || value === null) {
     return [{ type: "diagnostic", message: "Pi JSON event must be an object" }];
@@ -240,7 +242,7 @@ export function decodePiEvent(
   if (event.type === "message_update") {
     const ame = event.assistantMessageEvent as Record<string, unknown> | undefined;
     if (ame && typeof ame.type === "string") {
-      return decodeAssistantMessageEvent(ame, inFlightBlocks);
+      return decodeAssistantMessageEvent(ame, inFlightBlocks, messageId);
     }
     const message = event.message as Record<string, unknown> | undefined;
     if (message?.role === "assistant" || message?.role === "tool") return decodeMessageEnd(event);
@@ -249,23 +251,11 @@ export function decodePiEvent(
 
   if (event.type === "message_end") {
     inFlightBlocks?.clear();
-    return decodeMessageEnd(event);
+    return decodeMessageEnd(event, messageId);
   }
 
   if (event.type === "turn_end") {
     inFlightBlocks?.clear();
-    const message = event.message as Record<string, unknown> | undefined;
-    if (message?.role === "assistant" || message?.role === "tool") {
-      return decodeMessageEnd(event);
-    }
-    const rawUsage = (typeof message?.usage === "object" && message.usage !== null)
-      ? message.usage
-      : (typeof event.usage === "object" && event.usage !== null)
-        ? event.usage
-        : undefined;
-    if (rawUsage && typeof rawUsage === "object") {
-      return [{ type: "usage", usage: rawUsage as NonNullable<SubagentRun["usage"]> }];
-    }
     return [];
   }
 
@@ -289,7 +279,7 @@ export function decodePiEvent(
         .reverse()
         .find((m): m is Record<string, unknown> => typeof m === "object" && m !== null && m.role === "assistant");
       if (lastAssistant) {
-        events.push(...decodeMessageEnd({ type: "message_end", message: lastAssistant }));
+        events.push(...decodeMessageEnd({ type: "message_end", message: lastAssistant }, messageId, false));
       }
       return events;
     }
@@ -316,6 +306,8 @@ export function decodePiEvent(
 export class PiJsonDecoder {
   private buffer = "";
   private inFlightBlocks = new Map<number, InFlightBlock>();
+  private messageId = 0;
+  private messageActive = false;
 
   push(chunk: Buffer | string, final = false): SubagentEvent[] {
     this.buffer += chunk.toString();
@@ -337,9 +329,20 @@ export class PiJsonDecoder {
 
   private decodeLine(line: string): SubagentEvent[] {
     if (!line.trim()) return [];
+    if (line.length > MAX_DECODER_BUFFER_CHARS) {
+      return [{ type: "diagnostic", message: "Pi JSON line exceeded decoder limit and was discarded" }];
+    }
 
     try {
-      return decodePiEvent(JSON.parse(line), this.inFlightBlocks);
+      const value: unknown = JSON.parse(line);
+      const type = typeof value === "object" && value !== null ? (value as Record<string, unknown>).type : undefined;
+      if (type === "message_start" || (type === "message_update" && !this.messageActive) || (type === "message_end" && !this.messageActive)) {
+        this.messageId++;
+        this.messageActive = true;
+      }
+      const events = decodePiEvent(value, this.inFlightBlocks, this.messageId);
+      if (type === "message_end" || type === "turn_end" || type === "agent_end") this.messageActive = false;
+      return events;
     } catch {
       return [{ type: "diagnostic", message: `Malformed Pi JSON: ${line.slice(0, 200)}` }];
     }

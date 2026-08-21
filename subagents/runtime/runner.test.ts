@@ -75,7 +75,7 @@ test("researcher child arguments isolate the child and use exactly its allowlist
   assert.equal(args[args.indexOf("--extension") + 1]?.endsWith("subagents/agents/researcher/extension.ts"), true);
   assert.equal(args[args.indexOf("--tools") + 1], "read,exa_web_search_exa,exa_get_code_context_exa,exa_research_paper_exa,exa_crawling_exa,context7_resolve_library_id,context7_query_docs,gh_grep_searchGitHub");
   assert.equal(args.join(",").match(/\b(?:bash|edit|write)\b/), null);
-  assert.equal(RESEARCHER_SYSTEM_PROMPT, "Investigate the delegated research question and return concise, evidence-backed findings.");
+  assert.equal(args[args.indexOf("--append-system-prompt") + 1], RESEARCHER_SYSTEM_PROMPT);
 });
 
 test("decoder and reducer bound retained data and aggregate multipart reports", () => {
@@ -253,7 +253,7 @@ test("in-flight blocks are reset on turn_end, message_start, and agent_end", () 
     assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "fresh thought" },
   }) + "\n");
 
-  assert.deepEqual(events, [{ type: "thinking", text: "fresh thought", contentIndex: 0 }]);
+  assert.deepEqual(events, [{ type: "thinking", text: "fresh thought", contentIndex: 0, messageId: 2 }]);
 });
 
 test("compatibility tool result keeps message error state", () => {
@@ -337,7 +337,7 @@ test("nonzero stderr is bounded and abort escalates then cleans listeners", asyn
   assert.equal(hanging.stderr.listenerCount("data"), 0);
 });
 
-test("decoder emits usage event on message_end and turn_end", () => {
+test("decoder emits usage only once from message_end", () => {
   const decoder = new PiJsonDecoder();
   const messageEndEvents = decoder.push(
     JSON.stringify({
@@ -373,32 +373,38 @@ test("decoder emits usage event on message_end and turn_end", () => {
       },
     }) + "\n",
   );
-  assert.deepEqual(turnEndEvents, [
-    {
-      type: "usage",
-      usage: { input: 50, output: 25 },
-    },
-  ]);
+  assert.deepEqual(turnEndEvents, []);
+
+  const agentEndEvents = decoder.push(JSON.stringify({
+    type: "agent_end",
+    messages: [{ role: "assistant", content: [], usage: { input: 100, output: 50 } }],
+  }) + "\n");
+  assert.equal(agentEndEvents.some((event) => event.type === "usage"), false);
 });
 
-test("reduceSubagentEvent keeps the latest cumulative usage snapshot instead of summing", () => {
+test("reduceSubagentEvent sums per-message usage and every numeric cost field", () => {
   let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, items: [] };
   const usage = {
     input: 1000,
     output: 500,
     cacheRead: 200,
     cacheWrite: 100,
+    cacheWrite1h: 40,
+    reasoning: 300,
     totalTokens: 1800,
     cost: { total: 1.5, input: 0.5, output: 1.0 },
   };
 
-  // The same cumulative snapshot is surfaced at several lifecycle events.
-  for (let i = 0; i < 3; i++) {
-    run = reduceSubagentEvent(run, { type: "usage", usage }, i * 1000);
-  }
+  run = reduceSubagentEvent(run, { type: "usage", usage }, 1_000);
+  run = reduceSubagentEvent(run, { type: "usage", usage: {
+    input: 20, output: 10, cacheRead: 5, cacheWrite: 2, cacheWrite1h: 1, reasoning: 4, totalTokens: 37,
+    cost: { input: 0.1, output: 0.2, cacheRead: 0.03, cacheWrite: 0.04, total: 0.37 },
+  } }, 2_000);
 
-  assert.equal(run.usage?.input, 1000); // not 3000
-  assert.deepEqual(run.usage, usage);
+  assert.deepEqual(run.usage, {
+    input: 1020, output: 510, cacheRead: 205, cacheWrite: 102, cacheWrite1h: 41, reasoning: 304, totalTokens: 1837,
+    cost: { input: 0.6, output: 1.2, cacheRead: 0.03, cacheWrite: 0.04, total: 1.87 },
+  });
 });
 
 test("thinking deltas are incremental and accumulate into one retained item", () => {
@@ -424,6 +430,28 @@ test("thinking deltas are incremental and accumulate into one retained item", ()
     { kind: "thinking", text: "Hello", contentIndex: 0 },
     { kind: "thinking", text: "Another reasoning block", contentIndex: 1 },
   ]);
+});
+
+test("thinking content indexes are scoped to an assistant message", () => {
+  const decoder = new PiJsonDecoder();
+  let run: SubagentRun = { status: "running", startedAt: 0, items: [] };
+  for (const text of ["first", "second"]) {
+    const input = [
+      { type: "message_start" },
+      { type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: text } },
+      { type: "message_end", message: { role: "assistant", content: [{ type: "thinking", text }] } },
+    ].map((event) => JSON.stringify(event)).join("\n") + "\n";
+    for (const event of decoder.push(input)) run = reduceSubagentEvent(run, event);
+  }
+  assert.deepEqual(run.items.map((item) => item.kind === "thinking" ? item.text : ""), ["first", "second"]);
+});
+
+test("decoder discards an oversized complete line without parsing it", () => {
+  const decoder = new PiJsonDecoder();
+  const oversized = JSON.stringify({ type: "message_end", message: { role: "assistant", content: "x".repeat(MAX_DECODER_BUFFER_CHARS) } });
+  const events = decoder.push(oversized + "\n" + JSON.stringify({ type: "message_end", message: { role: "assistant", content: "ok" } }) + "\n");
+  assert.equal(events[0]?.type, "diagnostic");
+  assert.deepEqual(events.filter((event) => event.type === "result"), [{ type: "result", text: "ok" }]);
 });
 
 test("cumulative streaming snapshots do not consume retained history", () => {

@@ -18,9 +18,11 @@ export const workerParameters = Type.Object({
     Type.Array(Type.String(), { description: "Files likely to change." }),
   ),
   findings: Type.Optional(
-    Type.String({ description: "Facts or prior investigation the worker should build on." }),
+    Type.String({ description: "Confirmed facts, invariants, or prior investigation to build on." }),
   ),
-  verification: Type.Optional(Type.String({ description: "How to verify the change." })),
+  verification: Type.Optional(
+    Type.String({ description: "Expected behavior and focused checks that prove the change." }),
+  ),
 });
 
 /** Serializes the structured worker input into the user input sent to the child pi. */

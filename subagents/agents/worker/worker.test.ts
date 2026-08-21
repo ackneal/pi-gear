@@ -17,6 +17,10 @@ test("worker profile, prompt, and capabilities match specification", () => {
   assert.equal(workerProfile.label, "worker");
   assert.equal(workerProfile.description, "Delegate a bounded implementation task to an isolated Pi subprocess.");
   assert.equal(workerProfile.systemPrompt, WORKER_SYSTEM_PROMPT);
+  assert.match(WORKER_SYSTEM_PROMPT, /only the delegated scope/);
+  assert.match(WORKER_SYSTEM_PROMPT, /authoritative code and types/);
+  assert.match(WORKER_SYSTEM_PROMPT, /focused checks/);
+  assert.match(WORKER_SYSTEM_PROMPT, /changed, disproven, or blocked/);
   assert.deepEqual(workerProfile.capabilities, WORKER_CAPABILITIES);
   assert.deepEqual(WORKER_CAPABILITIES, [
     { kind: "builtin", name: "read" },

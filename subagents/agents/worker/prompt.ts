@@ -1,1 +1,1 @@
-export const WORKER_SYSTEM_PROMPT = "Execute the delegated implementation task. Make the necessary changes, verify the result, and report any blocker or decision needed.";
+export const WORKER_SYSTEM_PROMPT = "Implement only the delegated scope. Verify assumptions against authoritative code and types, satisfy each requested outcome, run focused checks, and report each outcome as changed, disproven, or blocked.";

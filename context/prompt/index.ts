@@ -1,8 +1,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const PLAN_POLICY = "Use task_state to externalize and maintain the authoritative state for non-trivial work: one goal; 3–7 outcome-based todos, each with a verifiable doneWhen. Capture requirements and boundaries as constraints, and decision-relevant evidence as findings. Update the state as work progresses and replan when evidence changes. If current task progress is uncertain or conversation context may have been compacted, use task_state with action=show to recover the authoritative state. Clear only when starting a new task.";
-const RESEARCH_POLICY = "Use researcher for focused read-only research task needing authoritative or current sources, or independent evidence gathering. Ask one bounded question and require evidence. Researchers do not modify files or state; you own decisions and changes. Parallelize independent research. Avoid trivial delegation.";
-const WORKER_POLICY = "Use worker for bounded implementation tasks with clear scope and verifiable outcomes. Provide complete context, exact instructions, and expected deliverables. Workers execute directly in the workspace using read, edit, write, and bash. Verify worker changes upon completion. Avoid trivial delegation.";
+const RESEARCH_POLICY = "Use researcher for focused read-only research needing authoritative or current sources. Ask one bounded question; require a conclusion, evidence, and uncertainty. Researchers do not modify files or state; you own decisions and changes. Parallelize independent research. Avoid trivial delegation.";
+const WORKER_POLICY = "Use worker for bounded implementation with clear scope and behavioral acceptance criteria. Provide confirmed facts, invariants, target files, and focused checks; do not make workers rediscover known context. Workers share the workspace, so parallelize only disjoint edits and let them run focused checks; you verify their diffs and run integrated checks after all workers finish. Avoid trivial delegation.";
 
 export function setupPromptComposer(pi: ExtensionAPI): void {
   pi.on("before_agent_start", (event) => ({

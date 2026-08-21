@@ -52,9 +52,11 @@ test("plan guidance contains planning semantics and recovery instruction", () =>
   assert.doesNotMatch(prompt, /continu|stop|blocker|final response/i);
 });
 
-test("worker guidance contains bounded implementation instructions", () => {
-  const prompt = composePrompt(base, ["worker"]);
-  assert.match(prompt, /Use worker for bounded implementation tasks with clear scope and verifiable outcomes/);
-  assert.match(prompt, /Workers execute directly in the workspace using read, edit, write, and bash/);
-  assert.match(prompt, /Verify worker changes upon completion/);
+test("delegation guidance separates focused worker checks from parent integration", () => {
+  const prompt = composePrompt(base, ["researcher", "worker"]);
+  assert.match(prompt, /Ask one bounded question; require a conclusion, evidence, and uncertainty/);
+  assert.match(prompt, /clear scope and behavioral acceptance criteria/);
+  assert.match(prompt, /confirmed facts, invariants, target files, and focused checks/);
+  assert.match(prompt, /parallelize only disjoint edits/);
+  assert.match(prompt, /verify their diffs and run integrated checks after all workers finish/);
 });
