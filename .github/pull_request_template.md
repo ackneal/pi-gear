@@ -1,4 +1,10 @@
-# feat(subagents): add worker orchestration and transcript detail view
+<!--
+PR title format:
+<type>(<scope>): <imperative summary>
+
+Example:
+feat(subagents): add worker orchestration and transcript detail view
+-->
 
 ## Summary
 <!-- Concise summary of what this PR does. -->
