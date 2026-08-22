@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bridgeToolName, type CapabilitySpec } from "../../capabilities/index.ts";
-import type { SubagentProfile } from "./types.ts";
+import type { SubagentDispatch, SubagentProfile } from "./types.ts";
 
 export const MAX_OUTPUT_CHARS = 32_000;
 export const KILL_TIMEOUT_MS = 1_000;
@@ -29,11 +29,13 @@ export function capabilityToolNames(capabilities: readonly CapabilitySpec[]): st
   return capabilities.flatMap((capability) => capability.kind === "builtin" ? [capability.name] : capability.tools.map((tool) => bridgeToolName(capability.id, tool.name)));
 }
 
-export function childArgs(profile: SubagentProfile, task: string, childExtension: URL): string[] {
+export function childArgs(profile: SubagentProfile, task: string, childExtension: URL, dispatch?: SubagentDispatch): string[] {
   return [
     "--mode",
     "json",
     "--no-session",
+    ...(dispatch?.model ? ["--model", dispatch.model] : []),
+    ...(dispatch?.thinkingLevel ? ["--thinking", dispatch.thinkingLevel] : []),
     "--no-extensions",
     "--no-skills",
     "--no-prompt-templates",
@@ -54,9 +56,10 @@ export function spawnPiChild(
   childExtension: URL,
   spawnProcess: SpawnProcess = spawn,
   cwd: string = process.cwd(),
+  dispatch?: SubagentDispatch,
 ): ChildProcess {
   const invocation = resolvePiInvocation();
-  return spawnProcess(invocation.command, [...invocation.prefixArgs, ...childArgs(profile, task, childExtension)], {
+  return spawnProcess(invocation.command, [...invocation.prefixArgs, ...childArgs(profile, task, childExtension, dispatch)], {
     cwd,
     stdio: ["ignore", "pipe", "pipe"],
   });

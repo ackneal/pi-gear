@@ -64,7 +64,10 @@ test("child process inherits the active session cwd", () => {
 });
 
 test("researcher child arguments isolate the child and use exactly its allowlist", () => {
-  const args = childArgs(researcherProfile, "inspect", new URL("../agents/researcher/extension.ts", import.meta.url));
+  const args = childArgs(researcherProfile, "inspect", new URL("../agents/researcher/extension.ts", import.meta.url), {
+    model: "openai/gpt-test",
+    thinkingLevel: "high",
+  });
   assert.ok(
     args.includes("--no-session") &&
     args.includes("--no-extensions") &&
@@ -76,6 +79,8 @@ test("researcher child arguments isolate the child and use exactly its allowlist
   assert.equal(args[args.indexOf("--tools") + 1], "read,exa_web_search_exa,exa_get_code_context_exa,exa_research_paper_exa,exa_crawling_exa,context7_resolve_library_id,context7_query_docs,gh_grep_searchGitHub");
   assert.equal(args.join(",").match(/\b(?:bash|edit|write)\b/), null);
   assert.equal(args[args.indexOf("--append-system-prompt") + 1], RESEARCHER_SYSTEM_PROMPT);
+  assert.equal(args[args.indexOf("--model") + 1], "openai/gpt-test");
+  assert.equal(args[args.indexOf("--thinking") + 1], "high");
 });
 
 test("decoder and reducer bound retained data and aggregate multipart reports", () => {
@@ -114,12 +119,14 @@ test("decodes the minimized Pi JSON-mode transcript", async () => {
 
 test("child returns a final report and rejects an empty successful result", async () => {
   const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), kill: () => true });
-  const result = runChildSubagent({ task: "inspect", profile, childExtension: new URL("./runner.test.ts", import.meta.url), spawnChild: () => child as never, onUpdate: () => {} });
+  const result = runChildSubagent({ task: "inspect", profile, dispatch: { model: "provider/model", thinkingLevel: "low" }, childExtension: new URL("./runner.test.ts", import.meta.url), spawnChild: () => child as never, onUpdate: () => {} });
 
   child.stdout.emit("data", Buffer.from('{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"report"}]}}\n'));
   child.emit("close", 0);
 
-  assert.equal((await result).status, "success");
+  const completed = await result;
+  assert.equal(completed.status, "success");
+  assert.deepEqual(completed.dispatch, { model: "provider/model", thinkingLevel: "low" });
 
   const empty = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), kill: () => true });
   const failed = runChildSubagent({ task: "inspect", profile, childExtension: new URL("./runner.test.ts", import.meta.url), spawnChild: () => empty as never, onUpdate: () => {} });
