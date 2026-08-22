@@ -256,6 +256,19 @@ export function formatDetailContent(
 
 export const BOTTOM_SECTION_HEIGHT = 4;
 
+function formatDispatch(run: SubagentRun | undefined): string | undefined {
+  const model = run?.dispatch?.model;
+  if (!model) return undefined;
+
+  const separator = model.indexOf("/");
+  const provider = separator > 0 ? model.slice(0, separator) : undefined;
+  const modelId = separator > 0 ? model.slice(separator + 1) : model;
+  const identity = provider ? `(${provider}) ${modelId}` : modelId;
+  return run.dispatch?.thinkingLevel
+    ? `${identity} • ${run.dispatch.thinkingLevel}`
+    : identity;
+}
+
 export function frameDetailBox(
   contentLines: string[],
   entryOrTitle: SubagentViewEntry | string,
@@ -372,11 +385,13 @@ export function frameDetailBox(
   }
 
   const scrollPart = scrollInfo ? ` · ${scrollInfo}` : "";
+  const run = entry?.run;
+  const dispatch = formatDispatch(run);
+  const dispatchPart = dispatch ? ` · ${dispatch}` : "";
   const leftFooter =
     theme.fg("accent", agentLabel) +
-    theme.fg("muted", ` · ${toolStr}${scrollPart}`);
+    theme.fg("muted", `${dispatchPart} · ${toolStr}${scrollPart}`);
 
-  const run = entry?.run;
   const startedAt = run?.startedAt ?? now;
   const finishedAt = run?.finishedAt ?? now;
   const elapsed = Math.max(0, finishedAt - startedAt);

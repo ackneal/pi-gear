@@ -685,6 +685,7 @@ test("Test 14: Single Footer line renders subagent label, tool counts, scroll in
     run: {
       status: "running",
       startedAt: 0,
+      dispatch: { model: "openai-codex/gpt-5.6-sol", thinkingLevel: "low" },
       items: [
         { kind: "tool", name: "tool1", status: "success" },
         { kind: "tool", name: "tool2", status: "success" },
@@ -705,8 +706,10 @@ test("Test 14: Single Footer line renders subagent label, tool counts, scroll in
         1_000,
   );
 
-  // Footer has "Worker · 2/3 tools · 1 failed · [3-8/20]" on left and "1s" on right
-  assert.match(linesWithTools[9] ?? "", /^Worker · 2\/3 tools · 1 failed · \[3-8\/20\]/);
+  assert.match(
+    linesWithTools[9] ?? "",
+    /^Worker · \(openai-codex\) gpt-5\.6-sol • low · 2\/3 tools · 1 failed · \[3-8\/20\]/,
+  );
   assert.match(linesWithTools[9] ?? "", /1s$/);
 });
 
