@@ -103,7 +103,7 @@ test("the OS temp dir becomes a runtime writable root", async () => {
   }
 });
 
-test("only the current process TMPDIR root is writable among its siblings", async () => {
+test("only the OS temp dir root is writable among its siblings", async () => {
   const parent = await mkdtemp(join(tmpdir(), "pi-gear-siblings-"));
   const tempRoot = join(parent, "current");
   const sibling = join(parent, "other");
