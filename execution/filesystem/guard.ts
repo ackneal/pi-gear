@@ -11,7 +11,7 @@ import {
   type FilesystemOperation,
 } from "../policy/filesystem.ts";
 import { loadExtensionConfig } from "../../config/index.ts";
-import { resolveRuntimeTempDir } from "../sandbox/config.ts";
+import { resolveRuntimeTempDir, type TempDirSource } from "../sandbox/config.ts";
 import {
   canonicalizeWorkspace,
   normalizeToolPath,
@@ -76,19 +76,22 @@ const block = (
   return { block: true as const, reason };
 };
 
-export function setupFilesystemGuard(pi: ExtensionAPI): void {
+export function setupFilesystemGuard(
+  pi: ExtensionAPI,
+  options: { readonly tempSource?: TempDirSource } = {},
+): void {
   const workspaces = new Map<string, Promise<CanonicalWorkspace>>();
   const warnedTools = new Set<string>();
 
   let tempPrefixes: Promise<readonly string[]> | undefined;
 
-  // Mirrors the sandbox's runtime $TMPDIR exception: temp files such as
-  // clipboard images should not trigger the outside-workspace prompt.
+  // Mirrors the sandbox's runtime temp exception (getconf DARWIN_USER_TEMP_DIR):
+  // clipboard images and build artifacts should not trigger the outside-workspace
+  // prompt. Only the exact resolved directory is trusted, never /var/folders/**.
   const withinTempDir = async (path: string): Promise<boolean> => {
     if (tempPrefixes === undefined) {
-      tempPrefixes = resolveRuntimeTempDir().then((temp) => [
-        ...new Set([process.env.TMPDIR?.trim(), temp.path].filter((p): p is string => p !== undefined && p !== "")),
-      ]);
+      const resolved = options.tempSource !== undefined ? { source: options.tempSource } : {};
+      tempPrefixes = resolveRuntimeTempDir(resolved).then((temp) => (temp.path !== undefined ? [temp.path] : []));
     }
     const prefixes = await tempPrefixes;
     return prefixes.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));

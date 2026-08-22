@@ -182,7 +182,7 @@ test("recursive filesystem tools warn once per session when Pi enables them", as
   ]);
 });
 
-test("current process TMPDIR access skips the outside-workspace prompt", async () => {
+test("current process temp dir access skips the outside-workspace prompt", async () => {
   const root = await mkdtemp(join(process.cwd(), ".pi-gear-guard-temp-"));
   const tempRoot = join(root, "tmpdir");
   const workspace = join(root, "workspace");
@@ -193,14 +193,10 @@ test("current process TMPDIR access skips the outside-workspace prompt", async (
     },
     sendMessage: () => undefined,
   } as unknown as ExtensionAPI;
-  const originalTmpdir = process.env.TMPDIR;
   try {
     await Promise.all([mkdir(tempRoot), mkdir(workspace)]);
     await writeFile(join(tempRoot, "clipboard.png"), "image");
-    // Point TMPDIR away from /tmp so the exception is exercised even where
-    // a configured /tmp/** rule would already allow access.
-    process.env.TMPDIR = tempRoot;
-    setupFilesystemGuard(pi);
+    setupFilesystemGuard(pi, { tempSource: async () => `${tempRoot}/` });
     assert.ok(handler);
     const ctx = { cwd: workspace, hasUI: false } as ExtensionContext;
 
@@ -216,8 +212,6 @@ test("current process TMPDIR access skips the outside-workspace prompt", async (
       ctx,
     ).then((result) => assert.equal(result, undefined));
   } finally {
-    if (originalTmpdir === undefined) delete process.env.TMPDIR;
-    else process.env.TMPDIR = originalTmpdir;
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -234,12 +228,10 @@ test("sibling temp roots still require confirmation", async () => {
     },
     sendMessage: () => undefined,
   } as unknown as ExtensionAPI;
-  const originalTmpdir = process.env.TMPDIR;
   try {
     await Promise.all([mkdir(tempRoot), mkdir(sibling), mkdir(workspace)]);
     await writeFile(join(sibling, "file.txt"), "x");
-    process.env.TMPDIR = tempRoot;
-    setupFilesystemGuard(pi);
+    setupFilesystemGuard(pi, { tempSource: async () => tempRoot });
     assert.ok(handler);
 
     assert.deepEqual(
@@ -250,8 +242,6 @@ test("sibling temp roots still require confirmation", async () => {
       { block: true, reason: "Access outside the workspace requires confirmation." },
     );
   } finally {
-    if (originalTmpdir === undefined) delete process.env.TMPDIR;
-    else process.env.TMPDIR = originalTmpdir;
     await rm(root, { recursive: true, force: true });
   }
 });

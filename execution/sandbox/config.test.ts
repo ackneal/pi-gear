@@ -81,11 +81,15 @@ const tmpOptInPolicy: AccessPolicy = {
   filesystem: { ...barePolicy.filesystem, rules: [{ path: "/tmp/**", access: "read-write", follow: true }] },
 };
 
-test("TMPDIR becomes a runtime writable root", async () => {
+test("the OS temp dir becomes a runtime writable root", async () => {
   const tempRoot = await mkdtemp(join(tmpdir(), "pi-gear-tmpdir-"));
   try {
-    const { path } = await resolveRuntimeTempDir({ TMPDIR: tempRoot });
+    const { path } = await resolveRuntimeTempDir({ source: async () => tempRoot });
     assert.equal(path, await realpath(tempRoot));
+
+    // getconf-style trailing slash resolves to the same canonical directory.
+    const slashed = await resolveRuntimeTempDir({ source: async () => `${tempRoot}/` });
+    assert.equal(slashed.path, path);
 
     const workspace = join(tempRoot, "workspace");
     const config = createSandboxConfig(workspace, barePolicy, { tempDir: path });
@@ -103,7 +107,7 @@ test("only the current process TMPDIR root is writable among its siblings", asyn
   const sibling = join(parent, "other");
   await Promise.all([mkdir(tempRoot), mkdir(sibling)]);
   try {
-    const { path } = await resolveRuntimeTempDir({ TMPDIR: tempRoot });
+    const { path } = await resolveRuntimeTempDir({ source: async () => tempRoot });
     assert.ok(path);
     const config = createSandboxConfig("/workspace", barePolicy, { tempDir: path });
 
@@ -142,7 +146,7 @@ test("canonical /private/tmp selectors deduplicate against configured /tmp", () 
   assert.equal(config.filesystem.allowWrite?.filter((entry) => entry === "/private/tmp/**").length, 1);
 });
 
-test("TMPDIR resolution skips invalid values with a warning", async () => {
+test("temp dir resolution skips invalid values with a warning", async () => {
   const notADirectory = await mkdtemp(join(tmpdir(), "pi-gear-invalid-"));
   const filePath = join(notADirectory, "file.txt");
   await writeFile(filePath, "x");
@@ -152,7 +156,7 @@ test("TMPDIR resolution skips invalid values with a warning", async () => {
     readonly value?: string;
     readonly expectedWarning?: RegExp;
   }[] = [
-    { name: "unset" },
+    { name: "unset behaves like no temp dir" },
     { name: "blank behaves like unset", value: "" },
     { name: "whitespace-only behaves like unset", value: "   " },
     { name: "relative path", value: "relative/tmp", expectedWarning: /absolute/ },
@@ -162,7 +166,7 @@ test("TMPDIR resolution skips invalid values with a warning", async () => {
 
   try {
     for (const { name, value, expectedWarning } of cases) {
-      const result = await resolveRuntimeTempDir(value === undefined ? {} : { TMPDIR: value });
+      const result = await resolveRuntimeTempDir({ source: async () => value });
       assert.equal(result.path, undefined, name);
       if (expectedWarning !== undefined) assert.match(result.warning ?? "", expectedWarning, name);
       else assert.equal(result.warning, undefined, name);
@@ -172,7 +176,7 @@ test("TMPDIR resolution skips invalid values with a warning", async () => {
   }
 });
 
-test("TMPDIR /tmp alias normalizes to /private/tmp on darwin only", async () => {
+test("/tmp alias normalizes to /private/tmp on darwin only", async () => {
   const aliasCases: readonly (readonly [string, NodeJS.Platform, string])[] = [
     ["/tmp", "darwin", "/private/tmp"],
     ["/tmp/nested", "darwin", "/private/tmp/nested"],
@@ -186,7 +190,17 @@ test("TMPDIR /tmp alias normalizes to /private/tmp on darwin only", async () => 
   }
 
   // A missing aliased path must surface the canonical spelling in its warning.
-  const aliased = await resolveRuntimeTempDir({ TMPDIR: "/tmp/pi-gear-alias" }, "darwin");
+  const aliased = await resolveRuntimeTempDir({ platform: "darwin", source: async () => "/tmp/pi-gear-alias" });
   assert.equal(aliased.path, undefined);
   assert.match(aliased.warning ?? "", /private\/tmp/);
+});
+
+test("a failing temp dir source degrades to a warning", async () => {
+  const failed = await resolveRuntimeTempDir({
+    source: async () => {
+      throw new Error("getconf exploded");
+    },
+  });
+  assert.equal(failed.path, undefined);
+  assert.match(failed.warning ?? "", /getconf exploded/);
 });

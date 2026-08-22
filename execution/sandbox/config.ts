@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process";
 import { readdir, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
+import { promisify } from "node:util";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { matchesFilesystemSelector, selectorPath } from "../policy/filesystem.ts";
 import type { AccessPolicy } from "../../config/types.ts";
@@ -21,26 +23,50 @@ export interface RuntimeTempDir {
   readonly warning?: string;
 }
 
+/** Supplies the raw OS temp directory spelling; the platform default is preferred over trusting $TMPDIR. */
+export type TempDirSource = () => Promise<string | undefined>;
+
+// confstr(_CS_DARWIN_USER_TEMP_DIR): the OS's own per-user temp directory,
+// immune to a spoofed or stale TMPDIR in the process environment.
+const getconfTempDirSource: TempDirSource = async () => {
+  const { stdout } = await promisify(execFile)("getconf", ["DARWIN_USER_TEMP_DIR"]);
+  return stdout.trim();
+};
+
+const envTempDirSource = (): TempDirSource => async () => process.env.TMPDIR?.trim();
+
+export interface RuntimeTempOptions {
+  readonly platform?: NodeJS.Platform;
+  readonly source?: TempDirSource;
+}
+
 /**
- * Validates $TMPDIR as a runtime writable root. Failures degrade to a warning,
- * never a sandbox startup failure.
+ * Validates the OS temp directory as the implicit writable root. Failures
+ * degrade to a warning, never a sandbox startup failure.
  */
-export const resolveRuntimeTempDir = async (
-  env: Readonly<Record<string, string | undefined>> = process.env,
-  platform: NodeJS.Platform = process.platform,
-): Promise<RuntimeTempDir> => {
-  const raw = env.TMPDIR?.trim();
+export const resolveRuntimeTempDir = async (options: RuntimeTempOptions = {}): Promise<RuntimeTempDir> => {
+  const platform = options.platform ?? process.platform;
+  const source = options.source ?? (platform === "darwin" ? getconfTempDirSource : envTempDirSource());
+
+  let raw: string | undefined;
+  try {
+    // Trim surrounding whitespace and getconf's trailing slash for clean prefix checks.
+    raw = (await source())?.trim().replace(/\/+$/, "");
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { warning: `Ignoring temp directory: ${reason}` };
+  }
   if (!raw) return {};
-  if (!isAbsolute(raw)) return { warning: `Ignoring TMPDIR (${raw}): not an absolute path` };
+  if (!isAbsolute(raw)) return { warning: `Ignoring temp directory (${raw}): not an absolute path` };
   try {
     const canonical = await realpath(normalizeTempAlias(raw, platform));
     if (!(await stat(canonical)).isDirectory()) {
-      return { warning: `Ignoring TMPDIR (${raw}): not a directory` };
+      return { warning: `Ignoring temp directory (${raw}): not a directory` };
     }
     return { path: canonical };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    return { warning: `Ignoring TMPDIR (${raw}): ${reason}` };
+    return { warning: `Ignoring temp directory (${raw}): ${reason}` };
   }
 };
 
