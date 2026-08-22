@@ -1,6 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SubagentDetailComponent } from "./component.ts";
-import { enableClearOnShrink, formatDuration, titleCase } from "./format.ts";
+import { formatDuration, titleCase } from "./format.ts";
 import {
   getAllSubagentEntries,
   getSubagentEntry,
@@ -62,7 +62,18 @@ export async function openSubagentDetailOverlay(
 
   await ctx.ui.custom(
     (tui, theme, _keybindings, done) => {
-      enableClearOnShrink(tui);
+      const clearable = tui as unknown as {
+        getClearOnShrink?: () => boolean;
+        setClearOnShrink?: (value: boolean) => void;
+      };
+      const previousClearOnShrink = clearable.getClearOnShrink?.();
+      clearable.setClearOnShrink?.(true);
+      let restored = false;
+      const restore = () => {
+        if (restored) return;
+        restored = true;
+        if (previousClearOnShrink !== undefined) clearable.setClearOnShrink?.(previousClearOnShrink);
+      };
 
       const allEntries = getAllSubagentEntries();
       const startIndex = Math.max(
@@ -72,7 +83,10 @@ export async function openSubagentDetailOverlay(
       const component = new SubagentDetailComponent({
         entry: entryToDisplay,
         theme,
-        onClose: () => done(undefined),
+        onClose: () => {
+          restore();
+          done(undefined);
+        },
         invalidate: () => tui.requestRender(),
         entries: allEntries,
         index: startIndex,
@@ -84,6 +98,7 @@ export async function openSubagentDetailOverlay(
         handleInput: (data: string) => component.handleInput(data),
         invalidate: () => component.invalidate(),
         dispose: () => {
+          restore();
           component.dispose();
           tui.requestRender();
         },

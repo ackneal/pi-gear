@@ -91,176 +91,22 @@ test("decoder and reducer bound retained data and aggregate multipart reports", 
   assert.ok(lastItem && lastItem.kind === "thinking" && lastItem.text.endsWith(TRUNCATION_MARKER));
 });
 
-test("decoder streams assistantMessageEvent deltas (thinking, text, tool calls) and message_end authoritative snapshot", () => {
-  const decoder = new PiJsonDecoder();
-  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, items: [] };
+test("decodes the checked-in Pi 0.84.1 JSON-mode transcript", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const jsonl = await readFile(new URL("./fixtures/pi-0.84.1-json-mode.jsonl", import.meta.url), "utf8");
+  const events = new PiJsonDecoder().push(jsonl, true);
+  assert.ok(events.some((event) => event.type === "thinking" && event.text === "Inspecting code"));
+  assert.ok(events.some((event) => event.type === "result" && event.text === "Final report"));
+  assert.ok(events.some((event) => event.type === "tool_start" && event.id === "call_42"));
+  assert.ok(events.some((event) => event.type === "tool_end" && event.id === "call_bad" && event.isError));
+  assert.equal(events.filter((event) => event.type === "usage").length, 2);
 
-  // message_start clears state
-  let events = decoder.push(JSON.stringify({ type: "message_start" }) + "\n");
-  assert.deepEqual(events, []);
-
-  // thinking stream
-  events = decoder.push(JSON.stringify({
-    type: "message_update",
-    assistantMessageEvent: { type: "thinking_start", contentIndex: 0 },
-  }) + "\n");
-  assert.deepEqual(events, []);
-
-  events = decoder.push(JSON.stringify({
-    type: "message_update",
-    assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "Inspecting codebase" },
-  }) + "\n");
-  assert.deepEqual(events, [{ type: "thinking", text: "Inspecting codebase", contentIndex: 0 }]);
-  for (const ev of events) run = reduceSubagentEvent(run, ev);
-  assert.equal(run.items.length, 1);
-  const thought1 = run.items[0];
-  assert.equal(thought1?.kind, "thinking");
-  if (thought1?.kind === "thinking") {
-    assert.equal(thought1.text, "Inspecting codebase");
-  }
-
-  events = decoder.push(JSON.stringify({
-    type: "message_update",
-    assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: " for patterns" },
-  }) + "\n");
-  assert.deepEqual(events, [{ type: "thinking", text: "Inspecting codebase for patterns", contentIndex: 0 }]);
-  for (const ev of events) run = reduceSubagentEvent(run, ev);
-  assert.equal(run.items.length, 1);
-  const thought2 = run.items[0];
-  assert.equal(thought2?.kind, "thinking");
-  if (thought2?.kind === "thinking") {
-    assert.equal(thought2.text, "Inspecting codebase for patterns");
-  }
-
-  events = decoder.push(JSON.stringify({
-    type: "message_update",
-    assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "Inspecting codebase for patterns - done" },
-  }) + "\n");
-  assert.deepEqual(events, [{ type: "thinking", text: "Inspecting codebase for patterns - done", contentIndex: 0 }]);
-  for (const ev of events) run = reduceSubagentEvent(run, ev);
-  assert.equal(run.items.length, 1);
-  const thought3 = run.items[0];
-  assert.equal(thought3?.kind, "thinking");
-  if (thought3?.kind === "thinking") {
-    assert.equal(thought3.text, "Inspecting codebase for patterns - done");
-  }
-
-  // toolcall stream
-  events = decoder.push(JSON.stringify({
-    type: "message_update",
-    assistantMessageEvent: { type: "toolcall_start", contentIndex: 1, id: "call_42", name: "mcp__exa__search" },
-  }) + "\n");
-  assert.deepEqual(events, [{ type: "tool_start", id: "call_42", name: "mcp__exa__search" }]);
-  for (const ev of events) run = reduceSubagentEvent(run, ev);
-  assert.equal(run.items.length, 2);
-  const tool1 = run.items[1];
-  assert.equal(tool1?.kind, "tool");
-  if (tool1?.kind === "tool") {
-    assert.equal(tool1.status, "running");
-  }
-
-  events = decoder.push(JSON.stringify({
-    type: "message_update",
-    assistantMessageEvent: { type: "toolcall_delta", contentIndex: 1, delta: '{"query": "antigravity"}' },
-  }) + "\n");
-  assert.deepEqual(events, [{ type: "tool_start", id: "call_42", name: "mcp__exa__search", args: { query: "antigravity" } }]);
-  for (const ev of events) run = reduceSubagentEvent(run, ev);
-  const tool2 = run.items[1];
-  assert.equal(tool2?.kind, "tool");
-  if (tool2?.kind === "tool") {
-    assert.deepEqual(tool2.args, { query: "antigravity" });
-  }
-
-  events = decoder.push(JSON.stringify({
-    type: "message_update",
-    assistantMessageEvent: { type: "toolcall_end", contentIndex: 1, toolCall: { id: "call_42", name: "mcp__exa__search", arguments: { query: "antigravity" } } },
-  }) + "\n");
-  assert.deepEqual(events, [{ type: "tool_start", id: "call_42", name: "mcp__exa__search", args: { query: "antigravity" } }]);
-
-  // text stream
-  events = decoder.push(JSON.stringify({
-    type: "message_update",
-    assistantMessageEvent: { type: "text_start", contentIndex: 2 },
-  }) + "\n");
-  assert.deepEqual(events, []);
-
-  events = decoder.push(JSON.stringify({
-    type: "message_update",
-    assistantMessageEvent: { type: "text_delta", contentIndex: 2, delta: "Analysis" },
-  }) + "\n");
-  assert.deepEqual(events, [{ type: "result", text: "Analysis" }]);
-  for (const ev of events) run = reduceSubagentEvent(run, ev);
-  assert.equal(run.result, "Analysis");
-
-  events = decoder.push(JSON.stringify({
-    type: "message_update",
-    assistantMessageEvent: { type: "text_delta", contentIndex: 2, delta: " complete" },
-  }) + "\n");
-  assert.deepEqual(events, [{ type: "result", text: "Analysis complete" }]);
-  for (const ev of events) run = reduceSubagentEvent(run, ev);
-  assert.equal(run.result, "Analysis complete");
-
-  events = decoder.push(JSON.stringify({
-    type: "message_update",
-    assistantMessageEvent: { type: "text_end", contentIndex: 2, content: "Analysis complete." },
-  }) + "\n");
-  assert.deepEqual(events, [{ type: "result", text: "Analysis complete." }]);
-  for (const ev of events) run = reduceSubagentEvent(run, ev);
-  assert.equal(run.result, "Analysis complete.");
-
-  // message_end authoritative snapshot with usage
-  events = decoder.push(JSON.stringify({
-    type: "message_end",
-    message: {
-      role: "assistant",
-      content: [
-        { type: "thinking", text: "Inspecting codebase for patterns - done" },
-        { type: "toolCall", id: "call_42", name: "mcp__exa__search", arguments: { query: "antigravity" } },
-        { type: "text", text: "Analysis complete." },
-      ],
-      usage: { input: 100, output: 50 },
-    },
-  }) + "\n");
-
-  assert.deepEqual(events, [
-    { type: "thinking", text: "Inspecting codebase for patterns - done", contentIndex: 0 },
-    { type: "tool_start", id: "call_42", name: "mcp__exa__search", args: { query: "antigravity" } },
-    { type: "result", text: "Analysis complete." },
-    { type: "usage", usage: { input: 100, output: 50 } },
-  ]);
-
-  for (const ev of events) run = reduceSubagentEvent(run, ev);
-  assert.equal(run.result, "Analysis complete.");
-  assert.equal(run.items.length, 2); // 1 thinking item, 1 tool item
-  assert.deepEqual(run.usage, { input: 100, output: 50 });
-});
-
-test("in-flight blocks are reset on turn_end, message_start, and agent_end", () => {
-  const decoder = new PiJsonDecoder();
-
-  // Partial thinking delta
-  decoder.push(JSON.stringify({
-    type: "message_update",
-    assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "abandoned thought" },
-  }) + "\n");
-
-  // turn_end resets in-flight state
-  decoder.push(JSON.stringify({ type: "turn_end" }) + "\n");
-
-  // Next message starts fresh
-  const events = decoder.push(JSON.stringify({
-    type: "message_update",
-    assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "fresh thought" },
-  }) + "\n");
-
-  assert.deepEqual(events, [{ type: "thinking", text: "fresh thought", contentIndex: 0, messageId: 2 }]);
-});
-
-test("compatibility tool result keeps message error state", () => {
   let run: SubagentRun = { status: "running", startedAt: 0, items: [] };
-  run = reduceSubagentEvent(run, { type: "tool_start", id: "x", name: "read" });
-  for (const event of new PiJsonDecoder().push('{"type":"tool_result_end","message":{"toolCallId":"x","isError":true,"content":[{"type":"text","text":"failed"}]}}\n')) run = reduceSubagentEvent(run, event);
-  assert.deepEqual(run.items, [{ kind: "tool", id: "x", name: "read", status: "error", result: "failed" }]);
+  for (const event of events) run = reduceSubagentEvent(run, event);
+  assert.equal(run.result, "Final report");
+  const failedTool = run.items.find((item) => item.kind === "tool" && item.id === "call_bad");
+  assert.equal(failedTool?.kind === "tool" ? failedTool.status : undefined, "error");
+  assert.equal(run.usage?.input, 150);
 });
 
 test("child returns a final report and rejects an empty successful result", async () => {
@@ -448,8 +294,8 @@ test("thinking content indexes are scoped to an assistant message", () => {
 
 test("decoder discards an oversized complete line without parsing it", () => {
   const decoder = new PiJsonDecoder();
-  const oversized = JSON.stringify({ type: "message_end", message: { role: "assistant", content: "x".repeat(MAX_DECODER_BUFFER_CHARS) } });
-  const events = decoder.push(oversized + "\n" + JSON.stringify({ type: "message_end", message: { role: "assistant", content: "ok" } }) + "\n");
+  const oversized = JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "x".repeat(MAX_DECODER_BUFFER_CHARS) }] } });
+  const events = decoder.push(oversized + "\n" + JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } }) + "\n");
   assert.equal(events[0]?.type, "diagnostic");
   assert.deepEqual(events.filter((event) => event.type === "result"), [{ type: "result", text: "ok" }]);
 });

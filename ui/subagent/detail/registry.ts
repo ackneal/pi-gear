@@ -12,101 +12,60 @@ const MAX_REGISTRY_ENTRIES = 50;
 const registry = new Map<string, SubagentViewEntry>();
 const subscribers = new Map<string, Set<(run: SubagentRun) => void>>();
 
-function notifySubscribers(toolCallId: string, run: SubagentRun): void {
-  const listeners = subscribers.get(toolCallId);
-  if (!listeners) return;
-  for (const listener of listeners) {
-    try {
-      listener(run);
-    } catch {
-      // Ignore subscriber errors to avoid breaking callers
-    }
+function notify(toolCallId: string, run: SubagentRun): void {
+  for (const listener of subscribers.get(toolCallId) ?? []) {
+    try { listener(run); } catch { /* A view must not break the run. */ }
   }
 }
 
-export function recordSubagentStart(
-  toolCallId: string,
-  profile: SubagentProfile,
-  task: string,
-  initialRun?: SubagentRun,
-): void {
+function evictIfNeeded(): void {
+  if (registry.size < MAX_REGISTRY_ENTRIES) return;
+  const oldest = registry.keys().next().value;
+  if (oldest !== undefined) {
+    registry.delete(oldest);
+    subscribers.delete(oldest);
+  }
+}
+
+/** Starts a new live run. This is the only operation which affects retention order. */
+export function recordSubagentLiveStart(toolCallId: string, profile: SubagentProfile, task: string, initialRun?: SubagentRun): void {
   if (!toolCallId) return;
   const now = Date.now();
+  if (!registry.has(toolCallId)) evictIfNeeded();
   const existing = registry.get(toolCallId);
-  const run: SubagentRun = initialRun ?? existing?.run ?? {
-    status: "running",
-    startedAt: now,
-    items: [],
-  };
-
-  if (registry.has(toolCallId)) {
-    registry.delete(toolCallId);
-  } else if (registry.size >= MAX_REGISTRY_ENTRIES) {
-    const oldestKey = registry.keys().next().value;
-    if (oldestKey !== undefined) {
-      registry.delete(oldestKey);
-    }
-  }
-
-  registry.set(toolCallId, {
-    toolCallId,
-    // Keep an already-recorded task (the formatted brief) over a later plain
-    // re-registration from the result renderer.
-    task: (existing?.task ?? task) || "Subagent task",
-    profile: profile || existing?.profile,
-    run,
-    updatedAt: now,
-  });
-
-  notifySubscribers(toolCallId, run);
+  const run = initialRun ?? existing?.run ?? { status: "running", startedAt: now, items: [] };
+  registry.set(toolCallId, { toolCallId, task, profile, run, updatedAt: now });
+  notify(toolCallId, run);
 }
 
-export function recordSubagentUpdate(toolCallId: string, run: SubagentRun): void {
-  if (!toolCallId) return;
+/** Updates a run that was explicitly started live; it never invents history. */
+export function recordSubagentLiveUpdate(toolCallId: string, run: SubagentRun): void {
   const entry = registry.get(toolCallId);
-  if (entry) {
-    entry.run = run;
-    entry.updatedAt = Date.now();
-    notifySubscribers(toolCallId, run);
-  } else {
-    recordSubagentStart(
-      toolCallId,
-      { id: "subagent", label: "subagent", description: "", systemPrompt: "", capabilities: [] },
-      "Subagent task",
-      run,
-    );
-  }
+  if (!entry) return;
+  entry.run = run;
+  entry.updatedAt = Date.now();
+  notify(toolCallId, run);
 }
 
-export function getSubagentEntry(toolCallId: string): SubagentViewEntry | undefined {
-  if (!toolCallId) return undefined;
-  return registry.get(toolCallId);
+/** Adds transcript history without moving or replacing an existing entry. */
+export function hydrateSubagentHistory(toolCallId: string, profile: SubagentProfile, task: string, run: SubagentRun): void {
+  if (!toolCallId || !task || registry.has(toolCallId)) return;
+  evictIfNeeded();
+  registry.set(toolCallId, { toolCallId, profile, task, run, updatedAt: Date.now() });
 }
 
-export function getAllSubagentEntries(): SubagentViewEntry[] {
-  return Array.from(registry.values());
-}
+export const getSubagentEntry = (toolCallId: string): SubagentViewEntry | undefined => toolCallId ? registry.get(toolCallId) : undefined;
+export const getAllSubagentEntries = (): SubagentViewEntry[] => Array.from(registry.values());
 
-export function subscribeSubagent(
-  toolCallId: string,
-  listener: (run: SubagentRun) => void,
-): () => void {
+export function subscribeSubagent(toolCallId: string, listener: (run: SubagentRun) => void): () => void {
   if (!toolCallId) return () => {};
   let listeners = subscribers.get(toolCallId);
-  if (!listeners) {
-    listeners = new Set();
-    subscribers.set(toolCallId, listeners);
-  }
+  if (!listeners) subscribers.set(toolCallId, listeners = new Set());
   listeners.add(listener);
-
   return () => {
     const set = subscribers.get(toolCallId);
-    if (set) {
-      set.delete(listener);
-      if (set.size === 0) {
-        subscribers.delete(toolCallId);
-      }
-    }
+    set?.delete(listener);
+    if (set?.size === 0) subscribers.delete(toolCallId);
   };
 }
 

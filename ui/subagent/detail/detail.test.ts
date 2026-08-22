@@ -19,8 +19,8 @@ import {
   clearSubagentRegistry,
   getAllSubagentEntries,
   getSubagentEntry,
-  recordSubagentStart,
-  recordSubagentUpdate,
+  recordSubagentLiveStart,
+  recordSubagentLiveUpdate,
   subscribeSubagent,
   type SubagentViewEntry,
 } from "./registry.ts";
@@ -33,7 +33,7 @@ const testTheme: Theme = {
 test("Test 1: toolCallId resolves correct subagent run from registry", () => {
   clearSubagentRegistry();
 
-  recordSubagentStart("call_101", researcherProfile, "Find memory leaks");
+  recordSubagentLiveStart("call_101", researcherProfile, "Find memory leaks");
   const entry = getSubagentEntry("call_101");
   assert.ok(entry);
   assert.equal(entry.toolCallId, "call_101");
@@ -57,7 +57,7 @@ test("Test 1: toolCallId resolves correct subagent run from registry", () => {
     ],
     result: "Memory audit complete",
   };
-  recordSubagentUpdate("call_101", updatedRun);
+  recordSubagentLiveUpdate("call_101", updatedRun);
 
   const updated = getSubagentEntry("call_101");
   assert.ok(updated);
@@ -69,15 +69,15 @@ test("Test 1: toolCallId resolves correct subagent run from registry", () => {
 test("Test 2: multiple concurrent subagents remain independently addressable", () => {
   clearSubagentRegistry();
 
-  recordSubagentStart("call_r1", researcherProfile, "Research query patterns");
-  recordSubagentStart("call_w1", workerProfile, "Execute migration");
+  recordSubagentLiveStart("call_r1", researcherProfile, "Research query patterns");
+  recordSubagentLiveStart("call_w1", workerProfile, "Execute migration");
 
   const runR1Update: SubagentRun = {
     status: "running",
     startedAt: 100,
     items: [{ kind: "thinking", text: "Analyzing slow logs" }],
   };
-  recordSubagentUpdate("call_r1", runR1Update);
+  recordSubagentLiveUpdate("call_r1", runR1Update);
 
   const entryR1 = getSubagentEntry("call_r1");
   const entryW1 = getSubagentEntry("call_w1");
@@ -367,7 +367,7 @@ test("Test 6: scrolling (up, down, home, end, autoScroll)", () => {
 test("Test 7: Esc key closes component cleanly without altering runtime state", () => {
   clearSubagentRegistry();
 
-  recordSubagentStart("call_esc", researcherProfile, "Esc test task");
+  recordSubagentLiveStart("call_esc", researcherProfile, "Esc test task");
   const entry = getSubagentEntry("call_esc");
   assert.ok(entry);
 
@@ -411,14 +411,14 @@ test("Test 7: Esc key closes component cleanly without altering runtime state", 
 test("Test 8: subscription cleanup removes listeners", () => {
   clearSubagentRegistry();
 
-  recordSubagentStart("call_sub", researcherProfile, "Subscription task");
+  recordSubagentLiveStart("call_sub", researcherProfile, "Subscription task");
 
   let calls = 0;
   const unsubscribe = subscribeSubagent("call_sub", () => {
     calls += 1;
   });
 
-  recordSubagentUpdate("call_sub", {
+  recordSubagentLiveUpdate("call_sub", {
     status: "running",
     startedAt: 0,
     items: [{ kind: "thinking", text: "Thought 1" }],
@@ -428,7 +428,7 @@ test("Test 8: subscription cleanup removes listeners", () => {
   // Unsubscribe and trigger another update
   unsubscribe();
 
-  recordSubagentUpdate("call_sub", {
+  recordSubagentLiveUpdate("call_sub", {
     status: "success",
     startedAt: 0,
     finishedAt: 1_000,
@@ -540,7 +540,7 @@ test("Test 10.5: detail output carries no OSC133 zone markers (no transcript pol
 
 test("Test 11: subagent registry is cleared on lifecycle events", () => {
   clearSubagentRegistry();
-  recordSubagentStart("call_live", researcherProfile, "Live task");
+  recordSubagentLiveStart("call_live", researcherProfile, "Live task");
   assert.equal(getAllSubagentEntries().length, 1);
 
   const handlers: Record<string, () => void> = {};
@@ -556,13 +556,13 @@ test("Test 11: subagent registry is cleared on lifecycle events", () => {
   assert.equal(getAllSubagentEntries().length, 0);
 
   // Add entry and trigger session_before_switch
-  recordSubagentStart("call_live2", researcherProfile, "Live task 2");
+  recordSubagentLiveStart("call_live2", researcherProfile, "Live task 2");
   assert.equal(getAllSubagentEntries().length, 1);
   handlers.session_before_switch?.();
   assert.equal(getAllSubagentEntries().length, 0);
 
   // Add entry and trigger session_shutdown
-  recordSubagentStart("call_live3", researcherProfile, "Live task 3");
+  recordSubagentLiveStart("call_live3", researcherProfile, "Live task 3");
   assert.equal(getAllSubagentEntries().length, 1);
   handlers.session_shutdown?.();
   assert.equal(getAllSubagentEntries().length, 0);
@@ -571,11 +571,11 @@ test("Test 11: subagent registry is cleared on lifecycle events", () => {
 test("Test 12: registry ignores missing or empty toolCallId without creating fallback IDs", () => {
   clearSubagentRegistry();
 
-  recordSubagentStart("", researcherProfile, "Missing ID");
+  recordSubagentLiveStart("", researcherProfile, "Missing ID");
   assert.equal(getAllSubagentEntries().length, 0);
   assert.equal(getSubagentEntry(""), undefined);
 
-  recordSubagentUpdate("", {
+  recordSubagentLiveUpdate("", {
     status: "running",
     startedAt: 0,
     items: [],

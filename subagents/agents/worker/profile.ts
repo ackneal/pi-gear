@@ -12,7 +12,7 @@ export const WORKER_CAPABILITIES = [
 export const workerProfile: SubagentProfile = {
   id: "worker",
   label: "worker",
-  description: "Delegate a bounded implementation task to an isolated Pi subprocess.",
+  description: "Delegate bounded, independent work that can proceed in parallel.",
   systemPrompt: WORKER_SYSTEM_PROMPT,
   capabilities: WORKER_CAPABILITIES,
   presentation: {

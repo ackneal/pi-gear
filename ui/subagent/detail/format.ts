@@ -22,12 +22,6 @@ export { cleanPlainText, usefulText } from "../text-policy.ts";
 export { STALLED_THRESHOLD_MS, formatDuration, formatUsage, idleDuration };
 export type { Theme };
 
-export function enableClearOnShrink(tui: unknown): void {
-  if (typeof (tui as { setClearOnShrink?: (val: boolean) => void })?.setClearOnShrink === "function") {
-    (tui as { setClearOnShrink: (val: boolean) => void }).setClearOnShrink(true);
-  }
-}
-
 // OSC 133 shell-integration zone markers (\x1b]133;A/B/C/D). The main transcript
 // uses them to segment scrollback zones; when overlay content carries them,
 // the terminal's shell-integration/transcript feature ingests the wrapped region

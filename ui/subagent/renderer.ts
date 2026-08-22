@@ -2,7 +2,7 @@ import type { AgentToolResult, ToolRenderResultOptions } from "@earendil-works/p
 import { Text } from "@earendil-works/pi-tui";
 import type { SubagentProfile, SubagentRun } from "../../subagents/runtime/types.ts";
 import { SubagentResultComponent } from "./component.ts";
-import { recordSubagentStart } from "./detail/index.ts";
+import { hydrateSubagentHistory } from "./detail/index.ts";
 import { collapsed, type SubagentRendererProfile, type Theme } from "./format.ts";
 
 type ToolRenderContext = {
@@ -28,11 +28,15 @@ export function renderSubagentResult(
   theme: Theme,
   context: ToolRenderContext,
 ): Text {
-  if (context.toolCallId && result.details) {
-    recordSubagentStart(
+  if (context.toolCallId && result.details && context.args) {
+    const primary = context.args.question ?? context.args.task;
+    const task = typeof primary === "string" && primary.trim()
+      ? primary
+      : JSON.stringify(context.args);
+    hydrateSubagentHistory(
       context.toolCallId,
       profile as unknown as SubagentProfile,
-      "",
+      task,
       result.details,
     );
   }

@@ -15,7 +15,7 @@ test("worker profile, prompt, and capabilities match specification", () => {
   assert.equal(WORKER_TOOL_NAME, "worker");
   assert.equal(workerProfile.id, "worker");
   assert.equal(workerProfile.label, "worker");
-  assert.equal(workerProfile.description, "Delegate a bounded implementation task to an isolated Pi subprocess.");
+  assert.equal(workerProfile.description, "Delegate bounded, independent work that can proceed in parallel.");
   assert.equal(workerProfile.systemPrompt, WORKER_SYSTEM_PROMPT);
   assert.match(WORKER_SYSTEM_PROMPT, /only the delegated scope/);
   assert.match(WORKER_SYSTEM_PROMPT, /authoritative code and types/);
@@ -104,7 +104,7 @@ test("setupSubagents registers researcher and worker tools", async () => {
   const workerTool = tools.get("worker")!;
   assert.equal(workerTool.label, "worker");
   assert.equal(workerTool.executionMode, "parallel");
-  assert.equal(workerTool.description, "Delegate a bounded implementation task to an isolated Pi subprocess.");
+  assert.equal(workerTool.description, "Delegate bounded, independent work that can proceed in parallel.");
 });
 
 test("formatWorkerInput serializes structured fields into the child user input", () => {

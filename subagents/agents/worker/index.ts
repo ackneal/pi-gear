@@ -13,15 +13,15 @@ export interface WorkerSubagentInput {
 }
 
 export const workerParameters = Type.Object({
-  task: Type.String({ description: "What to implement or fix." }),
+  task: Type.String({ description: "The bounded task to complete." }),
   targetFiles: Type.Optional(
-    Type.Array(Type.String(), { description: "Files likely to change." }),
+    Type.Array(Type.String(), { description: "Files relevant to the task, if any." }),
   ),
   findings: Type.Optional(
-    Type.String({ description: "Confirmed facts, invariants, or prior investigation to build on." }),
+    Type.String({ description: "Known context, constraints, or prior work to build on." }),
   ),
   verification: Type.Optional(
-    Type.String({ description: "Expected behavior and focused checks that prove the change." }),
+    Type.String({ description: "Expected outcome and focused checks that prove completion." }),
   ),
 });
 
