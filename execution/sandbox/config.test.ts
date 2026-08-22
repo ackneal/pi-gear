@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import test from "node:test";
 import type { AccessPolicy } from "../../config/types.ts";
 import { createEffectiveSandboxConfig, createSandboxConfig, normalizeTempAlias, resolveRuntimeTempDir } from "./config.ts";
@@ -149,6 +151,17 @@ test("canonical /private/tmp selectors deduplicate against configured /tmp", () 
   const config = createSandboxConfig("/workspace", privateTmpPolicy);
   assert.ok(config.filesystem.allowWrite?.includes("/private/tmp/**"));
   assert.equal(config.filesystem.allowWrite?.filter((entry) => entry === "/private/tmp/**").length, 1);
+});
+
+test("non-darwin has no implicit temp exception", async () => {
+  const result = await resolveRuntimeTempDir({ platform: "linux" });
+  assert.deepEqual(result, {});
+});
+
+test("darwin resolves the OS temp dir without an injected source", { skip: process.platform !== "darwin" }, async () => {
+  const expected = (await promisify(execFile)("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"])).stdout.trim().replace(/\/+$/, "");
+  const { path } = await resolveRuntimeTempDir();
+  assert.equal(path, await realpath(expected));
 });
 
 test("temp dir resolution skips invalid values with a warning", async () => {

@@ -27,13 +27,11 @@ export interface RuntimeTempDir {
 export type TempDirSource = () => Promise<string | undefined>;
 
 // confstr(_CS_DARWIN_USER_TEMP_DIR): the OS's own per-user temp directory,
-// immune to a spoofed or stale TMPDIR in the process environment.
+// invoked by absolute path so a manipulated PATH cannot substitute the binary.
 const getconfTempDirSource: TempDirSource = async () => {
-  const { stdout } = await promisify(execFile)("getconf", ["DARWIN_USER_TEMP_DIR"]);
+  const { stdout } = await promisify(execFile)("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"]);
   return stdout.trim();
 };
-
-const envTempDirSource = (): TempDirSource => async () => process.env.TMPDIR?.trim();
 
 export interface RuntimeTempOptions {
   readonly platform?: NodeJS.Platform;
@@ -46,7 +44,8 @@ export interface RuntimeTempOptions {
  */
 export const resolveRuntimeTempDir = async (options: RuntimeTempOptions = {}): Promise<RuntimeTempDir> => {
   const platform = options.platform ?? process.platform;
-  const source = options.source ?? (platform === "darwin" ? getconfTempDirSource : envTempDirSource());
+  // Only darwin gets an implicit temp exception; other platforms opt in via config.
+  const source = options.source ?? (platform === "darwin" ? getconfTempDirSource : async () => undefined);
 
   let raw: string | undefined;
   try {
