@@ -82,6 +82,7 @@ test("setupSubagents registers researcher and worker tools", async () => {
     executionMode: string;
     execute: (id: string, args: { task: string }, signal: AbortSignal | undefined, onUpdate: (update: unknown) => void, ctx: { cwd: string }) => Promise<unknown>;
   }>();
+  const handlers = new Map<string, Array<(event: unknown) => unknown>>();
 
   const mockPi = {
     registerTool: (tool: {
@@ -94,6 +95,7 @@ test("setupSubagents registers researcher and worker tools", async () => {
       tools.set(tool.name, tool);
     },
     registerCommand: () => {},
+    on: () => {},
   } as unknown as ExtensionAPI;
 
   setupSubagents(mockPi);
@@ -105,6 +107,32 @@ test("setupSubagents registers researcher and worker tools", async () => {
   assert.equal(workerTool.label, "worker");
   assert.equal(workerTool.executionMode, "parallel");
   assert.equal(workerTool.description, "Delegate bounded, independent work that can proceed in parallel.");
+});
+
+test("setupSubagents flags failed subagent runs as tool errors", () => {
+  const handlers = new Map<string, Array<(event: unknown) => unknown>>();
+  const mockPi = {
+    registerTool: () => {},
+    registerCommand: () => {},
+    on: (event: string, handler: (event: unknown) => unknown) => {
+      handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+    },
+  } as unknown as ExtensionAPI;
+
+  setupSubagents(mockPi);
+
+  const onToolResult = handlers.get("tool_result")?.[0];
+  assert.ok(onToolResult);
+  const rows = [
+    { toolName: "worker", run: { status: "error" }, expected: { isError: true } },
+    { toolName: "researcher", run: { status: "aborted" }, expected: { isError: true } },
+    { toolName: "worker", run: { status: "success", result: "done" }, expected: undefined },
+    { toolName: "read", run: { status: "error" }, expected: undefined },
+  ] as const;
+  for (const { toolName, run, expected } of rows) {
+    const result = onToolResult({ type: "tool_result", toolCallId: "t1", input: {}, content: [], isError: false, toolName, details: run });
+    assert.deepEqual(result, expected, `${toolName}/${run.status}`);
+  }
 });
 
 test("formatWorkerInput serializes structured fields into the child user input", () => {

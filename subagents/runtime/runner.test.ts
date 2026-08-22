@@ -91,9 +91,12 @@ test("decoder and reducer bound retained data and aggregate multipart reports", 
   assert.ok(lastItem && lastItem.kind === "thinking" && lastItem.text.endsWith(TRUNCATION_MARKER));
 });
 
-test("decodes the checked-in Pi 0.84.1 JSON-mode transcript", async () => {
+// Hand-written minimized transcript, not a literal `pi --mode json` capture.
+// Message shapes mirror the pinned 0.84.1 types (AssistantMessage, ToolResultMessage,
+// ThinkingContent, ToolCall) so decoder regressions against imagined protocols fail here.
+test("decodes the minimized Pi JSON-mode transcript", async () => {
   const { readFile } = await import("node:fs/promises");
-  const jsonl = await readFile(new URL("./fixtures/pi-0.84.1-json-mode.jsonl", import.meta.url), "utf8");
+  const jsonl = await readFile(new URL("./fixtures/json-mode-minimized.jsonl", import.meta.url), "utf8");
   const events = new PiJsonDecoder().push(jsonl, true);
   assert.ok(events.some((event) => event.type === "thinking" && event.text === "Inspecting code"));
   assert.ok(events.some((event) => event.type === "result" && event.text === "Final report"));
@@ -281,11 +284,14 @@ test("thinking deltas are incremental and accumulate into one retained item", ()
 test("thinking content indexes are scoped to an assistant message", () => {
   const decoder = new PiJsonDecoder();
   let run: SubagentRun = { status: "running", startedAt: 0, items: [] };
-  for (const text of ["first", "second"]) {
+  // The live delta only carries a prefix; ThinkingContent carries the full text
+  // as { type: "thinking", thinking }, so this fails unless message_end decoding
+  // reads the finalized message correctly.
+  for (const [delta, final] of [["fir", "first"], ["seco", "second"]] as const) {
     const input = [
       { type: "message_start" },
-      { type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: text } },
-      { type: "message_end", message: { role: "assistant", content: [{ type: "thinking", text }] } },
+      { type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta } },
+      { type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: final }] } },
     ].map((event) => JSON.stringify(event)).join("\n") + "\n";
     for (const event of decoder.push(input)) run = reduceSubagentEvent(run, event);
   }

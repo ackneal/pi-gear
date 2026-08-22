@@ -22,6 +22,21 @@ import {
 import type { SubagentRun } from "./runtime/types.ts";
 
 export function setupSubagents(pi: ExtensionAPI): void {
+  // AgentToolResult has no isError field: a normal return always means success.
+  // Flag failed subagent runs through the tool_result hook so Pi records them as errors.
+  pi.on("tool_result", (event) => {
+    if (
+      event.toolName !== RESEARCHER_TOOL_NAME &&
+      event.toolName !== WORKER_TOOL_NAME
+    ) {
+      return;
+    }
+    const run = event.details as SubagentRun | undefined;
+    if (run?.status === "error" || run?.status === "aborted") {
+      return { isError: true };
+    }
+  });
+
   pi.registerTool({
     name: RESEARCHER_TOOL_NAME,
     label: researcherProfile.label,
