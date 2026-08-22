@@ -3,7 +3,12 @@ import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { formatDoctor, setupSandbox } from "./index.ts";
 
-const enabled = { enabled: true, workspace: "/workspace", reason: undefined } as const;
+const enabled = {
+  enabled: true,
+  workspace: "/workspace",
+  reason: undefined,
+  network: { allowedDomains: ["github.com"], deniedDomains: [] },
+} as const;
 
 test("doctor reports only actionable sandbox diagnostics", () => {
   const output = formatDoctor(enabled, "darwin");
@@ -12,13 +17,15 @@ test("doctor reports only actionable sandbox diagnostics", () => {
     "Platform: darwin",
     "Workspace: /workspace",
     "Filesystem: read/edit/write guarded; other tools warn when unguarded",
-    "Network: configured rules; unknown hosts require approval",
+    "Network allow: github.com",
+    "Network deny: (none)",
+    "Network other hosts: require approval",
   ].join("\n"));
   assert.doesNotMatch(output, /TOKEN|SECRET|KEY|env/i);
 });
 
 test("doctor includes the failure reason when sandbox is unavailable", () => {
-  const output = formatDoctor({ enabled: false, workspace: "unavailable", reason: "sandbox dependency missing" }, "darwin");
+  const output = formatDoctor({ enabled: false, workspace: "unavailable", reason: "sandbox dependency missing", network: undefined }, "darwin");
   assert.match(output, /^Sandbox: unavailable\nReason: sandbox dependency missing\nPlatform: darwin/);
 });
 

@@ -1,5 +1,7 @@
-import { readdir, realpath } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { readdir, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
+import { promisify } from "node:util";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { matchesFilesystemSelector, selectorPath } from "../policy/filesystem.ts";
 import type { AccessPolicy } from "../../config/types.ts";
@@ -9,20 +11,85 @@ export const validateRuntimePath = (path: string, source: string): string => {
   return path;
 };
 
-export const createSandboxConfig = (workspaceRoot: string, policy: AccessPolicy): SandboxRuntimeConfig => {
+/** macOS aliases /tmp to /private/tmp; canonicalize before policy building so the alias cannot bypass rules. */
+export const normalizeTempAlias = (path: string, platform: NodeJS.Platform = process.platform): string =>
+  platform === "darwin" && (path === "/tmp" || path.startsWith("/tmp/")) ? `/private${path}` : path;
+
+const normalizedSelectorPath = (selector: string, workspace: string): string =>
+  normalizeTempAlias(selectorPath(selector, workspace));
+
+export interface RuntimeTempDir {
+  readonly path?: string;
+  readonly warning?: string;
+}
+
+/** Supplies the raw OS temp directory spelling; the platform default is preferred over trusting $TMPDIR. */
+export type TempDirSource = () => Promise<string | undefined>;
+
+// confstr(_CS_DARWIN_USER_TEMP_DIR): the OS's own per-user temp directory,
+// invoked by absolute path so a manipulated PATH cannot substitute the binary.
+const getconfTempDirSource: TempDirSource = async () => {
+  const { stdout } = await promisify(execFile)("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"]);
+  return stdout.trim();
+};
+
+export interface RuntimeTempOptions {
+  readonly platform?: NodeJS.Platform;
+  readonly source?: TempDirSource;
+}
+
+/**
+ * Validates the OS temp directory as the implicit writable root. Failures
+ * degrade to a warning, never a sandbox startup failure.
+ */
+export const resolveRuntimeTempDir = async (options: RuntimeTempOptions = {}): Promise<RuntimeTempDir> => {
+  const platform = options.platform ?? process.platform;
+  // Only darwin gets an implicit temp exception; other platforms opt in via config.
+  const source = options.source ?? (platform === "darwin" ? getconfTempDirSource : async () => undefined);
+
+  let raw: string | undefined;
+  try {
+    // Trim surrounding whitespace and getconf's trailing slash for clean prefix checks.
+    raw = (await source())?.trim().replace(/\/+$/, "");
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { warning: `Ignoring temp directory: ${reason}` };
+  }
+  if (!raw) return {};
+  if (!isAbsolute(raw)) return { warning: `Ignoring temp directory (${raw}): not an absolute path` };
+  try {
+    const canonical = await realpath(normalizeTempAlias(raw, platform));
+    if (!(await stat(canonical)).isDirectory()) {
+      return { warning: `Ignoring temp directory (${raw}): not a directory` };
+    }
+    return { path: canonical };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { warning: `Ignoring temp directory (${raw}): ${reason}` };
+  }
+};
+
+export interface RuntimeWritePaths {
+  /** Validated process temp directory; an implementation detail, never written back to config. */
+  readonly tempDir?: string | undefined;
+}
+
+export const createSandboxConfig = (workspaceRoot: string, policy: AccessPolicy, runtime: RuntimeWritePaths = {}): SandboxRuntimeConfig => {
   const workspace = validateRuntimePath(workspaceRoot, "workspace root");
   if (!isAbsolute(workspace)) throw new Error("workspace root must be absolute");
   const denyRead = policy.filesystem.rules
     .filter((rule) => rule.access === "deny")
-    .map((rule) => selectorPath(rule.path, workspace));
+    .map((rule) => normalizedSelectorPath(rule.path, workspace));
   const denyWrite = policy.filesystem.rules
     .filter((rule) => rule.access === "deny" || rule.access === "read-only")
-    .map((rule) => selectorPath(rule.path, workspace));
+    .map((rule) => normalizedSelectorPath(rule.path, workspace));
   const allowWrite = [...new Set([
     workspace,
+    // Runtime temp exception; read access is already host-wide via allowRead: [], so no extra read rule.
+    ...(runtime.tempDir !== undefined ? [validateRuntimePath(runtime.tempDir, "TMPDIR")] : []),
     ...policy.filesystem.rules
       .filter((rule) => rule.access === "read-write")
-      .map((rule) => selectorPath(rule.path, workspace)),
+      .map((rule) => normalizedSelectorPath(rule.path, workspace)),
   ])];
   return {
     filesystem: {
@@ -38,6 +105,7 @@ export const createSandboxConfig = (workspaceRoot: string, policy: AccessPolicy)
       allowedDomains: policy.network.rules.filter((rule) => rule.access === "allow").map((rule) => rule.host),
       deniedDomains: policy.network.rules.filter((rule) => rule.access === "deny").map((rule) => rule.host),
     },
+    enableWeakerNetworkIsolation: true,
   };
 };
 
@@ -77,8 +145,8 @@ const deniedWorkspaceFiles = async (workspace: string, policy: AccessPolicy): Pr
   return denied;
 };
 
-export const createEffectiveSandboxConfig = async (workspaceRoot: string, policy: AccessPolicy): Promise<SandboxRuntimeConfig> => {
-  const config = createSandboxConfig(workspaceRoot, policy);
+export const createEffectiveSandboxConfig = async (workspaceRoot: string, policy: AccessPolicy, runtime: RuntimeWritePaths = {}): Promise<SandboxRuntimeConfig> => {
+  const config = createSandboxConfig(workspaceRoot, policy, runtime);
   const [deniedFiles, followedPaths] = await Promise.all([
     deniedWorkspaceFiles(workspaceRoot, policy),
     followedPolicyPaths(workspaceRoot, policy),

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -180,4 +180,68 @@ test("recursive filesystem tools warn once per session when Pi enables them", as
     "find is not covered by the filesystem policy.",
     "grep is not covered by the filesystem policy.",
   ]);
+});
+
+test("current process temp dir access skips the outside-workspace prompt", async () => {
+  const root = await mkdtemp(join(process.cwd(), ".pi-gear-guard-temp-"));
+  const tempRoot = join(root, "tmpdir");
+  const workspace = join(root, "workspace");
+  let handler: ((event: ToolCall, ctx: ExtensionContext) => Promise<unknown>) | undefined;
+  const pi = {
+    on: (event: string, listener: unknown) => {
+      if (event === "tool_call") handler = listener as typeof handler;
+    },
+    sendMessage: () => undefined,
+  } as unknown as ExtensionAPI;
+  try {
+    await Promise.all([mkdir(tempRoot), mkdir(workspace)]);
+    await writeFile(join(tempRoot, "clipboard.png"), "image");
+    setupFilesystemGuard(pi, { tempSource: async () => `${tempRoot}/` });
+    assert.ok(handler);
+    const ctx = { cwd: workspace, hasUI: false } as ExtensionContext;
+
+    assert.equal(
+      await handler(
+        { type: "tool_call", toolName: "read", toolCallId: "test-tmp-read", input: { path: join(tempRoot, "clipboard.png") } },
+        ctx,
+      ),
+      undefined,
+    );
+    await handler(
+      { type: "tool_call", toolName: "write", toolCallId: "test-tmp-write", input: { path: join(tempRoot, "out.txt") } },
+      ctx,
+    ).then((result) => assert.equal(result, undefined));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("sibling temp roots still require confirmation", async () => {
+  const root = await mkdtemp(join(process.cwd(), ".pi-gear-guard-sibling-"));
+  const tempRoot = join(root, "current");
+  const sibling = join(root, "other");
+  const workspace = join(root, "workspace");
+  let handler: ((event: ToolCall, ctx: ExtensionContext) => Promise<unknown>) | undefined;
+  const pi = {
+    on: (event: string, listener: unknown) => {
+      if (event === "tool_call") handler = listener as typeof handler;
+    },
+    sendMessage: () => undefined,
+  } as unknown as ExtensionAPI;
+  try {
+    await Promise.all([mkdir(tempRoot), mkdir(sibling), mkdir(workspace)]);
+    await writeFile(join(sibling, "file.txt"), "x");
+    setupFilesystemGuard(pi, { tempSource: async () => tempRoot });
+    assert.ok(handler);
+
+    assert.deepEqual(
+      await handler(
+        { type: "tool_call", toolName: "read", toolCallId: "test-sibling-read", input: { path: join(sibling, "file.txt") } },
+        { cwd: workspace, hasUI: false } as ExtensionContext,
+      ),
+      { block: true, reason: "Access outside the workspace requires confirmation." },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

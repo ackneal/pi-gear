@@ -4,7 +4,7 @@ import { evaluateNetwork } from "../policy/network.ts";
 import { canonicalizeWorkspace, type CanonicalWorkspace } from "../filesystem/paths.ts";
 import { loadExtensionConfig } from "../../config/index.ts";
 import { SessionApprovals } from "./approvals.ts";
-import { createEffectiveSandboxConfig } from "./config.ts";
+import { createEffectiveSandboxConfig, resolveRuntimeTempDir } from "./config.ts";
 import { createSandboxedBashOperations } from "./spawn.ts";
 
 export interface SandboxManagerLike {
@@ -32,9 +32,12 @@ export interface SandboxStatus {
   readonly enabled: boolean;
   readonly workspace: string;
   readonly reason: string | undefined;
+  readonly network: { allowedDomains: readonly string[]; deniedDomains: readonly string[] } | undefined;
 }
 
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+const NETWORK_PROMPT_TIMEOUT_MS = 30_000;
 
 export class SandboxController {
   private readonly sendApprovalMessage: (content: string) => void | Promise<void>;
@@ -77,7 +80,7 @@ export class SandboxController {
     let approvals: SessionApprovals;
     approvals = new SessionApprovals({
       hasUI: ctx.hasUI,
-      confirm: (title, message) => ctx.ui.confirm(title, message),
+      confirm: (title, message) => ctx.ui.confirm(title, message, { timeout: NETWORK_PROMPT_TIMEOUT_MS }),
       notify: (message, level) => ctx.ui.notify(message, level),
       sendMessage: this.sendApprovalMessage,
     }, () => this.generation === generation && this.approvals === approvals);
@@ -89,11 +92,16 @@ export class SandboxController {
       if (process.platform !== "darwin" || !this.manager.isSupportedPlatform()) {
         throw new Error(`platform ${process.platform} is unsupported`);
       }
-      const [extensionConfig, workspace] = await Promise.all([loadExtensionConfig(), canonicalizeWorkspace(ctx.cwd)]);
+      const [extensionConfig, workspace, tempDir] = await Promise.all([
+        loadExtensionConfig(),
+        canonicalizeWorkspace(ctx.cwd),
+        resolveRuntimeTempDir(),
+      ]);
+      if (tempDir.warning !== undefined && ctx.hasUI) ctx.ui.notify(tempDir.warning, "warning");
       const policy = extensionConfig;
       const dependencies = await this.manager.checkDependenciesAsync();
       if (dependencies.errors.length > 0) throw new Error(dependencies.errors.join("; "));
-      const config = await createEffectiveSandboxConfig(workspace.canonicalRoot, policy);
+      const config = await createEffectiveSandboxConfig(workspace.canonicalRoot, policy, { tempDir: tempDir.path });
       initializationAttempted = true;
       await this.manager.initialize(config, async (request: NetworkHostPattern) => {
         if (this.generation !== generation || this.approvals !== approvals) return false;
@@ -141,8 +149,16 @@ export class SandboxController {
 
   status(): SandboxStatus {
     return this.state.kind === "ready"
-      ? { enabled: true, workspace: this.state.workspace.canonicalRoot, reason: undefined }
-      : { enabled: false, workspace: "unavailable", reason: this.state.kind === "unavailable" ? this.state.reason : this.state.kind };
+      ? {
+          enabled: true,
+          workspace: this.state.workspace.canonicalRoot,
+          reason: undefined,
+          network: {
+            allowedDomains: this.state.config.network.allowedDomains ?? [],
+            deniedDomains: this.state.config.network.deniedDomains ?? [],
+          },
+        }
+      : { enabled: false, workspace: "unavailable", reason: this.state.kind === "unavailable" ? this.state.reason : this.state.kind, network: undefined };
   }
 
   private enqueue(operation: () => Promise<void>): Promise<void> {
