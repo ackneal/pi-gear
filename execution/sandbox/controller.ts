@@ -32,9 +32,12 @@ export interface SandboxStatus {
   readonly enabled: boolean;
   readonly workspace: string;
   readonly reason: string | undefined;
+  readonly network: { allowedDomains: readonly string[]; deniedDomains: readonly string[] } | undefined;
 }
 
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+const NETWORK_PROMPT_TIMEOUT_MS = 30_000;
 
 export class SandboxController {
   private readonly sendApprovalMessage: (content: string) => void | Promise<void>;
@@ -77,7 +80,7 @@ export class SandboxController {
     let approvals: SessionApprovals;
     approvals = new SessionApprovals({
       hasUI: ctx.hasUI,
-      confirm: (title, message) => ctx.ui.confirm(title, message),
+      confirm: (title, message) => ctx.ui.confirm(title, message, { timeout: NETWORK_PROMPT_TIMEOUT_MS }),
       notify: (message, level) => ctx.ui.notify(message, level),
       sendMessage: this.sendApprovalMessage,
     }, () => this.generation === generation && this.approvals === approvals);
@@ -146,8 +149,16 @@ export class SandboxController {
 
   status(): SandboxStatus {
     return this.state.kind === "ready"
-      ? { enabled: true, workspace: this.state.workspace.canonicalRoot, reason: undefined }
-      : { enabled: false, workspace: "unavailable", reason: this.state.kind === "unavailable" ? this.state.reason : this.state.kind };
+      ? {
+          enabled: true,
+          workspace: this.state.workspace.canonicalRoot,
+          reason: undefined,
+          network: {
+            allowedDomains: this.state.config.network.allowedDomains ?? [],
+            deniedDomains: this.state.config.network.deniedDomains ?? [],
+          },
+        }
+      : { enabled: false, workspace: "unavailable", reason: this.state.kind === "unavailable" ? this.state.reason : this.state.kind, network: undefined };
   }
 
   private enqueue(operation: () => Promise<void>): Promise<void> {
