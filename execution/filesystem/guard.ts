@@ -11,6 +11,7 @@ import {
   type FilesystemOperation,
 } from "../policy/filesystem.ts";
 import { loadExtensionConfig } from "../../config/index.ts";
+import { resolveRuntimeTempDir } from "../sandbox/config.ts";
 import {
   canonicalizeWorkspace,
   normalizeToolPath,
@@ -79,6 +80,20 @@ export function setupFilesystemGuard(pi: ExtensionAPI): void {
   const workspaces = new Map<string, Promise<CanonicalWorkspace>>();
   const warnedTools = new Set<string>();
 
+  let tempPrefixes: Promise<readonly string[]> | undefined;
+
+  // Mirrors the sandbox's runtime $TMPDIR exception: temp files such as
+  // clipboard images should not trigger the outside-workspace prompt.
+  const withinTempDir = async (path: string): Promise<boolean> => {
+    if (tempPrefixes === undefined) {
+      tempPrefixes = resolveRuntimeTempDir().then((temp) => [
+        ...new Set([process.env.TMPDIR?.trim(), temp.path].filter((p): p is string => p !== undefined && p !== "")),
+      ]);
+    }
+    const prefixes = await tempPrefixes;
+    return prefixes.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+  };
+
   const workspaceFor = (cwd: string): Promise<CanonicalWorkspace> => {
     let workspace = workspaces.get(cwd);
     if (workspace === undefined) {
@@ -128,6 +143,15 @@ export function setupFilesystemGuard(pi: ExtensionAPI): void {
         case "deny":
           return block(toolName, target.path, "Access is not permitted.", ctx);
         case "ask":
+          // Only "ask" is downgraded; explicit deny decisions above still win,
+          // and the check covers both the tool spelling and the symlink-resolved
+          // target so /var/folders aliases behave identically.
+          if (
+            (await withinTempDir(target.path)) ||
+            (await withinTempDir(target.canonicalPath))
+          ) {
+            return;
+          }
           return ask(toolName, target.path, ctx, pi);
         case "allow":
           return;
