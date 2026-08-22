@@ -1,10 +1,10 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /** Static label shown instead of thinking content when thinking blocks are hidden. */
-const HIDDEN_THINKING_LABEL = "+ Thought";
+export const HIDDEN_THINKING_LABEL = "+ Thought";
 
 /** Rewrites assistant thinking blocks: strips a leading "thinking:" prefix and normalizes the ✦ bullet. */
-function formatThinking(markdown: string): string {
+export function formatThinking(markdown: string): string {
   const text = markdown.replace(/^\s*(?:thinking\s*:\s*)+/i, "").trim();
   if (!text) return text;
   return text.split(/\n{2,}/).map((block) => {

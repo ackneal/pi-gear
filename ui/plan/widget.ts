@@ -73,10 +73,12 @@ export function formatPlanWidgetView(view: PlanWidgetView, theme: WidgetTheme): 
 }
 
 export function createPlanWidget(view: PlanWidgetView) {
-  return (_tui: unknown, theme: WidgetTheme) => ({
-    render: (width: number): string[] => [
-      truncateToWidth(formatPlanWidgetView(view, theme), Math.max(1, width), "…"),
-    ],
-    invalidate: (): void => {},
-  });
+  return (_tui: unknown, theme: WidgetTheme) => {
+    return {
+      render: (width: number): string[] => [
+        truncateToWidth(formatPlanWidgetView(view, theme), Math.max(1, width), "…"),
+      ],
+      invalidate: (): void => {},
+    };
+  };
 }

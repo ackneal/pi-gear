@@ -22,7 +22,8 @@ const snapshot = (run: SubagentRun): SubagentRun => ({
 });
 
 export async function runChildSubagent(options: RunChildSubagentOptions): Promise<SubagentRun> {
-  let run: SubagentRun = { status: "running", startedAt: Date.now(), items: [] };
+  const startedAt = Date.now();
+  let run: SubagentRun = { status: "running", startedAt, lastActivityAt: startedAt, items: [] };
   let child: ChildProcess;
   let terminal = false;
   let aborted = false;
@@ -49,10 +50,12 @@ export async function runChildSubagent(options: RunChildSubagentOptions): Promis
       ? options.spawnChild()
       : spawnPiChild(options.profile, options.task, options.childExtension, options.spawnProcess, options.cwd);
   } catch (error) {
+    const now = Date.now();
     return {
       ...run,
       status: "error",
-      finishedAt: Date.now(),
+      finishedAt: now,
+      lastActivityAt: now,
       error: error instanceof Error ? error.message : String(error),
     };
   }
@@ -91,10 +94,12 @@ export async function runChildSubagent(options: RunChildSubagentOptions): Promis
       if (terminal) return;
       terminal = true;
       cleanup();
+      const now = Date.now();
       run = {
         ...run,
         status,
-        finishedAt: Date.now(),
+        finishedAt: now,
+        lastActivityAt: now,
         ...(error ? { error } : {}),
       };
       options.onUpdate(snapshot(run));

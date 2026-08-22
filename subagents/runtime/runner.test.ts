@@ -29,11 +29,21 @@ test("protocol handles fragmented JSON, trailing data, malformed diagnostics, an
   assert.deepEqual(decoder.push('{"type":"tool_execution_start","toolCallId":"x","toolName":"read"}\n{"bad"'), [{ type: "tool_start", id: "x", name: "read" }]);
   assert.equal(decoder.push('', true)[0]?.type, "diagnostic");
 
-  let run: SubagentRun = { status: "running", startedAt: 0, items: [] };
-  run = reduceSubagentEvent(run, { type: "tool_start", id: "x", name: "read" });
-  run = reduceSubagentEvent(run, { type: "tool_start", id: "x", name: "read" });
-  run = reduceSubagentEvent(run, { type: "tool_end", id: "x", isError: false, result: "ok" });
+  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, items: [] };
+  run = reduceSubagentEvent(run, { type: "tool_start", id: "x", name: "read" }, 1_000);
+  assert.equal(run.lastActivityAt, 1_000);
+  run = reduceSubagentEvent(run, { type: "tool_start", id: "x", name: "read" }, 2_000);
+  assert.equal(run.lastActivityAt, 2_000);
+  run = reduceSubagentEvent(run, { type: "diagnostic", message: "warn" }, 3_000);
+  assert.equal(run.lastActivityAt, 2_000);
+  run = reduceSubagentEvent(run, { type: "tool_end", id: "x", isError: false, result: "ok" }, 4_000);
+  assert.equal(run.lastActivityAt, 4_000);
   assert.deepEqual(run.items, [{ kind: "tool", id: "x", name: "read", status: "success", result: "ok" }]);
+  run = reduceSubagentEvent(run, { type: "thinking", text: "hmm" }, 5_000);
+  assert.equal(run.lastActivityAt, 5_000);
+  run = reduceSubagentEvent(run, { type: "result", text: "done" }, 6_000);
+  assert.equal(run.lastActivityAt, 6_000);
+  assert.equal(run.result, "done");
 });
 
 test("resolver follows official script, generic, Bun virtual, and packaged paths", () => {
@@ -55,11 +65,17 @@ test("child process inherits the active session cwd", () => {
 
 test("researcher child arguments isolate the child and use exactly its allowlist", () => {
   const args = childArgs(researcherProfile, "inspect", new URL("../agents/researcher/extension.ts", import.meta.url));
-  assert.ok(args.includes("--no-session") && args.includes("--no-extensions"));
+  assert.ok(
+    args.includes("--no-session") &&
+    args.includes("--no-extensions") &&
+    args.includes("--no-skills") &&
+    args.includes("--no-context-files") &&
+    args.includes("--no-prompt-templates"),
+  );
   assert.equal(args[args.indexOf("--extension") + 1]?.endsWith("subagents/agents/researcher/extension.ts"), true);
   assert.equal(args[args.indexOf("--tools") + 1], "read,exa_web_search_exa,exa_get_code_context_exa,exa_research_paper_exa,exa_crawling_exa,context7_resolve_library_id,context7_query_docs,gh_grep_searchGitHub");
   assert.equal(args.join(",").match(/\b(?:bash|edit|write)\b/), null);
-  assert.equal(RESEARCHER_SYSTEM_PROMPT, "Investigate the assigned task read-only using available tools. Return concise, evidence-backed findings. Do not modify files or task state.");
+  assert.equal(args[args.indexOf("--append-system-prompt") + 1], RESEARCHER_SYSTEM_PROMPT);
 });
 
 test("decoder and reducer bound retained data and aggregate multipart reports", () => {
@@ -68,15 +84,32 @@ test("decoder and reducer bound retained data and aggregate multipart reports", 
   const events = decodeMessage("one", "two");
   assert.deepEqual(events.filter((event) => event.type === "result"), [{ type: "result", text: "onetwo" }]);
   let run: SubagentRun = { status: "running", startedAt: 0, items: [] };
-  for (let i = 0; i < MAX_RETAINED_ITEMS + 2; i++) run = reduceSubagentEvent(run, { type: "thinking", text: "x".repeat(MAX_RETAINED_TEXT_CHARS + 1) });
-  assert.equal(run.items.length, MAX_RETAINED_ITEMS); assert.ok(run.items[0]?.kind === "thinking" && run.items[0].text.endsWith(TRUNCATION_MARKER));
+  for (let i = 0; i < MAX_RETAINED_ITEMS + 2; i++) run = reduceSubagentEvent(run, { type: "tool_start", id: `t_${i}`, name: "read" });
+  assert.equal(run.items.length, MAX_RETAINED_ITEMS);
+  run = reduceSubagentEvent(run, { type: "thinking", text: "x".repeat(MAX_RETAINED_TEXT_CHARS + 1) });
+  const lastItem = run.items[run.items.length - 1];
+  assert.ok(lastItem && lastItem.kind === "thinking" && lastItem.text.endsWith(TRUNCATION_MARKER));
 });
 
-test("compatibility tool result keeps message error state", () => {
+// Hand-written minimized transcript, not a literal `pi --mode json` capture.
+// Message shapes mirror the pinned 0.84.1 types (AssistantMessage, ToolResultMessage,
+// ThinkingContent, ToolCall) so decoder regressions against imagined protocols fail here.
+test("decodes the minimized Pi JSON-mode transcript", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const jsonl = await readFile(new URL("./fixtures/json-mode-minimized.jsonl", import.meta.url), "utf8");
+  const events = new PiJsonDecoder().push(jsonl, true);
+  assert.ok(events.some((event) => event.type === "thinking" && event.text === "Inspecting code"));
+  assert.ok(events.some((event) => event.type === "result" && event.text === "Final report"));
+  assert.ok(events.some((event) => event.type === "tool_start" && event.id === "call_42"));
+  assert.ok(events.some((event) => event.type === "tool_end" && event.id === "call_bad" && event.isError));
+  assert.equal(events.filter((event) => event.type === "usage").length, 2);
+
   let run: SubagentRun = { status: "running", startedAt: 0, items: [] };
-  run = reduceSubagentEvent(run, { type: "tool_start", id: "x", name: "read" });
-  for (const event of new PiJsonDecoder().push('{"type":"tool_result_end","message":{"toolCallId":"x","isError":true,"content":[{"type":"text","text":"failed"}]}}\n')) run = reduceSubagentEvent(run, event);
-  assert.deepEqual(run.items, [{ kind: "tool", id: "x", name: "read", status: "error", result: "failed" }]);
+  for (const event of events) run = reduceSubagentEvent(run, event);
+  assert.equal(run.result, "Final report");
+  const failedTool = run.items.find((item) => item.kind === "tool" && item.id === "call_bad");
+  assert.equal(failedTool?.kind === "tool" ? failedTool.status : undefined, "error");
+  assert.equal(run.usage?.input, 150);
 });
 
 test("child returns a final report and rejects an empty successful result", async () => {
@@ -152,3 +185,136 @@ test("nonzero stderr is bounded and abort escalates then cleans listeners", asyn
   assert.equal(hanging.stdout.listenerCount("data"), 0);
   assert.equal(hanging.stderr.listenerCount("data"), 0);
 });
+
+test("decoder emits usage only once from message_end", () => {
+  const decoder = new PiJsonDecoder();
+  const messageEndEvents = decoder.push(
+    JSON.stringify({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "report" }],
+        usage: { input: 100, output: 50, cacheRead: 20, cacheWrite: 10, totalTokens: 180, cost: { total: 0.005, input: 0.001, output: 0.004 } },
+      },
+    }) + "\n",
+  );
+  assert.deepEqual(messageEndEvents, [
+    { type: "result", text: "report" },
+    {
+      type: "usage",
+      usage: {
+        input: 100,
+        output: 50,
+        cacheRead: 20,
+        cacheWrite: 10,
+        totalTokens: 180,
+        cost: { total: 0.005, input: 0.001, output: 0.004 },
+      },
+    },
+  ]);
+
+  const turnEndEvents = decoder.push(
+    JSON.stringify({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        usage: { input: 50, output: 25 },
+      },
+    }) + "\n",
+  );
+  assert.deepEqual(turnEndEvents, []);
+
+  const agentEndEvents = decoder.push(JSON.stringify({
+    type: "agent_end",
+    messages: [{ role: "assistant", content: [], usage: { input: 100, output: 50 } }],
+  }) + "\n");
+  assert.equal(agentEndEvents.some((event) => event.type === "usage"), false);
+});
+
+test("reduceSubagentEvent sums per-message usage and every numeric cost field", () => {
+  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, items: [] };
+  const usage = {
+    input: 1000,
+    output: 500,
+    cacheRead: 200,
+    cacheWrite: 100,
+    cacheWrite1h: 40,
+    reasoning: 300,
+    totalTokens: 1800,
+    cost: { total: 1.5, input: 0.5, output: 1.0 },
+  };
+
+  run = reduceSubagentEvent(run, { type: "usage", usage }, 1_000);
+  run = reduceSubagentEvent(run, { type: "usage", usage: {
+    input: 20, output: 10, cacheRead: 5, cacheWrite: 2, cacheWrite1h: 1, reasoning: 4, totalTokens: 37,
+    cost: { input: 0.1, output: 0.2, cacheRead: 0.03, cacheWrite: 0.04, total: 0.37 },
+  } }, 2_000);
+
+  assert.deepEqual(run.usage, {
+    input: 1020, output: 510, cacheRead: 205, cacheWrite: 102, cacheWrite1h: 41, reasoning: 304, totalTokens: 1837,
+    cost: { input: 0.6, output: 1.2, cacheRead: 0.03, cacheWrite: 0.04, total: 1.87 },
+  });
+});
+
+test("thinking deltas are incremental and accumulate into one retained item", () => {
+  const decoder = new PiJsonDecoder();
+  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, items: [] };
+
+  // thinking_delta "Hel" + thinking_delta "lo" must accumulate to "Hello"
+  // in a single retained thinking item.
+  decoder.push(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } }) + "\n");
+  for (const delta of ["Hel", "lo"]) {
+    const events = decoder.push(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta } }) + "\n");
+    for (const ev of events) run = reduceSubagentEvent(run, ev);
+  }
+  assert.equal(run.items.length, 1);
+  if (run.items[0]?.kind === "thinking") assert.equal(run.items[0].text, "Hello");
+
+  // Block B: a new contentIndex creates a separate item.
+  decoder.push(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_start", contentIndex: 1 } }) + "\n");
+  const events = decoder.push(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 1, delta: "Another reasoning block" } }) + "\n");
+  for (const ev of events) run = reduceSubagentEvent(run, ev);
+
+  assert.deepEqual(run.items, [
+    { kind: "thinking", text: "Hello", contentIndex: 0 },
+    { kind: "thinking", text: "Another reasoning block", contentIndex: 1 },
+  ]);
+});
+
+test("thinking content indexes are scoped to an assistant message", () => {
+  const decoder = new PiJsonDecoder();
+  let run: SubagentRun = { status: "running", startedAt: 0, items: [] };
+  // The live delta only carries a prefix; ThinkingContent carries the full text
+  // as { type: "thinking", thinking }, so this fails unless message_end decoding
+  // reads the finalized message correctly.
+  for (const [delta, final] of [["fir", "first"], ["seco", "second"]] as const) {
+    const input = [
+      { type: "message_start" },
+      { type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta } },
+      { type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: final }] } },
+    ].map((event) => JSON.stringify(event)).join("\n") + "\n";
+    for (const event of decoder.push(input)) run = reduceSubagentEvent(run, event);
+  }
+  assert.deepEqual(run.items.map((item) => item.kind === "thinking" ? item.text : ""), ["first", "second"]);
+});
+
+test("decoder discards an oversized complete line without parsing it", () => {
+  const decoder = new PiJsonDecoder();
+  const oversized = JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "x".repeat(MAX_DECODER_BUFFER_CHARS) }] } });
+  const events = decoder.push(oversized + "\n" + JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } }) + "\n");
+  assert.equal(events[0]?.type, "diagnostic");
+  assert.deepEqual(events.filter((event) => event.type === "result"), [{ type: "result", text: "ok" }]);
+});
+
+test("cumulative streaming snapshots do not consume retained history", () => {
+  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, items: [] };
+  for (let i = 0; i < 5; i++) run = reduceSubagentEvent(run, { type: "tool_start", id: `t_${i}`, name: "read" });
+
+  // Stream many cumulative snapshots for a single in-flight block.
+  for (let i = 0; i < 50; i++) run = reduceSubagentEvent(run, { type: "thinking", text: `snapshot ${i}`, contentIndex: 7 });
+
+  const kinds = run.items.map((item) => item.kind);
+  assert.equal(kinds.filter((kind) => kind === "thinking").length, 1);
+  assert.equal(kinds.filter((kind) => kind === "tool").length, 5);
+});
+

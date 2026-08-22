@@ -30,7 +30,22 @@ export function capabilityToolNames(capabilities: readonly CapabilitySpec[]): st
 }
 
 export function childArgs(profile: SubagentProfile, task: string, childExtension: URL): string[] {
-  return ["--mode", "json", "-p", "--no-session", "--no-extensions", "--extension", fileURLToPath(childExtension), "--tools", capabilityToolNames(profile.capabilities).join(","), "--append-system-prompt", profile.systemPrompt, `Task: ${task}`];
+  return [
+    "--mode",
+    "json",
+    "--no-session",
+    "--no-extensions",
+    "--no-skills",
+    "--no-prompt-templates",
+    "--no-context-files",
+    "--extension",
+    fileURLToPath(childExtension),
+    "--tools",
+    capabilityToolNames(profile.capabilities).join(","),
+    "--append-system-prompt",
+    profile.systemPrompt,
+    task,
+  ];
 }
 
 export function spawnPiChild(
