@@ -3,17 +3,23 @@ import { selectSubagentModel } from "./model-selector.ts";
 import type { SubagentDispatch, ThinkingLevel } from "./runtime/types.ts";
 
 export const SUBAGENT_SETTINGS_ENTRY = "pi-gear.subagent-settings";
-export const SUBAGENT_MODEL_COMMAND = "gear:subagent-model";
-
-const SUBAGENTS = ["researcher", "worker"] as const;
+export const SUBAGENTS = ["researcher", "worker"] as const;
 const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
-type SubagentId = typeof SUBAGENTS[number];
+export type SubagentId = typeof SUBAGENTS[number];
 type ModelOverride = Required<SubagentDispatch>;
 type SettingsState = Partial<Record<SubagentId, ModelOverride>>;
 
+export interface SubagentSummary {
+  id: SubagentId;
+  mode: "inherit" | "override";
+  dispatch: SubagentDispatch;
+}
+
 export interface SubagentSettings {
   resolve(id: SubagentId, ctx: ExtensionContext): SubagentDispatch;
+  summaries(ctx: ExtensionContext): SubagentSummary[];
+  configure(args: string, ctx: ExtensionCommandContext): Promise<void>;
 }
 
 function isThinkingLevel(value: unknown): value is ThinkingLevel {
@@ -78,9 +84,20 @@ export function setupSubagentSettings(pi: ExtensionAPI): SubagentSettings {
   pi.on("session_start", (_event, ctx) => reconstruct(ctx));
   pi.on("session_tree", (_event, ctx) => reconstruct(ctx));
 
-  pi.registerCommand(SUBAGENT_MODEL_COMMAND, {
-    description: "Set a subagent model and thinking level for this session",
-    handler: async (args, ctx) => {
+  const resolve = (id: SubagentId, ctx: ExtensionContext): SubagentDispatch =>
+    state[id] ?? {
+      ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
+      ...(ctx.thinkingLevel ? { thinkingLevel: ctx.thinkingLevel } : {}),
+    };
+
+  return {
+    resolve,
+    summaries: (ctx) => SUBAGENTS.map((id) => ({
+      id,
+      mode: state[id] ? "override" : "inherit",
+      dispatch: resolve(id, ctx),
+    })),
+    async configure(args, ctx) {
       const id = await selectSubagent(args, ctx);
       if (!id) return;
 
@@ -107,15 +124,6 @@ export function setupSubagentSettings(pi: ExtensionAPI): SubagentSettings {
       };
       persist();
       ctx.ui.notify(`${id}: ${state[id].model} · ${selected.thinkingLevel}`, "info");
-    },
-  });
-
-  return {
-    resolve(id, ctx) {
-      return state[id] ?? {
-        ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
-        ...(ctx.thinkingLevel ? { thinkingLevel: ctx.thinkingLevel } : {}),
-      };
     },
   };
 }

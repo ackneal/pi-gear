@@ -4,6 +4,7 @@ import {
   UserMessageComponent,
 } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { formatSubagentDispatch } from "../../../subagents/runtime/dispatch.ts";
 import type { SubagentItem, SubagentRun } from "../../../subagents/runtime/types.ts";
 import { getCustomToolDefinition } from "../../tools/index.ts";
 import { formatThinking, HIDDEN_THINKING_LABEL } from "../../thinking/index.ts";
@@ -256,19 +257,6 @@ export function formatDetailContent(
 
 export const BOTTOM_SECTION_HEIGHT = 4;
 
-function formatDispatch(run: SubagentRun | undefined): string | undefined {
-  const model = run?.dispatch?.model;
-  if (!model) return undefined;
-
-  const separator = model.indexOf("/");
-  const provider = separator > 0 ? model.slice(0, separator) : undefined;
-  const modelId = separator > 0 ? model.slice(separator + 1) : model;
-  const identity = provider ? `(${provider}) ${modelId}` : modelId;
-  return run.dispatch?.thinkingLevel
-    ? `${identity} • ${run.dispatch.thinkingLevel}`
-    : identity;
-}
-
 export function frameDetailBox(
   contentLines: string[],
   entryOrTitle: SubagentViewEntry | string,
@@ -386,7 +374,7 @@ export function frameDetailBox(
 
   const scrollPart = scrollInfo ? ` · ${scrollInfo}` : "";
   const run = entry?.run;
-  const dispatch = formatDispatch(run);
+  const dispatch = formatSubagentDispatch(run?.dispatch);
   const dispatchPart = dispatch ? ` · ${dispatch}` : "";
   const leftFooter =
     theme.fg("accent", agentLabel) +

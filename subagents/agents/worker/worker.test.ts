@@ -71,7 +71,7 @@ test("worker extension configures filesystem guard and sandbox", () => {
 
   assert.ok(registeredEvents.includes("tool_call")); // filesystem guard
   assert.ok(registeredEvents.includes("session_start")); // sandbox
-  assert.ok(registeredCommands.includes("doctor")); // sandbox doctor
+  assert.deepEqual(registeredCommands, []); // child runtime exposes no user commands
   assert.ok(registeredTools.includes("bash")); // sandbox bash
 });
 

@@ -1,0 +1,41 @@
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExecutionServices } from "../execution/index.ts";
+import type { SubagentServices } from "../subagents/index.ts";
+import { formatDoctor } from "./doctor.ts";
+
+export const GEAR_COMMANDS = {
+  doctor: "gear:doctor",
+  subagentInspect: "gear:subagent-inspect",
+  subagentModel: "gear:subagent-model",
+} as const;
+
+export interface GearCommandServices {
+  execution: ExecutionServices;
+  subagents: SubagentServices;
+}
+
+export function setupCommands(pi: ExtensionAPI, services: GearCommandServices): void {
+  pi.registerCommand(GEAR_COMMANDS.subagentInspect, {
+    description: "Inspect subagent detail panels",
+    handler: async (args, ctx) => {
+      await services.subagents.inspect(ctx, args.trim() || undefined);
+    },
+  });
+
+  pi.registerCommand(GEAR_COMMANDS.subagentModel, {
+    description: "Set a subagent model and thinking level for this session",
+    handler: (args, ctx) => services.subagents.settings.configure(args, ctx),
+  });
+
+  pi.registerCommand(GEAR_COMMANDS.doctor, {
+    description: "Show pi-gear runtime diagnostics",
+    handler: async (_args, ctx) => {
+      const output = formatDoctor(
+        services.execution.sandbox.status(),
+        services.subagents.settings.summaries(ctx),
+        pi.getActiveTools(),
+      );
+      ctx.ui.notify(output, "info");
+    },
+  });
+}

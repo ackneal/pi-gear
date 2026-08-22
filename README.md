@@ -70,9 +70,9 @@ Review policy changes before using the extension. Do not weaken sensitive-file d
 
 ## Commands and tools
 
-### `/doctor`
+### `/gear:doctor`
 
-Shows the runtime information needed to diagnose execution problems:
+Shows sandbox diagnostics plus each active subagent's resolved model and thinking level:
 
 ```text
 Sandbox: enabled
@@ -80,9 +80,18 @@ Platform: darwin
 Workspace: /path/to/workspace
 Filesystem: read/edit/write guarded; other tools warn when unguarded
 Network: configured rules; unknown hosts require approval
+
+Subagents:
+- researcher: enabled · inherit · (provider) model • low
+- worker: enabled · override · (provider) model • medium
 ```
 
-When the sandbox is unavailable, `/doctor` inserts a `Reason:` line below the status. The previous `/sandbox` command has been replaced by `/doctor`.
+When the sandbox is unavailable, `/gear:doctor` inserts a `Reason:` line below the status.
+
+Other commands:
+
+- `/gear:subagent-inspect` — inspect recorded subagent runs.
+- `/gear:subagent-model` — set per-session subagent model and thinking overrides.
 
 ### `task_state`
 

@@ -1,19 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { setupSubagentSettings, SUBAGENT_MODEL_COMMAND, SUBAGENT_SETTINGS_ENTRY } from "../settings.ts";
+import { setupSubagentSettings, SUBAGENT_SETTINGS_ENTRY } from "../settings.ts";
 
 function harness(initialBranch: unknown[] = []) {
   let branch = initialBranch;
   const handlers: Record<string, (event: unknown, ctx: ExtensionContext) => void> = {};
-  let command: { handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> } | undefined;
   const appended: Array<{ customType: string; data: unknown }> = [];
   const pi = {
     on: (event: string, handler: (event: unknown, ctx: ExtensionContext) => void) => { handlers[event] = handler; },
-    registerCommand: (name: string, definition: typeof command) => {
-      assert.equal(name, SUBAGENT_MODEL_COMMAND);
-      command = definition;
-    },
     appendEntry: (customType: string, data: unknown) => {
       const entry = { type: "custom", customType, data };
       appended.push({ customType, data });
@@ -26,7 +21,6 @@ function harness(initialBranch: unknown[] = []) {
     settings,
     handlers,
     appended,
-    get command() { return command; },
     set branch(next: unknown[]) { branch = next; },
     context(overrides: Record<string, unknown> = {}) {
       return {
@@ -76,7 +70,7 @@ test("subagent model command uses the searchable custom model picker only in TUI
   });
 
   current.handlers.session_start?.({}, ctx);
-  await current.command?.handler("worker", ctx);
+  await current.settings.configure("worker", ctx);
 
   assert.equal(customCalls, 1);
   assert.deepEqual(current.settings.resolve("worker", ctx), { model: "provider/model-a", thinkingLevel: "medium" });
@@ -96,12 +90,12 @@ test("subagent model command saves and clears a session override", async () => {
   });
 
   current.handlers.session_start?.({}, ctx);
-  await current.command?.handler("worker", ctx);
+  await current.settings.configure("worker", ctx);
 
   assert.deepEqual(current.settings.resolve("worker", ctx), { model: "provider/model-a", thinkingLevel: "low" });
   assert.equal(current.appended.at(-1)?.customType, SUBAGENT_SETTINGS_ENTRY);
 
-  await current.command?.handler("worker", ctx);
+  await current.settings.configure("worker", ctx);
 
   assert.deepEqual(current.settings.resolve("worker", ctx), { model: "main/current", thinkingLevel: "low" });
   assert.match(notices.at(-1) ?? "", /inherits the main model/);
