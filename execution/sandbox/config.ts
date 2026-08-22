@@ -1,4 +1,4 @@
-import { readdir, realpath } from "node:fs/promises";
+import { readdir, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { matchesFilesystemSelector, selectorPath } from "../policy/filesystem.ts";
@@ -9,20 +9,62 @@ export const validateRuntimePath = (path: string, source: string): string => {
   return path;
 };
 
-export const createSandboxConfig = (workspaceRoot: string, policy: AccessPolicy): SandboxRuntimeConfig => {
+/** macOS aliases /tmp to /private/tmp; canonicalize before policy building so the alias cannot bypass rules. */
+export const normalizeTempAlias = (path: string, platform: NodeJS.Platform = process.platform): string =>
+  platform === "darwin" && (path === "/tmp" || path.startsWith("/tmp/")) ? `/private${path}` : path;
+
+const normalizedSelectorPath = (selector: string, workspace: string): string =>
+  normalizeTempAlias(selectorPath(selector, workspace));
+
+export interface RuntimeTempDir {
+  readonly path?: string;
+  readonly warning?: string;
+}
+
+/**
+ * Validates $TMPDIR as a runtime writable root. Failures degrade to a warning,
+ * never a sandbox startup failure.
+ */
+export const resolveRuntimeTempDir = async (
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  platform: NodeJS.Platform = process.platform,
+): Promise<RuntimeTempDir> => {
+  const raw = env.TMPDIR?.trim();
+  if (!raw) return {};
+  if (!isAbsolute(raw)) return { warning: `Ignoring TMPDIR (${raw}): not an absolute path` };
+  try {
+    const canonical = await realpath(normalizeTempAlias(raw, platform));
+    if (!(await stat(canonical)).isDirectory()) {
+      return { warning: `Ignoring TMPDIR (${raw}): not a directory` };
+    }
+    return { path: canonical };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { warning: `Ignoring TMPDIR (${raw}): ${reason}` };
+  }
+};
+
+export interface RuntimeWritePaths {
+  /** Validated process temp directory; an implementation detail, never written back to config. */
+  readonly tempDir?: string | undefined;
+}
+
+export const createSandboxConfig = (workspaceRoot: string, policy: AccessPolicy, runtime: RuntimeWritePaths = {}): SandboxRuntimeConfig => {
   const workspace = validateRuntimePath(workspaceRoot, "workspace root");
   if (!isAbsolute(workspace)) throw new Error("workspace root must be absolute");
   const denyRead = policy.filesystem.rules
     .filter((rule) => rule.access === "deny")
-    .map((rule) => selectorPath(rule.path, workspace));
+    .map((rule) => normalizedSelectorPath(rule.path, workspace));
   const denyWrite = policy.filesystem.rules
     .filter((rule) => rule.access === "deny" || rule.access === "read-only")
-    .map((rule) => selectorPath(rule.path, workspace));
+    .map((rule) => normalizedSelectorPath(rule.path, workspace));
   const allowWrite = [...new Set([
     workspace,
+    // Runtime temp exception; read access is already host-wide via allowRead: [], so no extra read rule.
+    ...(runtime.tempDir !== undefined ? [validateRuntimePath(runtime.tempDir, "TMPDIR")] : []),
     ...policy.filesystem.rules
       .filter((rule) => rule.access === "read-write")
-      .map((rule) => selectorPath(rule.path, workspace)),
+      .map((rule) => normalizedSelectorPath(rule.path, workspace)),
   ])];
   return {
     filesystem: {
@@ -77,8 +119,8 @@ const deniedWorkspaceFiles = async (workspace: string, policy: AccessPolicy): Pr
   return denied;
 };
 
-export const createEffectiveSandboxConfig = async (workspaceRoot: string, policy: AccessPolicy): Promise<SandboxRuntimeConfig> => {
-  const config = createSandboxConfig(workspaceRoot, policy);
+export const createEffectiveSandboxConfig = async (workspaceRoot: string, policy: AccessPolicy, runtime: RuntimeWritePaths = {}): Promise<SandboxRuntimeConfig> => {
+  const config = createSandboxConfig(workspaceRoot, policy, runtime);
   const [deniedFiles, followedPaths] = await Promise.all([
     deniedWorkspaceFiles(workspaceRoot, policy),
     followedPolicyPaths(workspaceRoot, policy),

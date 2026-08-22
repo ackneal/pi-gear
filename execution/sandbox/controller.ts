@@ -4,7 +4,7 @@ import { evaluateNetwork } from "../policy/network.ts";
 import { canonicalizeWorkspace, type CanonicalWorkspace } from "../filesystem/paths.ts";
 import { loadExtensionConfig } from "../../config/index.ts";
 import { SessionApprovals } from "./approvals.ts";
-import { createEffectiveSandboxConfig } from "./config.ts";
+import { createEffectiveSandboxConfig, resolveRuntimeTempDir } from "./config.ts";
 import { createSandboxedBashOperations } from "./spawn.ts";
 
 export interface SandboxManagerLike {
@@ -89,11 +89,16 @@ export class SandboxController {
       if (process.platform !== "darwin" || !this.manager.isSupportedPlatform()) {
         throw new Error(`platform ${process.platform} is unsupported`);
       }
-      const [extensionConfig, workspace] = await Promise.all([loadExtensionConfig(), canonicalizeWorkspace(ctx.cwd)]);
+      const [extensionConfig, workspace, tempDir] = await Promise.all([
+        loadExtensionConfig(),
+        canonicalizeWorkspace(ctx.cwd),
+        resolveRuntimeTempDir(),
+      ]);
+      if (tempDir.warning !== undefined && ctx.hasUI) ctx.ui.notify(tempDir.warning, "warning");
       const policy = extensionConfig;
       const dependencies = await this.manager.checkDependenciesAsync();
       if (dependencies.errors.length > 0) throw new Error(dependencies.errors.join("; "));
-      const config = await createEffectiveSandboxConfig(workspace.canonicalRoot, policy);
+      const config = await createEffectiveSandboxConfig(workspace.canonicalRoot, policy, { tempDir: tempDir.path });
       initializationAttempted = true;
       await this.manager.initialize(config, async (request: NetworkHostPattern) => {
         if (this.generation !== generation || this.approvals !== approvals) return false;
