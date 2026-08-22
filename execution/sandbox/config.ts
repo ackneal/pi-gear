@@ -106,6 +106,7 @@ export const createSandboxConfig = (workspaceRoot: string, policy: AccessPolicy,
       allowedDomains: policy.network.rules.filter((rule) => rule.access === "allow").map((rule) => rule.host),
       deniedDomains: policy.network.rules.filter((rule) => rule.access === "deny").map((rule) => rule.host),
     },
+    enableWeakerNetworkIsolation: true,
   };
 };
 

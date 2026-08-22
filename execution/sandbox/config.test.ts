@@ -127,6 +127,11 @@ test("/tmp is not writable unless configured", () => {
   assert.ok(!config.filesystem.allowWrite?.includes("/private/tmp"));
 });
 
+test("network isolation is weakened so sandboxed Go TLS verification can reach trustd", () => {
+  const config = createSandboxConfig("/workspace", barePolicy);
+  assert.equal(config.enableWeakerNetworkIsolation, true);
+});
+
 test("configured /tmp access canonicalizes to /private/tmp", () => {
   const config = createSandboxConfig("/workspace", tmpOptInPolicy);
   assert.ok(config.filesystem.allowWrite?.includes("/private/tmp/**"));
