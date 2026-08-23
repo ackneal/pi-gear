@@ -67,7 +67,23 @@ test("step reducers assign pending status and enforce semantic transitions", () 
   assert.match(applyAction(only, { action: "remove_step", id: 1 }).error ?? "", /at least 1 step/);
 });
 
-test("provider schema is flat, describes doneWhen, and exposes no status mutation", async () => {
+test("revise_step preserves a completed outcome until start_step reopens it", () => {
+  const initial = applyAction(undefined, plan).state!;
+  const completed = startAndComplete(initial, 1);
+
+  const rejected = applyAction(completed, { action: "revise_step", id: 1, outcome: "Change completed state" });
+  assert.equal(rejected.error, "Step #1 is complete; use start_step to reopen it before revising it.");
+  assert.equal(rejected.state, completed);
+  assert.equal(completed.steps[0]?.outcome, "Implement state");
+  assert.equal(completed.steps[0]?.status, "done");
+
+  const reopened = applyAction(completed, { action: "start_step", id: 1 }).state!;
+  const revised = applyAction(reopened, { action: "revise_step", id: 1, outcome: "Change reopened state" }).state!;
+  assert.equal(revised.steps[0]?.outcome, "Change reopened state");
+  assert.equal(revised.steps[0]?.status, "in_progress");
+});
+
+test("provider schema is flat, describes outcome and doneWhen, and exposes no status mutation", async () => {
   const harness = createHarness();
   setupTaskState(harness.pi);
   const schema = JSON.parse(JSON.stringify(harness.registered?.parameters)) as {
@@ -84,6 +100,8 @@ test("provider schema is flat, describes doneWhen, and exposes no status mutatio
     "set_plan", "add_step", "revise_step", "remove_step", "start_step", "complete_step",
     "add_constraint", "remove_constraint", "add_finding", "remove_finding", "show", "clear",
   ]);
+  assert.equal(schema.properties?.outcome?.description, "A coherent result, not an individual edit or command.");
+  assert.equal(schema.properties?.steps?.items?.properties?.outcome?.description, "A coherent result, not an individual edit or command.");
   assert.equal(schema.properties?.doneWhen?.description, "Observable completion condition.");
   assert.equal(schema.properties?.steps?.items?.properties?.doneWhen?.description, "Observable completion condition.");
   assert.equal(JSON.stringify(schema).includes('"status"'), false);

@@ -7,6 +7,11 @@ import { cloneTaskState, isTaskStateSnapshot, nextPlanStepId, snapshotTaskState 
 import { TASK_STATE_LIMITS, type PlanStep, type TaskState, type TaskStateAction, type TaskStateDetails } from "./types.ts";
 
 const text = (maxLength: number) => Type.String({ minLength: 1, maxLength });
+const outcome = () => Type.String({
+  minLength: 1,
+  maxLength: TASK_STATE_LIMITS.stepOutcome,
+  description: "A coherent result, not an individual edit or command.",
+});
 const doneWhen = () => Type.String({
   minLength: 1,
   maxLength: TASK_STATE_LIMITS.doneWhen,
@@ -16,7 +21,7 @@ const ACTIONS = ["set_plan", "add_step", "revise_step", "remove_step", "start_st
 const strict = <T extends TProperties>(properties: T) =>
   Type.Object(properties, { additionalProperties: false });
 const PlanStepInput = strict({
-  outcome: text(TASK_STATE_LIMITS.stepOutcome),
+  outcome: outcome(),
   doneWhen: doneWhen(),
 });
 const RuntimePlanStepInput = strict({
@@ -31,7 +36,7 @@ export const TaskStateParams = strict({
   steps: Type.Optional(Type.Array(PlanStepInput, { minItems: 1, maxItems: TASK_STATE_LIMITS.steps })),
   step: Type.Optional(PlanStepInput),
   id: Type.Optional(Type.Integer({ minimum: 1 })),
-  outcome: Type.Optional(text(TASK_STATE_LIMITS.stepOutcome)),
+  outcome: Type.Optional(outcome()),
   doneWhen: Type.Optional(doneWhen()),
   constraint: Type.Optional(text(TASK_STATE_LIMITS.constraint)),
   finding: Type.Optional(text(TASK_STATE_LIMITS.finding)),
@@ -272,6 +277,10 @@ function applyReviseStep(current: TaskState, state: TaskState, params: ReviseSte
 
   const step = state.steps.find((item) => item.id === params.id);
   if (step === undefined) return { state: current, error: `Step #${params.id} not found.` };
+  if (step.status === "done") {
+    return { state: current, error: `Step #${params.id} is complete; use start_step to reopen it before revising it.` };
+  }
+
   if (params.outcome !== undefined) step.outcome = params.outcome;
   if (params.doneWhen !== undefined) step.doneWhen = params.doneWhen;
   return { state, feedback: formatStepFeedback(`Step #${step.id} revised`, step) };
