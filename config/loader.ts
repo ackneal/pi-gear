@@ -5,7 +5,8 @@ import { parseExtensionConfig } from "./parse.ts";
 import type { ExtensionConfig, FilesystemRule } from "./types.ts";
 
 const runtimeFilesystemDefaults: readonly FilesystemRule[] = Object.freeze([
-  Object.freeze({ path: "/tmp", access: "read-write", follow: true }),
+  Object.freeze({ path: "/tmp", access: "read-write" }),
+  Object.freeze({ path: "/private/tmp", access: "read-write" }),
   Object.freeze({ path: join(getAgentDir(), "skills"), access: "read-only", follow: true }),
 ]);
 

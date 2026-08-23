@@ -65,7 +65,7 @@ test("dangling symlink writes are blocked as outside-workspace access", async ()
   }
 });
 
-test("built-in tmp access authorizes symlink targets at the guard boundary", async () => {
+test("built-in tmp access does not follow symlinks outside temp roots", async () => {
   const root = await mkdtemp(join("/tmp", "pi-gear-follow-guard-"));
   const workspace = join(root, "workspace");
   let handler: ((event: ToolCall, ctx: ExtensionContext) => Promise<unknown>) | undefined;
@@ -84,7 +84,10 @@ test("built-in tmp access authorizes symlink targets at the guard boundary", asy
       { type: "tool_call", toolName: "write", toolCallId: "test-follow-write", input: { path: "escape/new.txt" } },
       { cwd: workspace, hasUI: false } as ExtensionContext,
     );
-    assert.equal(result, undefined);
+    assert.deepEqual(result, {
+      block: true,
+      reason: "Access outside the workspace requires confirmation.",
+    });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

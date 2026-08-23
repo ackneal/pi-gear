@@ -23,7 +23,7 @@ export function setupCommands(pi: ExtensionAPI, services: GearCommandServices): 
   });
 
   pi.registerCommand(GEAR_COMMANDS.subagentModel, {
-    description: "Set a subagent model and thinking level for this session",
+    description: "Set the persistent model and thinking default for a subagent",
     handler: (args, ctx) => services.subagents.settings.configure(args, ctx),
   });
 

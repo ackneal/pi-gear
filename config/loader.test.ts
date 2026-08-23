@@ -8,13 +8,15 @@ import test from "node:test";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { loadExtensionConfig } from "./loader.ts";
 
-test("runtime filesystem defaults include writable tmp and read-only Pi skills", async () => {
+test("runtime filesystem defaults include explicit temp roots and read-only Pi skills", async () => {
   const config = await loadExtensionConfig();
+  const defaultPaths = new Set(["/tmp", "/private/tmp", join(getAgentDir(), "skills")]);
 
   assert.deepEqual(
-    config.filesystem.rules.filter((rule) => rule.path === "/tmp" || rule.path === join(getAgentDir(), "skills")),
+    config.filesystem.rules.filter((rule) => defaultPaths.has(rule.path)),
     [
-      { path: "/tmp", access: "read-write", follow: true },
+      { path: "/tmp", access: "read-write" },
+      { path: "/private/tmp", access: "read-write" },
       { path: join(getAgentDir(), "skills"), access: "read-only", follow: true },
     ],
   );
