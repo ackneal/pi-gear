@@ -93,7 +93,7 @@ Other commands:
 - `/gear:subagent-inspect` — inspect recorded subagent runs.
 - `/gear:subagent-model` — set the persistent model and thinking default for a subagent.
 
-Settings are written directly to `~/.pi/agent/pi-gear/runtime.json` and apply across sessions. Each subagent can inherit the current main model or override provider, model, and thinking level.
+Settings are written to `<PI_CODING_AGENT_DIR>/pi-gear/runtime.json` (default: `~/.pi/agent/pi-gear/runtime.json`) and apply across sessions. Each subagent can inherit the current main model or override provider, model, and thinking level.
 
 ### `task_state`
 

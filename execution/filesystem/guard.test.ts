@@ -65,10 +65,7 @@ test("dangling symlink writes are blocked as outside-workspace access", async ()
   }
 });
 
-test("follow rules authorize symlink targets at the guard boundary", async () => {
-  // The real policy marks /tmp/** as read-write with follow: true. A workspace
-  // under /tmp (where TMPDIR points in this environment) therefore passes its
-  // follow fallback through to the resolved /private target.
+test("built-in tmp access authorizes symlink targets at the guard boundary", async () => {
   const root = await mkdtemp(join("/tmp", "pi-gear-follow-guard-"));
   const workspace = join(root, "workspace");
   let handler: ((event: ToolCall, ctx: ExtensionContext) => Promise<unknown>) | undefined;

@@ -5,16 +5,6 @@
     "outsideWorkspaceDefault": "ask",
     "rules": [
       {
-        "path": "/tmp/**",
-        "access": "read-write",
-        "follow": true
-      },
-      {
-        "path": "~/.pi/agent/skills/**",
-        "access": "read-only",
-        "follow": true
-      },
-      {
         "path": "**/.env",
         "access": "deny"
       },
