@@ -1,8 +1,6 @@
 {
   "version": 1,
   "filesystem": {
-    "workspaceDefault": "read-write",
-    "outsideWorkspaceDefault": "ask",
     "rules": [
       {
         "path": "**/.env",
@@ -21,25 +19,37 @@
         "access": "deny"
       },
       {
-        "path": "~/.ssh/**",
+        "path": "~/.ssh",
         "access": "deny"
       },
       {
-        "path": "~/.aws/**",
+        "path": "~/.aws",
         "access": "deny"
       },
       {
-        "path": "~/.gnupg/**",
+        "path": "~/.gnupg",
         "access": "deny"
       },
       {
-        "path": "~/.kube/**",
+        "path": "~/.kube",
         "access": "deny"
       }
     ]
   },
   "network": {
-    "defaultAccess": "ask",
-    "rules": []
+    "rules": [
+      {
+        "host": "github.com",
+        "access": "allow"
+      },
+      {
+        "host": "*.github.com",
+        "access": "allow"
+      },
+      {
+        "host": "*.githubusercontent.com",
+        "access": "allow"
+      }
+    ]
   }
 }

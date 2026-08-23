@@ -3,11 +3,25 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { AccessPolicy } from "../../config/types.ts";
-import { evaluateFilesystem, followFallbackAccess } from "./filesystem.ts";
+import { evaluateFilesystem, followFallbackAccess, matchesFilesystemSelector } from "./filesystem.ts";
 
 const policy = (overrides: Partial<AccessPolicy> = {}): AccessPolicy => ({
-  filesystem: { workspaceDefault: "read-write", outsideWorkspaceDefault: "ask", rules: [], ...overrides.filesystem },
-  network: { defaultAccess: "ask", rules: [], ...overrides.network },
+  filesystem: { rules: [], ...overrides.filesystem },
+  network: { rules: [], ...overrides.network },
+});
+
+test("literal filesystem selectors include descendants but not similar prefixes", () => {
+  const cases = [
+    ["/home/user/.bun", "/home/user/.bun", true],
+    ["/home/user/.bun", "/home/user/.bun/bin/bun", true],
+    ["/home/user/.bun", "/home/user/.bun-other/file", false],
+    ["config.json", "config.json", true],
+    ["config.json", "config.json.backup", false],
+  ] as const;
+
+  for (const [selector, path, expected] of cases) {
+    assert.equal(matchesFilesystemSelector(selector, path), expected, `${selector} against ${path}`);
+  }
 });
 
 test("filesystem policy allows workspace access and asks outside it", () => {
@@ -17,7 +31,7 @@ test("filesystem policy allows workspace access and asks outside it", () => {
 });
 
 test("filesystem deny outranks allow and read-only blocks writes", () => {
-  const access = policy({ filesystem: { workspaceDefault: "read-write", outsideWorkspaceDefault: "ask", rules: [
+  const access = policy({ filesystem: { rules: [
     { path: "src/**", access: "read-write" },
     { path: "src/secrets/**", access: "deny" },
     { path: "docs/**", access: "read-only" },
@@ -36,7 +50,7 @@ test("filesystem deny outranks allow and read-only blocks writes", () => {
 });
 
 test("follow:true rules extend access to symlink targets while deny rules still win", () => {
-  const access = policy({ filesystem: { workspaceDefault: "read-write", outsideWorkspaceDefault: "ask", rules: [
+  const access = policy({ filesystem: { rules: [
     { path: "~/.pi/agent/skills/**", access: "read-only", follow: true },
     { path: "~/.ssh/**", access: "deny" },
   ] } });

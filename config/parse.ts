@@ -31,20 +31,6 @@ const version = (value: unknown): 1 => {
   return 1;
 };
 
-const readWriteDefault = (value: unknown): "read-write" => {
-  if (value !== "read-write") {
-    throw new Error('filesystem.workspaceDefault must be "read-write"');
-  }
-  return "read-write";
-};
-
-const askDefault = (value: unknown, name: string): "ask" => {
-  if (value !== "ask") {
-    throw new Error(`${name} must be "ask"`);
-  }
-  return "ask";
-};
-
 const string = (value: unknown, name: string): string => {
   if (typeof value !== "string" || value.length === 0) {
     throw new Error(`${name} must be a nonempty string`);
@@ -135,25 +121,15 @@ export const parseExtensionConfig = (value: unknown): ExtensionConfig => {
     const root = object(value, "config");
     exactKeys(root, "config", ["version", "filesystem", "network"]);
     const filesystem = object(root.filesystem, "filesystem");
-    exactKeys(filesystem, "filesystem", [
-      "workspaceDefault",
-      "outsideWorkspaceDefault",
-      "rules",
-    ]);
+    exactKeys(filesystem, "filesystem", ["rules"]);
     const network = object(root.network, "network");
-    exactKeys(network, "network", ["defaultAccess", "rules"]);
+    exactKeys(network, "network", ["rules"]);
 
     const policy: AccessPolicy = {
       filesystem: {
-        workspaceDefault: readWriteDefault(filesystem.workspaceDefault),
-        outsideWorkspaceDefault: askDefault(
-          filesystem.outsideWorkspaceDefault,
-          "filesystem.outsideWorkspaceDefault",
-        ),
         rules: filesystemRules(filesystem.rules),
       },
       network: {
-        defaultAccess: askDefault(network.defaultAccess, "network.defaultAccess"),
         rules: networkRules(network.rules),
       },
     };

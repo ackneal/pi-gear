@@ -10,11 +10,9 @@ import { createEffectiveSandboxConfig, createSandboxConfig, normalizeTempAlias, 
 
 const policy: AccessPolicy = {
   filesystem: {
-    workspaceDefault: "read-write",
-    outsideWorkspaceDefault: "ask",
     rules: [{ path: "/tmp/**", access: "read-write", follow: true }],
   },
-  network: { defaultAccess: "ask", rules: [] },
+  network: { rules: [] },
 };
 
 test("follow rules add canonical paths to the sandbox boundary", async () => {
@@ -39,15 +37,13 @@ test("follow rules map read-only and deny access to sandbox write and read bound
   const denied = "/tmp/pi-gear-follow-deny";
   const followPolicy: AccessPolicy = {
     filesystem: {
-      workspaceDefault: "read-write",
-      outsideWorkspaceDefault: "ask",
       rules: [
         { path: `${writable}/**`, access: "read-write", follow: true },
         { path: `${readonly}/**`, access: "read-only", follow: true },
         { path: `${denied}/**`, access: "deny", follow: true },
       ],
     },
-    network: { defaultAccess: "ask", rules: [] },
+    network: { rules: [] },
   };
 
   try {
@@ -74,8 +70,8 @@ test("follow rules map read-only and deny access to sandbox write and read bound
 });
 
 const barePolicy: AccessPolicy = {
-  filesystem: { workspaceDefault: "read-write", outsideWorkspaceDefault: "ask", rules: [] },
-  network: { defaultAccess: "ask", rules: [] },
+  filesystem: { rules: [] },
+  network: { rules: [] },
 };
 
 const tmpOptInPolicy: AccessPolicy = {

@@ -62,7 +62,7 @@ pi-gear is a Pi extension, not a standalone CLI. Configure your Pi runtime to lo
 
 ## Configuration
 
-Policy is defined in `config.json` in the repository root and loaded when the extension starts.
+Policy is loaded from `<PI_CODING_AGENT_DIR>/pi-gear/config.json` (default: `~/.pi/agent/pi-gear/config.json`). If that file does not exist, the repository-root `config.json` is used as the default and copyable example. An invalid global config fails closed instead of falling back silently.
 
 Filesystem rules use workspace-relative paths, absolute paths, or `~/` selectors. More restrictive rules take precedence over less restrictive rules. A rule with `"follow": true` also authorizes the symlink-resolved target of a matching path, so opt-in rules work through symlinks without prompting; explicit deny rules on the target still win.
 

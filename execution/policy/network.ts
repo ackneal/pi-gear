@@ -14,5 +14,5 @@ export const evaluateNetwork = (policy: AccessPolicy, host: string, port?: numbe
   const matches = policy.network.rules.filter((rule) => matchesHost(rule.host, host.toLowerCase(), port));
   if (matches.some((rule) => rule.access === "deny")) return "deny";
   if (matches.some((rule) => rule.access === "allow")) return "allow";
-  return policy.network.defaultAccess;
+  return "ask";
 };

@@ -4,15 +4,15 @@ import { parseExtensionConfig } from "./parse.ts";
 
 const validConfig = (): unknown => ({
   version: 1,
-  filesystem: { workspaceDefault: "read-write", outsideWorkspaceDefault: "ask", rules: [] },
-  network: { defaultAccess: "ask", rules: [] },
+  filesystem: { rules: [] },
+  network: { rules: [] },
 });
 
 test("configuration parsing fails closed for invalid shapes and unsafe selectors", () => {
   assert.throws(() => parseExtensionConfig({}), /Invalid policy configuration/);
   assert.throws(() => parseExtensionConfig({
     ...validConfig() as object,
-    filesystem: { workspaceDefault: "read-write", outsideWorkspaceDefault: "ask", rules: [{ path: "../secret", access: "deny" }] },
+    filesystem: { rules: [{ path: "../secret", access: "deny" }] },
   }), /Invalid policy configuration/);
   assert.throws(() => parseExtensionConfig({
     ...validConfig() as object,
@@ -24,8 +24,6 @@ test("filesystem rules accept an optional boolean follow flag", () => {
   const withFollow = parseExtensionConfig({
     ...validConfig() as object,
     filesystem: {
-      workspaceDefault: "read-write",
-      outsideWorkspaceDefault: "ask",
       rules: [{ path: "~/.pi/agent/skills/**", access: "read-only", follow: true }],
     },
   });
@@ -34,8 +32,6 @@ test("filesystem rules accept an optional boolean follow flag", () => {
   const withoutFollow = parseExtensionConfig({
     ...validConfig() as object,
     filesystem: {
-      workspaceDefault: "read-write",
-      outsideWorkspaceDefault: "ask",
       rules: [{ path: "src/**", access: "read-only" }],
     },
   });
@@ -44,16 +40,12 @@ test("filesystem rules accept an optional boolean follow flag", () => {
   assert.throws(() => parseExtensionConfig({
     ...validConfig() as object,
     filesystem: {
-      workspaceDefault: "read-write",
-      outsideWorkspaceDefault: "ask",
       rules: [{ path: "src/**", access: "read-only", follow: "yes" }],
     },
   }), /follow must be a boolean/);
   assert.throws(() => parseExtensionConfig({
     ...validConfig() as object,
     filesystem: {
-      workspaceDefault: "read-write",
-      outsideWorkspaceDefault: "ask",
       rules: [{ path: "src/**", access: "read-only", unknown: true }],
     },
   }), /invalid keys/);
