@@ -1,57 +1,36 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { selectSubagentModel } from "./model-selector.ts";
-import type { SubagentDispatch, ThinkingLevel } from "./runtime/types.ts";
+import {
+  RuntimeConfigStore,
+  type RuntimeSubagentId,
+  type RuntimeSubagentSetting,
+} from "./runtime-config.ts";
+import type { SubagentDispatch } from "./runtime/types.ts";
 
-export const SUBAGENT_SETTINGS_ENTRY = "pi-gear.subagent-settings";
 export const SUBAGENTS = ["researcher", "worker"] as const;
-const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
-export type SubagentId = typeof SUBAGENTS[number];
-type ModelOverride = Required<SubagentDispatch>;
-type SettingsState = Partial<Record<SubagentId, ModelOverride>>;
+export type SubagentId = RuntimeSubagentId;
 
 export interface SubagentSummary {
   id: SubagentId;
   mode: "inherit" | "override";
+  source: "main" | "runtime";
   dispatch: SubagentDispatch;
+  available: boolean;
+}
+
+export interface RuntimeSettingsStore {
+  load(): Promise<void>;
+  error(): string | undefined;
+  get(id: SubagentId): RuntimeSubagentSetting | undefined;
+  set(id: SubagentId, setting: RuntimeSubagentSetting): Promise<void>;
 }
 
 export interface SubagentSettings {
   resolve(id: SubagentId, ctx: ExtensionContext): SubagentDispatch;
   summaries(ctx: ExtensionContext): SubagentSummary[];
+  runtimeError(): string | undefined;
   configure(args: string, ctx: ExtensionCommandContext): Promise<void>;
-}
-
-function isThinkingLevel(value: unknown): value is ThinkingLevel {
-  return typeof value === "string" && THINKING_LEVELS.includes(value as ThinkingLevel);
-}
-
-function parseState(value: unknown): SettingsState | undefined {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-
-  const state: SettingsState = {};
-  for (const id of SUBAGENTS) {
-    const candidate = (value as Record<string, unknown>)[id];
-    if (candidate === undefined) continue;
-    if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) return undefined;
-
-    const model = (candidate as Record<string, unknown>).model;
-    const thinkingLevel = (candidate as Record<string, unknown>).thinkingLevel;
-    if (typeof model !== "string" || !model.includes("/") || !isThinkingLevel(thinkingLevel)) return undefined;
-    state[id] = { model, thinkingLevel };
-  }
-  return state;
-}
-
-function restoreState(ctx: ExtensionContext): SettingsState {
-  const branch = ctx.sessionManager.getBranch();
-  for (let index = branch.length - 1; index >= 0; index -= 1) {
-    const entry = branch[index];
-    if (entry?.type === "custom" && entry.customType === SUBAGENT_SETTINGS_ENTRY) {
-      return parseState(entry.data) ?? {};
-    }
-  }
-  return {};
 }
 
 function modelChoices(ctx: ExtensionCommandContext) {
@@ -76,54 +55,78 @@ async function selectSubagent(args: string, ctx: ExtensionCommandContext): Promi
   return SUBAGENTS.includes(selected as SubagentId) ? selected as SubagentId : undefined;
 }
 
-export function setupSubagentSettings(pi: ExtensionAPI): SubagentSettings {
-  let state: SettingsState = {};
-  const reconstruct = (ctx: ExtensionContext): void => { state = restoreState(ctx); };
-  const persist = (): void => { pi.appendEntry(SUBAGENT_SETTINGS_ENTRY, structuredClone(state)); };
+function mainDispatch(ctx: ExtensionContext): SubagentDispatch {
+  return {
+    ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
+    ...(ctx.thinkingLevel ? { thinkingLevel: ctx.thinkingLevel } : {}),
+  };
+}
 
-  pi.on("session_start", (_event, ctx) => reconstruct(ctx));
-  pi.on("session_tree", (_event, ctx) => reconstruct(ctx));
+function dispatchFor(setting: RuntimeSubagentSetting | undefined, ctx: ExtensionContext): SubagentDispatch {
+  return setting?.mode === "override"
+    ? { model: `${setting.provider}/${setting.model}`, thinkingLevel: setting.thinkingLevel }
+    : mainDispatch(ctx);
+}
+
+export function setupSubagentSettings(
+  pi: ExtensionAPI,
+  runtime: RuntimeSettingsStore = new RuntimeConfigStore(),
+): SubagentSettings {
+  pi.on("session_start", async () => runtime.load());
 
   const resolve = (id: SubagentId, ctx: ExtensionContext): SubagentDispatch =>
-    state[id] ?? {
-      ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
-      ...(ctx.thinkingLevel ? { thinkingLevel: ctx.thinkingLevel } : {}),
-    };
+    dispatchFor(runtime.get(id), ctx);
 
   return {
     resolve,
-    summaries: (ctx) => SUBAGENTS.map((id) => ({
-      id,
-      mode: state[id] ? "override" : "inherit",
-      dispatch: resolve(id, ctx),
-    })),
+    summaries(ctx) {
+      const availableModels = ctx.modelRegistry.getAvailable();
+
+      return SUBAGENTS.map((id) => {
+        const setting = runtime.get(id);
+
+        return {
+          id,
+          mode: setting?.mode ?? "inherit",
+          source: setting ? "runtime" : "main",
+          dispatch: dispatchFor(setting, ctx),
+          available: setting?.mode === "override"
+            ? availableModels.some((model) => model.provider === setting.provider && model.id === setting.model)
+            : ctx.model !== undefined,
+        };
+      });
+    },
+    runtimeError: () => runtime.error(),
     async configure(args, ctx) {
       const id = await selectSubagent(args, ctx);
       if (!id) return;
 
       const action = await selectOption(ctx, `${id} model`, ["Inherit from main", "Choose model"]);
       if (!action) return;
-      if (action === "Inherit from main") {
-        delete state[id];
-        persist();
-        ctx.ui.notify(`${id} now inherits the main model and thinking level`, "info");
-        return;
+
+      try {
+        let setting: RuntimeSubagentSetting = { mode: "inherit" };
+        if (action === "Choose model") {
+          const selected = await selectSubagentModel(
+            ctx,
+            `Select ${id} model`,
+            modelChoices(ctx),
+            resolve(id, ctx).thinkingLevel ?? "off",
+          );
+          if (!selected) return;
+          setting = {
+            mode: "override",
+            provider: selected.choice.model.provider,
+            model: selected.choice.model.id,
+            thinkingLevel: selected.thinkingLevel,
+          };
+        }
+
+        await runtime.set(id, setting);
+        ctx.ui.notify(`${id} ${setting.mode} saved as the default`, "info");
+      } catch (error) {
+        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
       }
-
-      const selected = await selectSubagentModel(
-        ctx,
-        `Select ${id} model`,
-        modelChoices(ctx),
-        state[id]?.thinkingLevel ?? ctx.thinkingLevel ?? "off",
-      );
-      if (!selected) return;
-
-      state[id] = {
-        model: `${selected.choice.model.provider}/${selected.choice.model.id}`,
-        thinkingLevel: selected.thinkingLevel,
-      };
-      persist();
-      ctx.ui.notify(`${id}: ${state[id].model} · ${selected.thinkingLevel}`, "info");
     },
   };
 }

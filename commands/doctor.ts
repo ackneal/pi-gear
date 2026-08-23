@@ -9,6 +9,7 @@ export function formatDoctor(
   subagents: SubagentSummary[],
   activeTools: readonly string[],
   platform: NodeJS.Platform = process.platform,
+  runtimeError?: string,
 ): string {
   const lines = [
     `Sandbox: ${status.enabled ? "enabled" : "unavailable"}`,
@@ -29,10 +30,12 @@ export function formatDoctor(
   }
 
   lines.push("", "Subagents:");
+  if (runtimeError) lines.push(`Runtime config: invalid · ${runtimeError}`);
   for (const summary of subagents) {
     const availability = activeTools.includes(summary.id) ? "enabled" : "disabled";
     const dispatch = formatSubagentDispatch(summary.dispatch) ?? "unresolved";
-    lines.push(`- ${summary.id}: ${availability} · ${summary.mode} · ${dispatch}`);
+    const modelStatus = summary.available ? "" : " · model unavailable";
+    lines.push(`- ${summary.id}: ${availability} · ${summary.source} ${summary.mode} · ${dispatch}${modelStatus}`);
   }
 
   return lines.join("\n");

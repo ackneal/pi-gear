@@ -91,7 +91,9 @@ When the sandbox is unavailable, `/gear:doctor` inserts a `Reason:` line below t
 Other commands:
 
 - `/gear:subagent-inspect` — inspect recorded subagent runs.
-- `/gear:subagent-model` — set per-session subagent model and thinking overrides.
+- `/gear:subagent-model` — set the persistent model and thinking default for a subagent.
+
+Settings are written directly to `~/.pi/agent/pi-gear/runtime.json` and apply across sessions. Each subagent can inherit the current main model or override provider, model, and thinking level.
 
 ### `task_state`
 

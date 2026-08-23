@@ -15,15 +15,17 @@ test("doctor reports active subagents and their resolved model settings", () => 
   const output = formatDoctor(
     sandboxStatus,
     [
-      { id: "researcher", mode: "inherit", dispatch: { model: "main/model-a", thinkingLevel: "low" } },
-      { id: "worker", mode: "override", dispatch: { model: "provider/model-b", thinkingLevel: "high" } },
+      { id: "researcher", mode: "inherit", source: "main", dispatch: { model: "main/model-a", thinkingLevel: "low" }, available: true },
+      { id: "worker", mode: "override", source: "runtime", dispatch: { model: "provider/model-b", thinkingLevel: "high" }, available: false },
     ],
     ["researcher"],
     "darwin",
+    "invalid JSON",
   );
 
-  assert.match(output, /- researcher: enabled · inherit · \(main\) model-a • low/);
-  assert.match(output, /- worker: disabled · override · \(provider\) model-b • high/);
+  assert.match(output, /Runtime config: invalid · invalid JSON/);
+  assert.match(output, /- researcher: enabled · main inherit · \(main\) model-a • low/);
+  assert.match(output, /- worker: disabled · runtime override · \(provider\) model-b • high · model unavailable/);
 });
 
 test("gear commands are centrally registered and delegate to their services", async () => {
@@ -43,6 +45,7 @@ test("gear commands are centrally registered and delegate to their services", as
         configure: async (args: string) => { calls.push(`model:${args}`); },
         resolve: () => ({}),
         summaries: () => [],
+        runtimeError: () => undefined,
       },
     },
   } as unknown as GearCommandServices;

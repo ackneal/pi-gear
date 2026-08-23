@@ -34,6 +34,8 @@ export function setupCommands(pi: ExtensionAPI, services: GearCommandServices): 
         services.execution.sandbox.status(),
         services.subagents.settings.summaries(ctx),
         pi.getActiveTools(),
+        process.platform,
+        services.subagents.settings.runtimeError(),
       );
       ctx.ui.notify(output, "info");
     },
