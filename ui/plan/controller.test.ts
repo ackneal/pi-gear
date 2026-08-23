@@ -24,8 +24,8 @@ class ManualScheduler implements PlanScheduler {
 
 const theme = { fg: (_color: string, text: string) => `\x1b[36m${text}\x1b[0m`, bold: (text: string) => `\x1b[1m${text}\x1b[0m` };
 
-function state(statuses: Array<"pending" | "in_progress" | "done"> = ["pending", "in_progress", "pending", "pending"], text: string = "Integrate context") {
-  return { goal: "Ship the Plan UI", todos: statuses.map((status, index) => ({ id: index + 1, text: index === 2 ? text : `Step ${index + 1}`, doneWhen: "Verified", status })), constraints: [], findings: [] };
+function state(statuses: Array<"pending" | "in_progress" | "done"> = ["pending", "in_progress", "pending", "pending"], outcome: string = "Integrate context") {
+  return { goal: "Ship the Plan UI", steps: statuses.map((status, index) => ({ id: index + 1, outcome: index === 2 ? outcome : `Step ${index + 1}`, doneWhen: "Verified", status })), constraints: [], findings: [] };
 }
 
 function harness() {
@@ -43,8 +43,8 @@ test("rapid done then started updates coalesce from the original stable state", 
   const done = state(["pending", "done", "pending", "pending"]);
   const started = state(["pending", "done", "in_progress", "pending"]);
   controller.reconstruct(ctx as never, before);
-  controller.update(ctx as never, before, done, { action: "update_todo", statusChanged: true });
-  controller.update(ctx as never, done, started, { action: "update_todo", statusChanged: true });
+  controller.update(ctx as never, before, done, { action: "complete_step" });
+  controller.update(ctx as never, done, started, { action: "start_step" });
   assert.match(line(2), /✓ #2 → ● #3 Integrate context/);
   timers.run(0);
   assert.match(line(2), /✓ #2 → ● #3/);
@@ -59,7 +59,7 @@ test("final completion stays visible before hiding", () => {
   const before = state(["done", "done", "in_progress", "done"]);
   const complete = state(["done", "done", "done", "done"]);
   controller.reconstruct(ctx as never, before);
-  controller.update(ctx as never, before, complete, { action: "update_todo", statusChanged: true });
+  controller.update(ctx as never, before, complete, { action: "complete_step" });
   assert.match(line(1), /✓ Plan complete · 4\/4/);
   timers.run(0);
   assert.deepEqual(calls[2], [PLAN_WIDGET_ID, undefined, { placement: "aboveEditor" }]);
@@ -70,10 +70,10 @@ test("revisions settle while findings, constraints, and show do not reset their 
   const { calls, ctx, line } = harness();
   const controller = new PlanWidgetController(timers);
   const before = state();
-  const revised = { ...before, goal: "Revised goal" };
+  const revised = { ...before, steps: [{ ...before.steps[0]!, outcome: "Revised outcome" }, ...before.steps.slice(1)] };
   const withFinding = { ...revised, findings: ["Useful finding"] };
   controller.reconstruct(ctx as never, before);
-  controller.update(ctx as never, before, revised, { action: "update_goal" });
+  controller.update(ctx as never, before, revised, { action: "revise_step" });
   controller.update(ctx as never, revised, withFinding, { action: "add_finding" });
   controller.update(ctx as never, withFinding, withFinding, { action: "show" });
   assert.equal(timers.callbacks.length, 1);
@@ -95,7 +95,7 @@ test("reconstruction is steady, shutdown cancels timers, and widget lines fit CJ
     assert.equal(rendered.length, 1);
     assert.ok(visibleWidth(rendered[0] ?? "") <= Math.max(1, width));
   }
-  controller.update(ctx as never, cjk, { ...cjk, goal: "Revised" }, { action: "update_goal" });
+  controller.update(ctx as never, cjk, { ...cjk, steps: [{ ...cjk.steps[0]!, outcome: "Revised" }, ...cjk.steps.slice(1)] }, { action: "revise_step" });
   controller.shutdown(ctx as never);
   timers.run(0);
   assert.deepEqual(calls.at(-1), [PLAN_WIDGET_ID, undefined, { placement: "aboveEditor" }]);

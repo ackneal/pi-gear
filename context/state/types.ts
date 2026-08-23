@@ -1,28 +1,28 @@
-export const TASK_STATE_VERSION = 1 as const;
+export const TASK_STATE_VERSION = 2 as const;
 
 export const TASK_STATE_LIMITS = {
   goal: 500,
-  todoText: 300,
+  stepOutcome: 300,
   doneWhen: 300,
-  todos: 10,
+  steps: 10,
   constraints: 10,
   constraint: 300,
   findings: 10,
   finding: 500,
 } as const;
 
-export type TodoStatus = "pending" | "in_progress" | "done";
+export type StepStatus = "pending" | "in_progress" | "done";
 
-export interface Todo {
+export interface PlanStep {
   id: number;
-  text: string;
+  outcome: string;
   doneWhen: string;
-  status: TodoStatus;
+  status: StepStatus;
 }
 
 export interface TaskState {
   goal: string;
-  todos: Todo[];
+  steps: PlanStep[];
   constraints: string[];
   findings: string[];
 }
@@ -34,10 +34,11 @@ export interface TaskStateSnapshot {
 
 export type TaskStateAction =
   | "set_plan"
-  | "update_goal"
-  | "add_todo"
-  | "update_todo"
-  | "remove_todo"
+  | "add_step"
+  | "revise_step"
+  | "remove_step"
+  | "start_step"
+  | "complete_step"
   | "add_constraint"
   | "remove_constraint"
   | "add_finding"

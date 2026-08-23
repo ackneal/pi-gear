@@ -4,27 +4,33 @@ import { formatPlanResult, PlanSnapshotComponent } from "./renderer.ts";
 import { visibleWidth } from "./display.ts";
 
 const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
-const state = { goal: "Ship the Plan UI", todos: [{ id: 1, text: "Build renderer", doneWhen: "Snapshots are readable", status: "done" as const }, { id: 2, text: "Test lifecycle", doneWhen: "Timers are deterministic", status: "in_progress" as const }], constraints: [], findings: [] };
+const state = { goal: "Ship the Plan UI", steps: [{ id: 1, outcome: "Build renderer", doneWhen: "Snapshots are readable", status: "done" as const }, { id: 2, outcome: "Test lifecycle", doneWhen: "Timers are deterministic", status: "in_progress" as const }], constraints: [], findings: [] };
 
 function result(action: string, params: Record<string, unknown>, next = state) {
-  return { content: [{ type: "text" as const, text: "Canonical state remains available to the model." }], details: { tool: "task_state" as const, action, params, version: 1 as const, state: next } } as never;
+  return { content: [{ type: "text" as const, text: "Canonical state remains available to the model." }], details: { tool: "task_state" as const, action, params, version: 2 as const, state: next } } as never;
 }
 
-test("status-only updates are silent while text and doneWhen revisions snapshot", () => {
-  assert.equal(formatPlanResult(result("update_todo", { id: 2, status: "done" }), { expanded: false, isPartial: false }, theme), "");
-  const revisedText = { ...state, todos: [state.todos[0]!, { ...state.todos[1]!, text: "Verify lifecycle" }] };
-  const revisedDoneWhen = { ...state, todos: [state.todos[0]!, { ...state.todos[1]!, doneWhen: "Widget hides" }] };
-  const textSnapshot = formatPlanResult(result("update_todo", { id: 2, text: "Verify lifecycle" }, revisedText), { expanded: false, isPartial: false }, theme);
-  const doneWhenSnapshot = formatPlanResult(result("update_todo", { id: 2, doneWhen: "Widget hides" }, revisedDoneWhen), { expanded: true, isPartial: false }, theme);
-  assert.match(textSnapshot, /Verify lifecycle/);
-  assert.doesNotMatch(textSnapshot, /Test lifecycle/);
+test("semantic status actions are silent while structural actions and show snapshot full details state", () => {
+  for (const action of ["start_step", "complete_step"]) {
+    assert.equal(formatPlanResult(result(action, { id: 2 }), { expanded: false, isPartial: false }, theme), "");
+  }
+
+  const revisedOutcome = { ...state, steps: [state.steps[0]!, { ...state.steps[1]!, outcome: "Verify lifecycle" }] };
+  const revisedDoneWhen = { ...state, steps: [state.steps[0]!, { ...state.steps[1]!, doneWhen: "Widget hides" }] };
+  for (const action of ["set_plan", "add_step", "remove_step", "show"]) {
+    assert.match(formatPlanResult(result(action, {}, revisedOutcome), { expanded: false, isPartial: false }, theme), /Verify lifecycle/);
+  }
+  const outcomeSnapshot = formatPlanResult(result("revise_step", { id: 2, outcome: "Verify lifecycle" }, revisedOutcome), { expanded: false, isPartial: false }, theme);
+  const doneWhenSnapshot = formatPlanResult(result("revise_step", { id: 2, doneWhen: "Widget hides" }, revisedDoneWhen), { expanded: true, isPartial: false }, theme);
+  assert.match(outcomeSnapshot, /Verify lifecycle/);
+  assert.doesNotMatch(outcomeSnapshot, /Test lifecycle/);
   assert.match(doneWhenSnapshot, /Done when: Widget hides/);
   assert.doesNotMatch(doneWhenSnapshot, /Done when: Timers are deterministic/);
 });
 
 test("snapshot components wrap long CJK steps within the actual render width", () => {
   const long = "確認長文字顯示正常並且在非常窄的終端視窗中仍然保持清楚可讀的步驟內容";
-  const component = new PlanSnapshotComponent({ ...state, todos: [{ ...state.todos[0]!, text: long }, state.todos[1]!] }, true, theme);
+  const component = new PlanSnapshotComponent({ ...state, steps: [{ ...state.steps[0]!, outcome: long }, state.steps[1]!] }, true, theme);
   const lines = component.render(24);
   assert.ok(lines.every((line) => visibleWidth(line) <= 24));
   assert.match(lines.join("\n"), /✓ #1/);

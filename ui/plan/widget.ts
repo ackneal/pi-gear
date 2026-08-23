@@ -1,4 +1,4 @@
-import type { TaskState, TodoStatus } from "../../context/state/types.ts";
+import type { StepStatus, TaskState } from "../../context/state/types.ts";
 import { sanitizeDisplayText, truncateToWidth } from "./display.ts";
 
 export const PLAN_WIDGET_ID = "pi-gear.plan";
@@ -15,45 +15,45 @@ export type PlanWidgetView =
   | { kind: "status"; before: TaskState; state: TaskState }
   | { kind: "complete"; state: TaskState };
 
-function symbol(status: TodoStatus): string {
+function symbol(status: StepStatus): string {
   return status === "done" ? "✓" : status === "in_progress" ? "●" : "○";
 }
 
 function counts(state: TaskState): string {
-  return `${state.todos.filter((todo) => todo.status === "done").length}/${state.todos.length}`;
+  return `${state.steps.filter((step) => step.status === "done").length}/${state.steps.length}`;
 }
 
-export function hasUnfinishedTodos(state: TaskState | undefined): boolean {
-  return state?.todos.some((todo) => todo.status !== "done") ?? false;
+export function hasUnfinishedSteps(state: TaskState | undefined): boolean {
+  return state?.steps.some((step) => step.status !== "done") ?? false;
 }
 
 function steady(state: TaskState, theme: WidgetTheme): string {
-  const current = state.todos.find((todo) => todo.status === "in_progress")
-    ?? state.todos.find((todo) => todo.status === "pending");
+  const current = state.steps.find((step) => step.status === "in_progress")
+    ?? state.steps.find((step) => step.status === "pending");
 
   if (!current) {
     return `${theme.fg("muted", `Plan ${counts(state)} · `)}${theme.fg("success", "✓ Complete")}`;
   }
 
   const color = current.status === "in_progress" ? "accent" : "dim";
-  return `${theme.fg("muted", `Plan ${counts(state)} · `)}${theme.fg(color, `${symbol(current.status)} #${current.id} ${sanitizeDisplayText(current.text)}`)}`;
+  return `${theme.fg("muted", `Plan ${counts(state)} · `)}${theme.fg(color, `${symbol(current.status)} #${current.id} ${sanitizeDisplayText(current.outcome)}`)}`;
 }
 
 function status(before: TaskState, state: TaskState, theme: WidgetTheme): string {
-  const changes = state.todos.flatMap((todo) => {
-    const previous = before.todos.find((item) => item.id === todo.id);
-    return previous && previous.status !== todo.status ? [{ previous, todo }] : [];
+  const changes = state.steps.flatMap((step) => {
+    const previous = before.steps.find((item) => item.id === step.id);
+    return previous && previous.status !== step.status ? [{ previous, step }] : [];
   });
-  const completed = changes.find(({ previous, todo }) => previous.status !== "done" && todo.status === "done")?.todo;
-  const started = changes.find(({ previous, todo }) => previous.status !== "in_progress" && todo.status === "in_progress")?.todo;
-  const pending = changes.find(({ todo }) => todo.status === "pending")?.todo;
+  const completed = changes.find(({ previous, step }) => previous.status !== "done" && step.status === "done")?.step;
+  const started = changes.find(({ previous, step }) => previous.status !== "in_progress" && step.status === "in_progress")?.step;
+  const pending = changes.find(({ step }) => step.status === "pending")?.step;
 
   if (completed && started) {
-    return `${theme.fg("success", `✓ #${completed.id}`)}${theme.fg("muted", " → ")}${theme.fg("accent", `● #${started.id} ${sanitizeDisplayText(started.text)}`)}`;
+    return `${theme.fg("success", `✓ #${completed.id}`)}${theme.fg("muted", " → ")}${theme.fg("accent", `● #${started.id} ${sanitizeDisplayText(started.outcome)}`)}`;
   }
   if (completed) return `${theme.fg("success", `✓ #${completed.id} completed`)}${theme.fg("muted", ` · ${counts(state)}`)}`;
-  if (started) return `${theme.fg("accent", `● #${started.id} started · ${sanitizeDisplayText(started.text)}`)}`;
-  if (pending) return `${theme.fg("warning", `○ #${pending.id} pending · ${sanitizeDisplayText(pending.text)}`)}`;
+  if (started) return `${theme.fg("accent", `● #${started.id} started · ${sanitizeDisplayText(started.outcome)}`)}`;
+  if (pending) return `${theme.fg("warning", `○ #${pending.id} pending · ${sanitizeDisplayText(pending.outcome)}`)}`;
   return steady(state, theme);
 }
 
@@ -62,7 +62,7 @@ export function formatPlanWidgetView(view: PlanWidgetView, theme: WidgetTheme): 
     case "steady":
       return steady(view.state, theme);
     case "created":
-      return `${theme.fg("success", "＋ Plan created")}${theme.fg("muted", ` · ${view.state.todos.length} steps`)}`;
+      return `${theme.fg("success", "＋ Plan created")}${theme.fg("muted", ` · ${view.state.steps.length} steps`)}`;
     case "revised":
       return `${theme.fg("accent", "↻ Plan revised")}${theme.fg("muted", ` · ${counts(view.state)}`)}`;
     case "status":

@@ -41,14 +41,13 @@ test("orders Plan before Research before Worker and replaces only its idempotent
   assert.equal(removed, base);
 });
 
-test("plan guidance contains planning semantics and recovery instruction", () => {
+test("plan guidance is concise and completion-oriented", () => {
   const prompt = composePrompt(base, ["task_state"]);
-  assert.match(prompt, /externalize and maintain the authoritative state for non-trivial work/);
-  assert.match(prompt, /one goal; 3–7 outcome-based todos.*verifiable doneWhen/);
-  assert.match(prompt, /requirements and boundaries as constraints/);
-  assert.match(prompt, /decision-relevant evidence as findings/);
-  assert.match(prompt, /Update the state as work progresses.*replan when evidence changes.*Clear only when starting a new task/);
-  assert.match(prompt, /task_state with action=show to recover the authoritative state/);
+  assert.match(prompt, /Use task_state for non-trivial work/);
+  assert.match(prompt, /Complete outcome steps only when their doneWhen is satisfied/);
+  assert.match(prompt, /prefer the smallest useful check before dependent work proceeds/);
+  assert.match(prompt, /Replan when evidence changes/);
+  assert.doesNotMatch(prompt, /authoritative|recover/);
   assert.doesNotMatch(prompt, /continu|stop|blocker|final response/i);
 });
 
@@ -58,7 +57,8 @@ test("delegation guidance preserves research terms and scopes worker tasks", () 
   assert.match(prompt, /Ask one bounded question; require a conclusion, evidence, and uncertainty/);
   assert.match(prompt, /Worker calls block/);
   assert.match(prompt, /two or more independent ready tasks/);
-  assert.match(prompt, /dispatch them together with disjoint files and clear completion checks/);
+  assert.match(prompt, /dispatch them together with disjoint files/);
   assert.match(prompt, /Do not parallelize dependencies or overlapping edits/);
+  assert.match(prompt, /Workers should satisfy focused completion checks for their delegated work/);
   assert.match(prompt, /Keep integration and final verification in the main agent/);
 });

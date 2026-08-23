@@ -23,7 +23,7 @@ Pi runs shell commands in the host environment and its built-in file tools have 
 
 - **Bash is sandboxed.** Agent commands execute inside Anthropic Sandbox Runtime with constrained filesystem and network access. If the sandbox cannot initialize, Bash does not run — there is no unsandboxed fallback.
 - **Filesystem access is policy-driven.** Pi's `read`, `edit`, and `write` tools are checked against a deny/read-only/read-write rule set with path normalization and symlink-aware resolution.
-- **Plans and research are structured.** `task_state` tracks goals, todos, constraints, and findings inside the session; a child-process researcher keeps read-only investigation isolated from the main agent.
+- **Plans and research are structured.** `task_state` tracks goals, outcome steps, constraints, and findings inside the session; a child-process researcher keeps read-only investigation isolated from the main agent.
 
 ## Features
 
@@ -32,7 +32,7 @@ Pi runs shell commands in the host environment and its built-in file tools have 
 - **Sensitive-path protection** — Credential files and directories are denied by default, and deny rules always outrank allow rules.
 - **Recursive-tool warning** — Warns when Pi enables unguarded recursive filesystem tools (`grep`, `find`, `ls`), but does not block them.
 - **Network approvals** — Sandboxed Bash uses configured allow, deny, and approval rules. Unknown hosts require approval by default.
-- **Task state** — Provides the `task_state` tool for goals, bounded todos, constraints, findings, and verifiable completion criteria.
+- **Task state** — Provides the `task_state` tool for goals, bounded outcome steps, constraints, findings, and observable completion conditions.
 - **Plan UI** — Renders task plans in the Pi interface and restores active state across session branches and compaction.
 - **Researcher** — Provides an isolated, read-only `researcher` subagent with the `read` tool and selected MCP research capabilities.
 - **Loop guard** — Sends advisory check-ins after 15 and 25 consecutive turns, then resets after the agent settles.
@@ -97,13 +97,17 @@ Settings are written to `<PI_CODING_AGENT_DIR>/pi-gear/runtime.json` (default: `
 
 ### `task_state`
 
-Use `task_state` for non-trivial work:
+Use `task_state` for non-trivial work. Its semantic actions are:
 
-```text
-set_plan → update_todo → add_constraint / add_finding → show → clear
-```
+- Plan and steps: `set_plan`, `add_step`, `revise_step`, `remove_step`, `start_step`, `complete_step`
+- Context: `add_constraint`, `remove_constraint`, `add_finding`, `remove_finding`
+- State: `show`, `clear`
 
-A plan contains one goal and 1–10 todos. Each todo has a status and a `doneWhen` verification condition. Active state is reconstructed from session history and preserved through compaction.
+A `TaskState` contains one goal and 1–10 outcome steps, plus constraints and findings. Each step's `doneWhen` is its observable completion condition. New steps are `pending`; use `start_step` and `complete_step` for status transitions because status cannot be mutated directly.
+
+Findings capture new facts that affect later decisions or replanning, not routine test or check results. Constraints and findings carry through active replanning.
+
+`TaskState` is working state. It clears automatically after the work is complete and the agent has settled. Use `clear` to abandon or reset the current state.
 
 ### `researcher`
 
