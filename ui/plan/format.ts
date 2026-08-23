@@ -1,9 +1,9 @@
-import type { TaskState, TodoStatus } from "../../context/state/types.ts";
+import type { StepStatus, TaskState } from "../../context/state/types.ts";
 import { sanitizeDisplayText, truncateToWidth, wrapDisplayText } from "./display.ts";
 
 export type PlanTheme = { fg(color: "toolTitle" | "muted" | "toolOutput" | "error" | "text", text: string): string; bold(text: string): string };
 
-function symbol(status: TodoStatus): string { return status === "done" ? "✓" : status === "in_progress" ? "●" : "○"; }
+function symbol(status: StepStatus): string { return status === "done" ? "✓" : status === "in_progress" ? "●" : "○"; }
 
 function section(lines: string[], heading: string, values: readonly string[], width: number): void {
   if (!values.length) return;
@@ -13,13 +13,13 @@ function section(lines: string[], heading: string, values: readonly string[], wi
 
 export function formatPlanSnapshotLines(state: TaskState | undefined, expanded: boolean, width: number): string[] {
   if (!state) return [truncateToWidth("Plan · Empty", width, "…")];
-  const done = state.todos.filter((todo) => todo.status === "done").length;
-  const lines = [truncateToWidth(`Plan · ${done}/${state.todos.length} complete`, width, "…")];
+  const done = state.steps.filter((step) => step.status === "done").length;
+  const lines = [truncateToWidth(`Plan · ${done}/${state.steps.length} complete`, width, "…")];
   if (expanded) section(lines, "Goal", [state.goal], width);
   lines.push(truncateToWidth("  Steps", width, "…"));
-  for (const todo of state.todos) {
-    lines.push(...wrapDisplayText(`#${todo.id} ${todo.text}`, `    ${symbol(todo.status)} `, "      ", width));
-    if (expanded) lines.push(...wrapDisplayText(`Done when: ${todo.doneWhen}`, "      ", "      ", width));
+  for (const step of state.steps) {
+    lines.push(...wrapDisplayText(`#${step.id} ${step.outcome}`, `    ${symbol(step.status)} `, "      ", width));
+    if (expanded) lines.push(...wrapDisplayText(`Done when: ${step.doneWhen}`, "      ", "      ", width));
   }
   if (expanded) {
     section(lines, "Constraints", state.constraints, width);

@@ -4,7 +4,7 @@ import { sanitizeDisplayText, visibleWidth, wrapDisplayText } from "./display.ts
 import { createPlanWidget } from "./widget.ts";
 
 test("sanitized widget content stays one actual terminal line", () => {
-  const factory = createPlanWidget({ kind: "steady", state: { goal: "Goal", todos: [{ id: 1, text: "確認\n\t\x1b[31m長文字顯示正常\x1b[0m", doneWhen: "Done", status: "in_progress" }], constraints: [], findings: [] } });
+  const factory = createPlanWidget({ kind: "steady", state: { goal: "Goal", steps: [{ id: 1, outcome: "確認\n\t\x1b[31m長文字顯示正常\x1b[0m", doneWhen: "Done", status: "in_progress" }], constraints: [], findings: [] } });
   const lines = factory(undefined, { fg: (_color: string, text: string) => text, bold: (text: string) => text }).render(24);
   assert.equal(lines.length, 1);
   assert.ok(visibleWidth(lines[0] ?? "") <= 24);

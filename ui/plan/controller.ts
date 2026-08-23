@@ -1,6 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { TaskState, TaskStateAction } from "../../context/state/types.ts";
-import { createPlanWidget, hasUnfinishedTodos, PLAN_WIDGET_ID, type PlanWidgetView } from "./widget.ts";
+import { createPlanWidget, hasUnfinishedSteps, PLAN_WIDGET_ID, type PlanWidgetView } from "./widget.ts";
 
 export const TRANSITION_DURATION_MS = 2_000;
 export const COMPLETION_DURATION_MS = 3_000;
@@ -10,12 +10,7 @@ export interface PlanScheduler {
   clearTimeout(handle: ReturnType<typeof setTimeout>): void;
 }
 
-export type PlanUiChange = {
-  action: TaskStateAction;
-  statusChanged?: boolean;
-  textChanged?: boolean;
-  doneWhenChanged?: boolean;
-};
+export type PlanUiChange = { action: TaskStateAction };
 
 type WidgetContext = Pick<ExtensionContext, "hasUI" | "mode" | "ui">;
 type Transition = { view: PlanWidgetView; before?: TaskState };
@@ -40,7 +35,7 @@ export class PlanWidgetController {
     this.cancelTimer();
     this.transition = undefined;
     this.latest = state;
-    this.render(ctx, hasUnfinishedTodos(state) && state ? { kind: "steady", state } : undefined);
+    this.render(ctx, hasUnfinishedSteps(state) && state ? { kind: "steady", state } : undefined);
   }
 
   update(
@@ -58,7 +53,7 @@ export class PlanWidgetController {
       return;
     }
 
-    if (!hasUnfinishedTodos(state) && hasUnfinishedTodos(previous)) {
+    if (!hasUnfinishedSteps(state) && hasUnfinishedSteps(previous)) {
       this.begin(ctx, { view: { kind: "complete", state } }, COMPLETION_DURATION_MS);
       return;
     }
@@ -68,7 +63,7 @@ export class PlanWidgetController {
       return;
     }
 
-    if (this.isStatusOnly(change) && this.hasStatusChange(previous, state)) {
+    if (this.isStatusTransition(change) && this.hasStatusChange(previous, state)) {
       const before = this.transition?.view.kind === "status"
         ? this.transition.before ?? previous ?? state
         : previous ?? state;
@@ -87,7 +82,7 @@ export class PlanWidgetController {
       return;
     }
 
-    this.render(ctx, hasUnfinishedTodos(state) ? { kind: "steady", state } : undefined);
+    this.render(ctx, hasUnfinishedSteps(state) ? { kind: "steady", state } : undefined);
   }
 
   shutdown(ctx: WidgetContext): void {
@@ -110,7 +105,7 @@ export class PlanWidgetController {
       this.transition = undefined;
       this.render(
         ctx,
-        hasUnfinishedTodos(this.latest) && this.latest
+        hasUnfinishedSteps(this.latest) && this.latest
           ? { kind: "steady", state: this.latest }
           : undefined,
       );
@@ -125,24 +120,20 @@ export class PlanWidgetController {
     return { kind: "steady", state };
   }
 
-  private isStatusOnly(change: PlanUiChange): boolean {
-    return change.action === "update_todo"
-      && Boolean(change.statusChanged)
-      && !change.textChanged
-      && !change.doneWhenChanged;
+  private isStatusTransition(change: PlanUiChange): boolean {
+    return change.action === "start_step" || change.action === "complete_step";
   }
 
   private isStructural(change: PlanUiChange): boolean {
     return change.action === "set_plan"
-      || change.action === "update_goal"
-      || change.action === "add_todo"
-      || change.action === "remove_todo"
-      || (change.action === "update_todo" && Boolean(change.textChanged || change.doneWhenChanged));
+      || change.action === "add_step"
+      || change.action === "revise_step"
+      || change.action === "remove_step";
   }
 
   private hasStatusChange(previous: TaskState | undefined, state: TaskState): boolean {
-    return previous?.todos.some((todo) =>
-      state.todos.find((item) => item.id === todo.id)?.status !== todo.status,
+    return previous?.steps.some((step) =>
+      state.steps.find((item) => item.id === step.id)?.status !== step.status,
     ) ?? false;
   }
 

@@ -53,10 +53,11 @@ export class PlanSnapshotComponent {
 }
 
 function isSnapshot(details: TaskStateDetails | undefined): boolean {
-  if (!details) return false;
-  if (details.action !== "update_todo") return details.action === "set_plan" || details.action === "update_goal" || details.action === "add_todo" || details.action === "remove_todo" || details.action === "show";
-  const params = record(details.params);
-  return params?.text !== undefined || params?.doneWhen !== undefined;
+  return details?.action === "set_plan"
+    || details?.action === "add_step"
+    || details?.action === "revise_step"
+    || details?.action === "remove_step"
+    || details?.action === "show";
 }
 
 function successful(details: TaskStateDetails | undefined, expanded: boolean, theme: PlanTheme): string {
