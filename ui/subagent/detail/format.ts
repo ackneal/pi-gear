@@ -4,6 +4,7 @@ import {
   UserMessageComponent,
 } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { formatSubagentDispatch } from "../../../subagents/runtime/dispatch.ts";
 import type { SubagentItem, SubagentRun } from "../../../subagents/runtime/types.ts";
 import { getCustomToolDefinition } from "../../tools/index.ts";
 import { formatThinking, HIDDEN_THINKING_LABEL } from "../../thinking/index.ts";
@@ -372,11 +373,13 @@ export function frameDetailBox(
   }
 
   const scrollPart = scrollInfo ? ` · ${scrollInfo}` : "";
+  const run = entry?.run;
+  const dispatch = formatSubagentDispatch(run?.dispatch);
+  const dispatchPart = dispatch ? ` · ${dispatch}` : "";
   const leftFooter =
     theme.fg("accent", agentLabel) +
-    theme.fg("muted", ` · ${toolStr}${scrollPart}`);
+    theme.fg("muted", `${dispatchPart} · ${toolStr}${scrollPart}`);
 
-  const run = entry?.run;
   const startedAt = run?.startedAt ?? now;
   const finishedAt = run?.finishedAt ?? now;
   const elapsed = Math.max(0, finishedAt - startedAt);

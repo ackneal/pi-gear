@@ -18,12 +18,19 @@ export interface RunChildSubagentOptions extends RunSubagentOptions {
 
 const snapshot = (run: SubagentRun): SubagentRun => ({
   ...run,
+  ...(run.dispatch ? { dispatch: { ...run.dispatch } } : {}),
   items: run.items.map((item) => ({ ...item })),
 });
 
 export async function runChildSubagent(options: RunChildSubagentOptions): Promise<SubagentRun> {
   const startedAt = Date.now();
-  let run: SubagentRun = { status: "running", startedAt, lastActivityAt: startedAt, items: [] };
+  let run: SubagentRun = {
+    status: "running",
+    startedAt,
+    lastActivityAt: startedAt,
+    items: [],
+    ...(options.dispatch ? { dispatch: { ...options.dispatch } } : {}),
+  };
   let child: ChildProcess;
   let terminal = false;
   let aborted = false;
@@ -48,7 +55,7 @@ export async function runChildSubagent(options: RunChildSubagentOptions): Promis
   try {
     child = options.spawnChild
       ? options.spawnChild()
-      : spawnPiChild(options.profile, options.task, options.childExtension, options.spawnProcess, options.cwd);
+      : spawnPiChild(options.profile, options.task, options.childExtension, options.spawnProcess, options.cwd, options.dispatch);
   } catch (error) {
     const now = Date.now();
     return {

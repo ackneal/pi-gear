@@ -1,19 +1,7 @@
 {
   "version": 1,
   "filesystem": {
-    "workspaceDefault": "read-write",
-    "outsideWorkspaceDefault": "ask",
     "rules": [
-      {
-        "path": "/tmp/**",
-        "access": "read-write",
-        "follow": true
-      },
-      {
-        "path": "~/.pi/agent/skills/**",
-        "access": "read-only",
-        "follow": true
-      },
       {
         "path": "**/.env",
         "access": "deny"
@@ -31,25 +19,37 @@
         "access": "deny"
       },
       {
-        "path": "~/.ssh/**",
+        "path": "~/.ssh",
         "access": "deny"
       },
       {
-        "path": "~/.aws/**",
+        "path": "~/.aws",
         "access": "deny"
       },
       {
-        "path": "~/.gnupg/**",
+        "path": "~/.gnupg",
         "access": "deny"
       },
       {
-        "path": "~/.kube/**",
+        "path": "~/.kube",
         "access": "deny"
       }
     ]
   },
   "network": {
-    "defaultAccess": "ask",
-    "rules": []
+    "rules": [
+      {
+        "host": "github.com",
+        "access": "allow"
+      },
+      {
+        "host": "*.github.com",
+        "access": "allow"
+      },
+      {
+        "host": "*.githubusercontent.com",
+        "access": "allow"
+      }
+    ]
   }
 }

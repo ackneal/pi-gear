@@ -49,6 +49,7 @@ export class SessionApprovals {
       return false;
     }
     if (!this.isCurrent()) return false;
+    if (this.approvedHosts.has(key)) return true;
 
     this.approvedHosts.add(key);
     void Promise.resolve(this.ui.sendMessage(`User approved network access: ${key}`)).catch(() => undefined);

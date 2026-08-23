@@ -4,8 +4,8 @@ import type { AccessPolicy } from "../../config/types.ts";
 import { evaluateNetwork } from "./network.ts";
 
 const policy: AccessPolicy = {
-  filesystem: { workspaceDefault: "read-write", outsideWorkspaceDefault: "ask", rules: [] },
-  network: { defaultAccess: "ask", rules: [
+  filesystem: { rules: [] },
+  network: { rules: [
     { host: "api.example.com:443", access: "allow" },
     { host: "*.example.com", access: "allow" },
     { host: "blocked.example.com", access: "deny" },

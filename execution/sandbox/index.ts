@@ -2,28 +2,11 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { SandboxController, type SandboxStatus } from "./controller.ts";
 import { createSandboxBashTool } from "../../ui/tools/index.ts";
 
-const describeDomains = (domains: readonly string[]): string => domains.length > 0 ? domains.join(", ") : "(none)";
-
-/** Pi adapter: register the controller's lifecycle, bash operations, and status surface. */
-export function formatDoctor(status: SandboxStatus, platform: NodeJS.Platform = process.platform): string {
-  const lines = [
-    `Sandbox: ${status.enabled ? "enabled" : "unavailable"}`,
-    `Platform: ${platform}`,
-    `Workspace: ${status.workspace}`,
-    "Filesystem: read/edit/write guarded; other tools warn when unguarded",
-  ];
-  if (status.network !== undefined) {
-    lines.push(`Network allow: ${describeDomains(status.network.allowedDomains)}`);
-    lines.push(`Network deny: ${describeDomains(status.network.deniedDomains)}`);
-    lines.push("Network other hosts: require approval");
-  } else {
-    lines.push("Network: unavailable");
-  }
-  if (!status.enabled && status.reason !== undefined) lines.splice(1, 0, `Reason: ${status.reason}`);
-  return lines.join("\n");
+export interface SandboxDiagnostics {
+  status(): SandboxStatus;
 }
 
-export function setupSandbox(pi: ExtensionAPI): void {
+export function setupSandbox(pi: ExtensionAPI): SandboxDiagnostics {
   const controller = new SandboxController((content) =>
     pi.sendMessage({ customType: "sandbox", content, display: false }),
   );
@@ -38,10 +21,7 @@ export function setupSandbox(pi: ExtensionAPI): void {
     pi.registerTool(createSandboxBashTool(ctx.cwd, controller.operations));
   });
 
-  pi.registerCommand("doctor", {
-    description: "Show pi-gear runtime diagnostics",
-    handler: async (_args, ctx) => {
-      ctx.ui.notify(formatDoctor(controller.status()), "info");
-    },
-  });
+  return {
+    status: () => controller.status(),
+  };
 }

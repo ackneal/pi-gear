@@ -1,4 +1,4 @@
-import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   openSubagentDetailOverlay,
   recordSubagentLiveStart,
@@ -20,8 +20,16 @@ import {
   runWorker,
 } from "./agents/worker/index.ts";
 import type { SubagentRun } from "./runtime/types.ts";
+import { setupSubagentSettings, type SubagentSettings } from "./settings.ts";
 
-export function setupSubagents(pi: ExtensionAPI): void {
+export interface SubagentServices {
+  settings: SubagentSettings;
+  inspect(ctx: ExtensionContext, toolCallId?: string): Promise<void>;
+}
+
+export function setupSubagents(pi: ExtensionAPI): SubagentServices {
+  const settings = setupSubagentSettings(pi);
+
   // AgentToolResult has no isError field: a normal return always means success.
   // Flag failed subagent runs through the tool_result hook so Pi records them as errors.
   pi.on("tool_result", (event) => {
@@ -52,6 +60,7 @@ export function setupSubagents(pi: ExtensionAPI): void {
         researcherInput,
         {
           cwd: ctx.cwd,
+          dispatch: settings.resolve("researcher", ctx),
           ...(signal ? { signal } : {}),
           onUpdate: (next) => {
             if (toolCallId) {
@@ -95,6 +104,7 @@ export function setupSubagents(pi: ExtensionAPI): void {
         workerInput,
         {
           cwd: ctx.cwd,
+          dispatch: settings.resolve("worker", ctx),
           ...(signal ? { signal } : {}),
           onUpdate: (next) => {
             if (toolCallId) {
@@ -123,11 +133,10 @@ export function setupSubagents(pi: ExtensionAPI): void {
     renderShell: "self",
   });
 
-  pi.registerCommand("subagent", {
-    description: "Inspect subagent detail overlay",
-    handler: async (args, ctx) =>
-      openSubagentDetailOverlay(ctx, args.trim() || undefined),
-  });
+  return {
+    settings,
+    inspect: (ctx, toolCallId) => openSubagentDetailOverlay(ctx, toolCallId),
+  };
 }
 
 export { RESEARCHER_TOOL_NAME, researcherProfile, runResearcher } from "./agents/researcher/index.ts";

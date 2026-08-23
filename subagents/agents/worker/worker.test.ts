@@ -15,7 +15,7 @@ test("worker profile, prompt, and capabilities match specification", () => {
   assert.equal(WORKER_TOOL_NAME, "worker");
   assert.equal(workerProfile.id, "worker");
   assert.equal(workerProfile.label, "worker");
-  assert.equal(workerProfile.description, "Delegate bounded, independent work that can proceed in parallel.");
+  assert.equal(workerProfile.description, "Delegate one of several disjoint tasks for parallel execution.");
   assert.equal(workerProfile.systemPrompt, WORKER_SYSTEM_PROMPT);
   assert.match(WORKER_SYSTEM_PROMPT, /only the delegated scope/);
   assert.match(WORKER_SYSTEM_PROMPT, /authoritative code and types/);
@@ -71,7 +71,7 @@ test("worker extension configures filesystem guard and sandbox", () => {
 
   assert.ok(registeredEvents.includes("tool_call")); // filesystem guard
   assert.ok(registeredEvents.includes("session_start")); // sandbox
-  assert.ok(registeredCommands.includes("doctor")); // sandbox doctor
+  assert.deepEqual(registeredCommands, []); // child runtime exposes no user commands
   assert.ok(registeredTools.includes("bash")); // sandbox bash
 });
 
@@ -106,7 +106,7 @@ test("setupSubagents registers researcher and worker tools", async () => {
   const workerTool = tools.get("worker")!;
   assert.equal(workerTool.label, "worker");
   assert.equal(workerTool.executionMode, "parallel");
-  assert.equal(workerTool.description, "Delegate bounded, independent work that can proceed in parallel.");
+  assert.equal(workerTool.description, "Delegate one of several disjoint tasks for parallel execution.");
 });
 
 test("setupSubagents flags failed subagent runs as tool errors", () => {

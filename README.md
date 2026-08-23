@@ -43,7 +43,7 @@ Pi runs shell commands in the host environment and its built-in file tools have 
 | --- | --- |
 | **Operating system** | macOS for Sandbox Runtime |
 | **Node.js** | >= 22.19.0 |
-| **Package manager** | npm |
+| **Package manager** | bun |
 | **Pi** | `@earendil-works/pi-coding-agent` runtime |
 
 ## Install and load
@@ -51,7 +51,7 @@ Pi runs shell commands in the host environment and its built-in file tools have 
 Install dependencies from the repository root:
 
 ```sh
-npm ci
+bun install
 ```
 
 pi-gear is a Pi extension, not a standalone CLI. Configure your Pi runtime to load the extension entry point:
@@ -62,7 +62,7 @@ pi-gear is a Pi extension, not a standalone CLI. Configure your Pi runtime to lo
 
 ## Configuration
 
-Policy is defined in `config.json` in the repository root and loaded when the extension starts.
+Policy is loaded from `<PI_CODING_AGENT_DIR>/pi-gear/config.json` (default: `~/.pi/agent/pi-gear/config.json`). If that file does not exist, the repository-root `config.json` is used as the default and copyable example. An invalid global config fails closed instead of falling back silently.
 
 Filesystem rules use workspace-relative paths, absolute paths, or `~/` selectors. More restrictive rules take precedence over less restrictive rules. A rule with `"follow": true` also authorizes the symlink-resolved target of a matching path, so opt-in rules work through symlinks without prompting; explicit deny rules on the target still win.
 
@@ -70,9 +70,9 @@ Review policy changes before using the extension. Do not weaken sensitive-file d
 
 ## Commands and tools
 
-### `/doctor`
+### `/gear:doctor`
 
-Shows the runtime information needed to diagnose execution problems:
+Shows sandbox diagnostics plus each active subagent's resolved model and thinking level:
 
 ```text
 Sandbox: enabled
@@ -80,9 +80,20 @@ Platform: darwin
 Workspace: /path/to/workspace
 Filesystem: read/edit/write guarded; other tools warn when unguarded
 Network: configured rules; unknown hosts require approval
+
+Subagents:
+- researcher: enabled · inherit · (provider) model • low
+- worker: enabled · override · (provider) model • medium
 ```
 
-When the sandbox is unavailable, `/doctor` inserts a `Reason:` line below the status. The previous `/sandbox` command has been replaced by `/doctor`.
+When the sandbox is unavailable, `/gear:doctor` inserts a `Reason:` line below the status.
+
+Other commands:
+
+- `/gear:subagent-inspect` — inspect recorded subagent runs.
+- `/gear:subagent-model` — set the persistent model and thinking default for a subagent.
+
+Settings are written to `<PI_CODING_AGENT_DIR>/pi-gear/runtime.json` (default: `~/.pi/agent/pi-gear/runtime.json`) and apply across sessions. Each subagent can inherit the current main model or override provider, model, and thinking level.
 
 ### `task_state`
 
@@ -127,13 +138,13 @@ The researcher inherits the active session working directory so local reads reso
 Run the type checker:
 
 ```sh
-npm run typecheck
+bun run typecheck
 ```
 
 Run the test suite:
 
 ```sh
-npm test
+bun run test
 ```
 
 The suite covers policy, path, sandbox lifecycle, researcher runtime, task-state, Plan UI, and tool-renderer behavior. Two tests exercise the real Sandbox Runtime (sandbox integration and spawn lifecycle); in restricted environments they fail with `EPERM` when `/tmp/claude/srt-mux-*.sock` cannot be created — an environment permission issue, not an assertion failure.

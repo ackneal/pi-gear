@@ -52,11 +52,13 @@ test("plan guidance contains planning semantics and recovery instruction", () =>
   assert.doesNotMatch(prompt, /continu|stop|blocker|final response/i);
 });
 
-test("delegation guidance limits workers to independent parallel work", () => {
+test("delegation guidance preserves research terms and scopes worker tasks", () => {
   const prompt = composePrompt(base, ["researcher", "worker"]);
+  assert.match(prompt, /Preserve exact identifiers and quoted terms in delegated questions/);
   assert.match(prompt, /Ask one bounded question; require a conclusion, evidence, and uncertainty/);
-  assert.match(prompt, /parallelize bounded, independent work/);
-  assert.match(prompt, /known context, constraints, expected outcomes, and checks/);
-  assert.match(prompt, /Parallelize only disjoint workspace changes/);
-  assert.match(prompt, /you own integration and final verification/);
+  assert.match(prompt, /Worker calls block/);
+  assert.match(prompt, /two or more independent ready tasks/);
+  assert.match(prompt, /dispatch them together with disjoint files and clear completion checks/);
+  assert.match(prompt, /Do not parallelize dependencies or overlapping edits/);
+  assert.match(prompt, /Keep integration and final verification in the main agent/);
 });

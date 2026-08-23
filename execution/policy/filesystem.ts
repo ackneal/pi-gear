@@ -45,7 +45,8 @@ const globRegex = (pattern: string): RegExp => {
 };
 
 export const matchesFilesystemSelector = (selector: string, workspacePath: string): boolean =>
-  globRegex(selector).test(workspacePath);
+  globRegex(selector).test(workspacePath) ||
+  !selector.includes("*") && workspacePath.startsWith(`${selector}/`);
 
 const relativeWorkspacePath = (workspaceRoot: string, path: string): string | undefined => {
   const candidate = relative(workspaceRoot, path);
@@ -87,14 +88,14 @@ export const evaluateFilesystem = (
 
   let access: FilesystemAccess | undefined = workspacePath === undefined
     ? undefined
-    : policy.filesystem.workspaceDefault;
+    : "read-write";
   for (const rule of matches) {
     if (access === undefined || rank(rule.access) > rank(access)) access = rule.access;
   }
 
   if (access === undefined) {
     if (followFallback !== undefined) return decisionForAccess(followFallback, operation);
-    return policy.filesystem.outsideWorkspaceDefault;
+    return "ask";
   }
   return decisionForAccess(access, operation);
 };

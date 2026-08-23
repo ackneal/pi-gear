@@ -9,6 +9,7 @@ export interface SubagentRun {
   finishedAt?: number;
   lastActivityAt?: number;
   items: SubagentItem[];
+  dispatch?: SubagentDispatch;
   result?: string;
   error?: string;
   usage?: {
@@ -30,4 +31,6 @@ export interface SubagentRun {
 }
 export interface SubagentPresentation { activity?: { starting?: string; complete?: string; drafting?: string; failed?: string; aborted?: string; }; }
 export interface SubagentProfile { id: string; label: string; description: string; systemPrompt: string; capabilities: readonly CapabilitySpec[]; presentation?: SubagentPresentation; }
-export interface RunSubagentOptions { task: string; profile: SubagentProfile; signal?: AbortSignal; onUpdate: (run: SubagentRun) => void; }
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export interface SubagentDispatch { model?: string; thinkingLevel?: ThinkingLevel; }
+export interface RunSubagentOptions { task: string; profile: SubagentProfile; dispatch?: SubagentDispatch; signal?: AbortSignal; onUpdate: (run: SubagentRun) => void; }

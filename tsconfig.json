@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["index.ts", "context/**/*.ts", "config/**/*.ts", "execution/**/*.ts", "capabilities/**/*.ts", "subagents/**/*.ts", "ui/**/*.ts"]
+  "include": ["index.ts", "commands/**/*.ts", "context/**/*.ts", "config/**/*.ts", "execution/**/*.ts", "capabilities/**/*.ts", "subagents/**/*.ts", "ui/**/*.ts"]
 }

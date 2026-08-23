@@ -12,7 +12,7 @@ export const WORKER_CAPABILITIES = [
 export const workerProfile: SubagentProfile = {
   id: "worker",
   label: "worker",
-  description: "Delegate bounded, independent work that can proceed in parallel.",
+  description: "Delegate one of several disjoint tasks for parallel execution.",
   systemPrompt: WORKER_SYSTEM_PROMPT,
   capabilities: WORKER_CAPABILITIES,
   presentation: {

@@ -15,12 +15,9 @@ export interface NetworkRule {
 
 export interface AccessPolicy {
   readonly filesystem: {
-    readonly workspaceDefault: "read-write";
-    readonly outsideWorkspaceDefault: "ask";
     readonly rules: readonly FilesystemRule[];
   };
   readonly network: {
-    readonly defaultAccess: "ask";
     readonly rules: readonly NetworkRule[];
   };
 }

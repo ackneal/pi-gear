@@ -1,11 +1,12 @@
 {
   "name": "pi-gear",
   "private": true,
+  "packageManager": "bun@1.3.13",
   "license": "MIT",
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --experimental-strip-types --test config/*.test.ts context/*/*.test.ts execution/*/*.test.ts execution/*/*/*.test.ts lifecycle/*.test.ts subagents/*/*.test.ts subagents/*/*/*.test.ts ui/*/*.test.ts ui/*/*/*.test.ts"
+    "test": "node --experimental-strip-types --test commands/*.test.ts config/*.test.ts context/*/*.test.ts execution/*/*.test.ts execution/*/*/*.test.ts lifecycle/*.test.ts subagents/*/*.test.ts subagents/*/*/*.test.ts ui/*/*.test.ts ui/*/*/*.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.71",
