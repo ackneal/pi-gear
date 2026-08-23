@@ -15,7 +15,7 @@ const policy: AccessPolicy = {
   network: { rules: [] },
 };
 
-test("follow rules add canonical paths to the sandbox boundary", async () => {
+test("follow rules add canonical paths to the sandbox boundary", { skip: process.platform !== "darwin" }, async () => {
   const workspace = await mkdtemp(join(tmpdir(), "pi-gear-config-"));
 
   try {
@@ -130,7 +130,7 @@ test("network isolation is weakened so sandboxed Go TLS verification can reach t
   assert.equal(config.enableWeakerNetworkIsolation, true);
 });
 
-test("configured /tmp access canonicalizes to /private/tmp", () => {
+test("configured /tmp access canonicalizes to /private/tmp", { skip: process.platform !== "darwin" }, () => {
   const config = createSandboxConfig("/workspace", tmpOptInPolicy);
   assert.ok(config.filesystem.allowWrite?.includes("/private/tmp/**"));
   assert.ok(!config.filesystem.allowWrite?.includes("/tmp/**"));
