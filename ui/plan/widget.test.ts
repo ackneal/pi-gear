@@ -34,6 +34,11 @@ test("status bar distinguishes completion progress and uses consistent action wo
       expected: "Plan · ✓2/3 · ○ #3 Implement runtime policy",
     },
     {
+      name: "steady completed plan",
+      view: { kind: "steady", state: state(["done", "done", "done"]) },
+      expected: "Plan · ✓3/3 · Complete",
+    },
+    {
       name: "plan created",
       view: { kind: "created", state: state(["pending", "pending", "pending"]) },
       expected: "＋ Plan created · 3 steps",

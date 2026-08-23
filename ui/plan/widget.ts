@@ -36,7 +36,7 @@ function steady(state: TaskState, theme: WidgetTheme): string {
     ?? state.steps.find((step) => step.status === "pending");
 
   if (!current) {
-    return `${theme.fg("muted", `Plan · ${progress(state)} · `)}${theme.fg("success", "✓ Complete")}`;
+    return `${theme.fg("muted", `Plan · ${progress(state)} · `)}${theme.fg("success", "Complete")}`;
   }
 
   const color = current.status === "in_progress" ? "accent" : "dim";
