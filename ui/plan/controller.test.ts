@@ -45,11 +45,11 @@ test("rapid done then started updates coalesce from the original stable state", 
   controller.reconstruct(ctx as never, before);
   controller.update(ctx as never, before, done, { action: "complete_step" });
   controller.update(ctx as never, done, started, { action: "start_step" });
-  assert.match(line(2), /✓ #2 → ● #3 Integrate context/);
+  assert.match(line(2), /✓ #2 completed · ✓1\/4 → ● #3 started · Integrate context/);
   timers.run(0);
-  assert.match(line(2), /✓ #2 → ● #3/);
+  assert.match(line(2), /✓ #2 completed · ✓1\/4 → ● #3 started/);
   timers.run(1);
-  assert.match(line(3), /Plan 1\/4 · ● #3 Integrate context/);
+  assert.match(line(3), /Plan · ✓1\/4 · ● #3 Integrate context/);
 });
 
 test("final completion stays visible before hiding", () => {
@@ -77,9 +77,9 @@ test("revisions settle while findings, constraints, and show do not reset their 
   controller.update(ctx as never, revised, withFinding, { action: "add_finding" });
   controller.update(ctx as never, withFinding, withFinding, { action: "show" });
   assert.equal(timers.callbacks.length, 1);
-  assert.match(line(3), /↻ Plan revised · 0\/4/);
+  assert.match(line(3), /↻ Plan revised · ✓0\/4/);
   timers.run(0);
-  assert.match(line(4), /Plan 0\/4 · ● #2 Step 2/);
+  assert.match(line(4), /Plan · ✓0\/4 · ● #2 Step 2/);
   assert.equal(calls.length, 5);
 });
 
@@ -89,7 +89,7 @@ test("reconstruction is steady, shutdown cancels timers, and widget lines fit CJ
   const controller = new PlanWidgetController(timers);
   const cjk = state(["pending", "pending", "in_progress", "pending"], "確認\x1b[31m長文字顯示正常並且在窄終端保持單行\x1b[0m");
   controller.reconstruct(ctx as never, cjk);
-  assert.match(line(0), /Plan 0\/4 · ● #3/);
+  assert.match(line(0), /Plan · ✓0\/4 · ● #3/);
   for (const width of [1, 24, 92]) {
     const rendered = (calls[0]?.[1] as (tui: unknown, currentTheme: typeof theme) => { render(width: number): string[] })(undefined, theme).render(width);
     assert.equal(rendered.length, 1);
