@@ -43,7 +43,7 @@ Pi runs shell commands in the host environment and its built-in file tools have 
 | --- | --- |
 | **Operating system** | macOS for Sandbox Runtime |
 | **Node.js** | >= 22.19.0 |
-| **Package manager** | npm |
+| **Package manager** | bun |
 | **Pi** | `@earendil-works/pi-coding-agent` runtime |
 
 ## Install and load
@@ -51,7 +51,7 @@ Pi runs shell commands in the host environment and its built-in file tools have 
 Install dependencies from the repository root:
 
 ```sh
-npm ci
+bun install
 ```
 
 pi-gear is a Pi extension, not a standalone CLI. Configure your Pi runtime to load the extension entry point:
@@ -138,13 +138,13 @@ The researcher inherits the active session working directory so local reads reso
 Run the type checker:
 
 ```sh
-npm run typecheck
+bun run typecheck
 ```
 
 Run the test suite:
 
 ```sh
-npm test
+bun run test
 ```
 
 The suite covers policy, path, sandbox lifecycle, researcher runtime, task-state, Plan UI, and tool-renderer behavior. Two tests exercise the real Sandbox Runtime (sandbox integration and spawn lifecycle); in restricted environments they fail with `EPERM` when `/tmp/claude/srt-mux-*.sock` cannot be created — an environment permission issue, not an assertion failure.
