@@ -16,11 +16,23 @@ class FakeClient {
   syncCount = 0;
   shutdownCount = 0;
   lastNavigation: unknown;
+  running = false;
+  activeWaits = 0;
+  maxActiveWaits = 0;
   private readonly target: string;
-  constructor(target: string) { this.target = target; }
+  private readonly shutdownDelayMs: number;
+  constructor(target: string, shutdownDelayMs = 0) {
+    this.target = target;
+    this.shutdownDelayMs = shutdownDelayMs;
+  }
   diagnosticsRevision(): number { return 0; }
-  async sync(): Promise<void> { this.syncCount++; }
-  async waitForDiagnostics(): Promise<void> {}
+  async sync(): Promise<void> { this.running = true; this.syncCount++; }
+  async waitForDiagnostics(): Promise<void> {
+    this.activeWaits++;
+    this.maxActiveWaits = Math.max(this.maxActiveWaits, this.activeWaits);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    this.activeWaits--;
+  }
   diagnosticsFor() {
     return [
       { range: { start: { line: 1, character: 2 }, end: { line: 1, character: 3 } }, severity: 1, code: 10, message: " first\nerror " },
@@ -29,13 +41,18 @@ class FakeClient {
     ];
   }
   async navigate(method: string, path: string, position: unknown): Promise<unknown> {
+    this.running = true;
     this.lastNavigation = { method, path, position };
     return [{
       uri: pathToFileURL(this.target).href,
       range: { start: { line: 8, character: 9 }, end: { line: 8, character: 10 } },
     }];
   }
-  async shutdown(): Promise<void> { this.shutdownCount++; }
+  async shutdown(): Promise<void> {
+    this.running = false;
+    this.shutdownCount++;
+    if (this.shutdownDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.shutdownDelayMs));
+  }
 }
 
 test("manager matches configured extensions, reuses clients, normalizes diagnostics, and maps navigation positions", async () => {
@@ -44,7 +61,7 @@ test("manager matches configured extensions, reuses clients, normalizes diagnost
   await writeFile(source, "const value = 1;\n");
   const fake = new FakeClient(source);
   const manager = new LspManager(
-    [{ extensions: [".ts", ".tsx"], command: ["server"] }],
+    [{ extensions: [".ts", ".tsx"], languageIds: { ".ts": "typescript", ".tsx": "typescriptreact" }, command: ["server"] }],
     cwd,
     () => fake as unknown as LspClient,
   );
@@ -83,7 +100,7 @@ test("diagnostic normalization keeps only errors and warnings", () => {
   assert.deepEqual(diagnostics.map(({ severity }) => severity), ["error", "warning"]);
 });
 
-test("diagnostics changed scope follows Git while workspace and non-Git fallback scan configured files", async () => {
+test("diagnostics keeps changed scope Git-focused and scans bounded workspace files concurrently", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-scope-"));
   const changed = join(cwd, "changed.ts");
   const clean = join(cwd, "clean.ts");
@@ -94,13 +111,41 @@ test("diagnostics changed scope follows Git while workspace and non-Git fallback
   await exec("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-qm", "initial"], { cwd });
   await writeFile(changed, "const changed = 2;\n");
   const fake = new FakeClient(changed);
-  const manager = new LspManager([{ extensions: [".ts"], command: ["server"] }], cwd, () => fake as unknown as LspClient);
+  const manager = new LspManager([{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }], cwd, () => fake as unknown as LspClient);
 
   try {
     assert.deepEqual((await manager.diagnostics("changed")).map(({ path }) => path), ["changed.ts", "changed.ts"]);
+    fake.maxActiveWaits = 0;
     assert.deepEqual((await manager.diagnostics("workspace")).map(({ path }) => path), ["changed.ts", "changed.ts", "clean.ts", "clean.ts"]);
+    assert.equal(fake.maxActiveWaits, 2);
     await rm(join(cwd, ".git"), { recursive: true, force: true });
-    assert.equal((await manager.diagnostics("changed")).length, 4);
+    assert.deepEqual(await manager.diagnostics("changed"), []);
+  } finally {
+    await manager.shutdown();
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+
+test("workspace diagnostics reject source sets above the file limit before starting clients", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-workspace-limit-"));
+  await Promise.all(Array.from(
+    { length: 101 },
+    (_, index) => writeFile(join(cwd, `source-${index}.ts`), "const value = 1;\n"),
+  ));
+  let clients = 0;
+  const manager = new LspManager(
+    [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
+    cwd,
+    () => {
+      clients++;
+      throw new Error("must reject before starting clients");
+    },
+  );
+
+  try {
+    await assert.rejects(manager.diagnostics("workspace"), /exceeded the 100-file limit/);
+    assert.equal(clients, 0);
   } finally {
     await manager.shutdown();
     await rm(cwd, { recursive: true, force: true });
@@ -114,8 +159,8 @@ test("doctor statuses resolve available and missing executables without starting
   await chmod(executable, 0o755);
   let clients = 0;
   const manager = new LspManager([
-    { extensions: [".ok"], command: [executable] },
-    { extensions: [".missing"], command: ["definitely-missing-language-server"] },
+    { extensions: [".ok"], languageIds: { ".ok": "test" }, command: [executable] },
+    { extensions: [".missing"], languageIds: { ".missing": "test" }, command: ["definitely-missing-language-server"] },
   ], cwd, () => {
     clients++;
     throw new Error("doctor must not start clients");
@@ -123,8 +168,8 @@ test("doctor statuses resolve available and missing executables without starting
 
   try {
     assert.deepEqual(await manager.statuses(), [
-      { extensions: [".ok"], executable, available: true },
-      { extensions: [".missing"], executable: "definitely-missing-language-server", available: false, reason: "not found" },
+      { extensions: [".ok"], executable, available: true, running: false },
+      { extensions: [".missing"], executable: "definitely-missing-language-server", available: false, running: false },
     ]);
     assert.equal(clients, 0);
   } finally {
@@ -139,7 +184,7 @@ test("filesystem deny rules prevent LSP file synchronization", async () => {
   await writeFile(source, "const secret = 1;\n");
   let clients = 0;
   const manager = new LspManager(
-    [{ extensions: [".ts"], command: ["server"] }],
+    [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
     cwd,
     () => { clients++; throw new Error("should not start"); },
     { filesystem: { rules: [{ path: "secret.ts", access: "deny" }] }, network: { rules: [] } },
@@ -162,7 +207,7 @@ test("navigation omits destinations denied by workspace policy", async () => {
   await writeFile(denied, "const secret = 1;\n");
   const fake = new FakeClient(denied);
   const manager = new LspManager(
-    [{ extensions: [".ts"], command: ["server"] }],
+    [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
     cwd,
     () => fake as unknown as LspClient,
     { filesystem: { rules: [{ path: "secret.ts", access: "deny" }] }, network: { rules: [] } },
@@ -176,12 +221,76 @@ test("navigation omits destinations denied by workspace policy", async () => {
   }
 });
 
+
+test("idle timeout shuts down and removes a client, then the next use starts a replacement", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-idle-"));
+  const source = join(cwd, "source.ts");
+  await writeFile(source, "const value = 1;\n");
+  const clients: FakeClient[] = [];
+  const manager = new LspManager(
+    [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
+    cwd,
+    () => {
+      const client = new FakeClient(source, clients.length === 0 ? 30 : 0);
+      clients.push(client);
+      return client as unknown as LspClient;
+    },
+    undefined,
+    0.0002,
+  );
+
+  try {
+    await manager.sync(source);
+    assert.equal(clients.length, 1);
+    assert.equal((await manager.statuses())[0]?.running, true);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(clients[0]?.shutdownCount, 1);
+    assert.equal((await manager.statuses())[0]?.running, false);
+
+    const restarted = manager.sync(source);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(clients.length, 1);
+    await restarted;
+    assert.equal(clients.length, 2);
+    assert.equal(clients[1]?.syncCount, 1);
+  } finally {
+    await manager.shutdown();
+    assert.equal(clients[1]?.shutdownCount, 1);
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("zero idle timeout keeps the client until session shutdown", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-idle-disabled-"));
+  const source = join(cwd, "source.ts");
+  await writeFile(source, "const value = 1;\n");
+  const client = new FakeClient(source);
+  const manager = new LspManager(
+    [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
+    cwd,
+    () => client as unknown as LspClient,
+    undefined,
+    0,
+  );
+
+  try {
+    await manager.sync(source);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(client.shutdownCount, 0);
+  } finally {
+    await manager.shutdown();
+    assert.equal(client.shutdownCount, 1);
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
 test("unsupported extensions fail without starting a client", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-unsupported-"));
   const source = join(cwd, "source.go");
   await writeFile(source, "package main\n");
   let clients = 0;
-  const manager = new LspManager([{ extensions: [".ts"], command: ["server"] }], cwd, () => {
+  const manager = new LspManager([{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }], cwd, () => {
     clients++;
     throw new Error("should not start");
   });

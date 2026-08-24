@@ -140,32 +140,58 @@ const nonemptyStringArray = (value: unknown, name: string): readonly string[] =>
   return Object.freeze(value.map((entry, index) => string(entry, `${name}[${index}]`)));
 };
 
+const MAX_IDLE_TIMEOUT_MINUTES = Math.floor(2_147_483_647 / 60_000);
+
 const lspConfig = (value: unknown): LspConfig => {
   const lsp = object(value, "lsp");
-  exactKeys(lsp, "lsp", ["servers"]);
+  exactKeys(lsp, "lsp", ["servers"], ["idleTimeoutMinutes"]);
   if (!Array.isArray(lsp.servers)) throw new Error("lsp.servers must be an array");
+  const idleTimeoutMinutes = lsp.idleTimeoutMinutes === undefined ? 15 : lsp.idleTimeoutMinutes;
+  if (
+    typeof idleTimeoutMinutes !== "number" ||
+    !Number.isFinite(idleTimeoutMinutes) ||
+    idleTimeoutMinutes < 0 ||
+    idleTimeoutMinutes > MAX_IDLE_TIMEOUT_MINUTES
+  ) {
+    throw new Error(`lsp.idleTimeoutMinutes must be between 0 and ${MAX_IDLE_TIMEOUT_MINUTES}`);
+  }
 
   const ownedExtensions = new Set<string>();
   const servers = lsp.servers.map((value, index): LspServerConfig => {
-    const server = object(value, `lsp.servers[${index}]`);
-    exactKeys(server, `lsp.servers[${index}]`, ["extensions", "command"]);
-    const extensions = nonemptyStringArray(server.extensions, `lsp.servers[${index}].extensions`);
+    const name = `lsp.servers[${index}]`;
+    const server = object(value, name);
+    exactKeys(server, name, ["extensions", "languageIds", "command"]);
+    const extensions = nonemptyStringArray(server.extensions, `${name}.extensions`);
     for (const extension of extensions) {
       if (!/^\.[^./\\]+$/.test(extension)) {
-        throw new Error(`lsp.servers[${index}].extensions contains invalid extension ${extension}`);
+        throw new Error(`${name}.extensions contains invalid extension ${extension}`);
       }
       if (ownedExtensions.has(extension)) {
         throw new Error(`lsp.servers contains duplicate extension ${extension}`);
       }
       ownedExtensions.add(extension);
     }
+
+    const languageIdsValue = object(server.languageIds, `${name}.languageIds`);
+    exactKeys(languageIdsValue, `${name}.languageIds`, extensions);
+    const languageIds = Object.freeze(Object.fromEntries(
+      extensions.map((extension) => [
+        extension,
+        string(languageIdsValue[extension], `${name}.languageIds[${JSON.stringify(extension)}]`),
+      ]),
+    ));
+
     return Object.freeze({
       extensions,
-      command: nonemptyStringArray(server.command, `lsp.servers[${index}].command`),
+      languageIds,
+      command: nonemptyStringArray(server.command, `${name}.command`),
     });
   });
 
-  return Object.freeze({ servers: Object.freeze(servers) });
+  return Object.freeze({
+    servers: Object.freeze(servers),
+    idleTimeoutMinutes,
+  });
 };
 
 export const parseExtensionConfig = (value: unknown): ExtensionConfig => {

@@ -39,14 +39,17 @@ const navigationParameters = Type.Object({
   column: Type.Integer({ minimum: 1 }),
 }, { additionalProperties: false });
 
-export function setupLsp(pi: ExtensionAPI): LspServices {
+export function setupLsp(
+  pi: ExtensionAPI,
+  loadConfig: typeof loadExtensionConfig = loadExtensionConfig,
+): LspServices {
   let manager: LspManager | undefined;
 
   pi.on("session_start", async (_event, ctx) => {
-    const config = await loadExtensionConfig();
-    if (!config.lsp) return;
+    const config = await loadConfig();
+    if (!config.lsp || config.lsp.servers.length === 0) return;
 
-    manager = new LspManager(config.lsp.servers, ctx.cwd, undefined, config);
+    manager = new LspManager(config.lsp.servers, ctx.cwd, undefined, config, config.lsp.idleTimeoutMinutes);
     await manager.initializeWorkspace();
     manager.startWatching();
 
@@ -101,9 +104,15 @@ export function setupLsp(pi: ExtensionAPI): LspServices {
   return {
     async statuses(cwd) {
       if (manager && manager.cwd === cwd) return manager.statuses();
-      const config = await loadExtensionConfig();
-      if (!config.lsp) return [];
-      return new LspManager(config.lsp.servers, cwd, undefined, config).statuses();
+      const config = await loadConfig();
+      if (!config.lsp || config.lsp.servers.length === 0) return [];
+      return new LspManager(
+        config.lsp.servers,
+        cwd,
+        undefined,
+        config,
+        config.lsp.idleTimeoutMinutes,
+      ).statuses();
     },
   };
 }

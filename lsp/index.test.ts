@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { lspErrorPatch } from "./index.ts";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { lspErrorPatch, setupLsp } from "./index.ts";
 import type { LspManager } from "./manager.ts";
 
 const event = (toolName: string, isError = false) => ({
@@ -28,4 +29,26 @@ test("successful edit/write surface only new LSP errors", async () => {
   assert.equal(await lspErrorPatch(manager, event("read")), undefined);
   assert.equal(await lspErrorPatch(manager, event("edit", true)), undefined);
   assert.equal(calls, 2);
+});
+
+test("empty LSP server configuration does not set up a manager, tools, or watchers", async () => {
+  const handlers = new Map<string, (...args: any[]) => any>();
+  const tools: string[] = [];
+  const pi = {
+    on: (name: string, handler: (...args: any[]) => any) => { handlers.set(name, handler); },
+    registerTool: (tool: { name: string }) => { tools.push(tool.name); },
+  } as unknown as ExtensionAPI;
+  const loadConfig = async () => ({
+    version: 1,
+    filesystem: { rules: [] },
+    network: { rules: [] },
+    lsp: { servers: [] },
+  }) as const;
+
+  const services = setupLsp(pi, loadConfig as never);
+  await handlers.get("session_start")?.({}, { cwd: "/definitely-not-a-workspace" });
+
+  assert.deepEqual(tools, []);
+  assert.deepEqual(await services.statuses("/definitely-not-a-workspace"), []);
+  await handlers.get("session_shutdown")?.();
 });

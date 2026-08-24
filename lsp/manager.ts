@@ -15,10 +15,19 @@ export interface LspServerStatus {
   readonly extensions: readonly string[];
   readonly executable: string;
   readonly available: boolean;
-  readonly reason?: string;
+  readonly running: boolean;
 }
 
 export type LspClientFactory = (config: LspServerConfig, cwd: string) => LspClient;
+
+interface ActiveClient {
+  readonly client: LspClient;
+  activeOperations: number;
+  idleTimer?: ReturnType<typeof setTimeout>;
+}
+
+const MAX_DIAGNOSTIC_FILES = 100;
+const MAX_WORKSPACE_ENTRIES = 5_000;
 
 const gitStatus = (cwd: string): Promise<string[] | undefined> => new Promise((resolveResult) => {
   execFile("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], { cwd, encoding: "utf8" }, (error, stdout) => {
@@ -36,15 +45,23 @@ const gitStatus = (cwd: string): Promise<string[] | undefined> => new Promise((r
 
 const workspaceFiles = async (cwd: string, extensions: ReadonlySet<string>): Promise<string[]> => {
   const files: string[] = [];
+  let entries = 0;
 
   const visit = async (directory: string): Promise<void> => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
+      entries++;
+      if (entries > MAX_WORKSPACE_ENTRIES) {
+        throw new Error(`Workspace diagnostics exceeded the ${MAX_WORKSPACE_ENTRIES}-entry scan limit; use scope "changed"`);
+      }
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
         if (entry.name === ".git" || entry.name === "node_modules") continue;
         await visit(join(directory, entry.name));
       } else if (entry.isFile() && extensions.has(extname(entry.name))) {
         files.push(join(directory, entry.name));
+        if (files.length > MAX_DIAGNOSTIC_FILES) {
+          throw new Error(`Diagnostics exceeded the ${MAX_DIAGNOSTIC_FILES}-file limit; use scope "changed"`);
+        }
       }
     }
   };
@@ -68,7 +85,8 @@ const executableAvailable = async (executable: string, cwd: string, envPath = pr
 
 export class LspManager {
   private readonly byExtension = new Map<string, LspServerConfig>();
-  private readonly clients = new Map<LspServerConfig, LspClient>();
+  private readonly clients = new Map<LspServerConfig, ActiveClient>();
+  private readonly retiring = new Map<LspServerConfig, Promise<void>>();
   private readonly surfacedErrors = new Map<string, Set<string>>();
   private workspace: CanonicalWorkspace | undefined;
   private watcher: FSWatcher | undefined;
@@ -78,17 +96,20 @@ export class LspManager {
   readonly cwd: string;
   private readonly createClient: LspClientFactory;
   private readonly policy: AccessPolicy;
+  private readonly idleTimeoutMs: number;
 
   constructor(
     servers: readonly LspServerConfig[],
     cwd: string,
     createClient: LspClientFactory = (config, root) => new LspClient(config, root),
     policy: AccessPolicy = { filesystem: { rules: [] }, network: { rules: [] } },
+    idleTimeoutMinutes = 15,
   ) {
     this.servers = servers;
     this.cwd = cwd;
     this.createClient = createClient;
     this.policy = policy;
+    this.idleTimeoutMs = idleTimeoutMinutes * 60_000;
     for (const server of servers) {
       for (const extension of server.extensions) this.byExtension.set(extension, server);
     }
@@ -102,13 +123,38 @@ export class LspManager {
     return this.byExtension.get(extname(path));
   }
 
-  private client(config: LspServerConfig): LspClient {
-    let client = this.clients.get(config);
-    if (!client) {
-      client = this.createClient(config, this.cwd);
-      this.clients.set(config, client);
+  private async withClient<T>(config: LspServerConfig, operation: (client: LspClient) => Promise<T>): Promise<T> {
+    let entry = this.clients.get(config);
+    if (!entry) {
+      await this.retiring.get(config);
+      entry = this.clients.get(config);
     }
-    return client;
+    if (!entry) {
+      entry = { client: this.createClient(config, this.cwd), activeOperations: 0 };
+      this.clients.set(config, entry);
+    }
+    if (entry.idleTimer) clearTimeout(entry.idleTimer);
+    delete entry.idleTimer;
+    entry.activeOperations++;
+
+    try {
+      return await operation(entry.client);
+    } finally {
+      entry.activeOperations--;
+      if (!this.closing && entry.activeOperations === 0 && this.idleTimeoutMs > 0) {
+        const activeEntry = entry;
+        entry.idleTimer = setTimeout(() => {
+          if (this.clients.get(config) !== activeEntry || activeEntry.activeOperations !== 0) return;
+          this.clients.delete(config);
+          const retirement = activeEntry.client.shutdown()
+            .catch(() => {})
+            .finally(() => {
+              if (this.retiring.get(config) === retirement) this.retiring.delete(config);
+            });
+          this.retiring.set(config, retirement);
+        }, this.idleTimeoutMs);
+      }
+    }
   }
 
   private async sourcePath(path: string): Promise<string> {
@@ -135,11 +181,12 @@ export class LspManager {
     const absolute = await this.sourcePath(path);
     const config = this.match(absolute);
     if (!config) throw new Error(`No language server configured for ${extname(absolute) || "this file"}`);
-    const client = this.client(config);
-    const revision = client.diagnosticsRevision(absolute);
-    await client.sync(absolute);
-    await client.waitForDiagnostics(absolute, revision);
-    return normalizeDiagnostics(absolute, this.cwd, client.diagnosticsFor(absolute));
+    return this.withClient(config, async (client) => {
+      const revision = client.diagnosticsRevision(absolute);
+      await client.sync(absolute);
+      await client.waitForDiagnostics(absolute, revision);
+      return normalizeDiagnostics(absolute, this.cwd, client.diagnosticsFor(absolute));
+    });
   }
 
   async primeErrors(path: string): Promise<void> {
@@ -159,31 +206,37 @@ export class LspManager {
 
   async diagnostics(scope: "changed" | "workspace"): Promise<NormalizedDiagnostic[]> {
     const extensions = new Set(this.byExtension.keys());
-    const changed = scope === "changed" ? await gitStatus(this.cwd) : undefined;
-    const paths = changed === undefined
-      ? await workspaceFiles(this.cwd, extensions)
-      : changed.map((path) => resolve(this.cwd, path)).filter((path) => extensions.has(extname(path)));
-    const diagnostics: NormalizedDiagnostic[] = [];
-
-    for (const path of paths) {
-      try {
-        diagnostics.push(...await this.sync(path));
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      }
+    let paths: string[];
+    if (scope === "workspace") {
+      paths = await workspaceFiles(this.cwd, extensions);
+    } else {
+      const changed = await gitStatus(this.cwd);
+      paths = changed?.map((path) => resolve(this.cwd, path)).filter((path) => extensions.has(extname(path))) ?? [];
     }
-    return diagnostics.sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line || a.column - b.column);
+    if (paths.length > MAX_DIAGNOSTIC_FILES) {
+      throw new Error(`Diagnostics exceeded the ${MAX_DIAGNOSTIC_FILES}-file limit; narrow the changed set`);
+    }
+
+    const results = await Promise.all(paths.map(async (path) => {
+      try {
+        return await this.sync(path);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+        throw error;
+      }
+    }));
+    return results.flat().sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line || a.column - b.column);
   }
 
   async navigate(action: "definition" | "references", path: string, line: number, column: number): Promise<SourceLocation[]> {
     const absolute = await this.sourcePath(path);
     const config = this.match(absolute);
     if (!config) throw new Error(`No language server configured for ${extname(absolute) || "this file"}`);
-    const response = await this.client(config).navigate(
+    const response = await this.withClient(config, (client) => client.navigate(
       action === "definition" ? "textDocument/definition" : "textDocument/references",
       absolute,
       { line: line - 1, character: column - 1 },
-    );
+    ));
     const values = parseNavigationResponse(action, response);
     const locations: SourceLocation[] = [];
 
@@ -225,7 +278,7 @@ export class LspManager {
         extensions: server.extensions,
         executable: executable ?? "(missing)",
         available,
-        ...(!executable ? { reason: "misconfigured" } : available ? {} : { reason: "not found" }),
+        running: this.clients.get(server)?.client.running ?? false,
       };
     }));
   }
@@ -236,7 +289,14 @@ export class LspManager {
     this.watcher = undefined;
     for (const timeout of this.debounce.values()) clearTimeout(timeout);
     this.debounce.clear();
-    await Promise.all([...this.clients.values()].map((client) => client.shutdown()));
+    for (const entry of this.clients.values()) {
+      if (entry.idleTimer) clearTimeout(entry.idleTimer);
+    }
+    await Promise.all([
+      ...[...this.clients.values()].map(({ client }) => client.shutdown()),
+      ...this.retiring.values(),
+    ]);
     this.clients.clear();
+    this.retiring.clear();
   }
 }

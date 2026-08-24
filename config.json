@@ -1,21 +1,31 @@
 {
   "version": 1,
   "lsp": {
+    "idleTimeoutMinutes": 15,
     "servers": [
       {
         "extensions": [".ts", ".tsx", ".js", ".jsx"],
-        "command": ["typescript-language-server", "--stdio"]
+        "languageIds": {
+          ".ts": "typescript",
+          ".tsx": "typescriptreact",
+          ".js": "javascript",
+          ".jsx": "javascriptreact"
+        },
+        "command": ["tsc", "--lsp", "--stdio"]
       },
       {
         "extensions": [".go"],
+        "languageIds": { ".go": "go" },
         "command": ["gopls"]
       },
       {
         "extensions": [".rs"],
+        "languageIds": { ".rs": "rust" },
         "command": ["rust-analyzer"]
       },
       {
         "extensions": [".py", ".pyi"],
+        "languageIds": { ".py": "python", ".pyi": "python" },
         "command": ["basedpyright-langserver", "--stdio"]
       }
     ]

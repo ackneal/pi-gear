@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,7 +35,7 @@ process.stdin.on("data", (chunk) => {
     }
     if (message.method === "textDocument/didOpen" || message.method === "textDocument/didChange") {
       const uri = message.params.textDocument.uri;
-      appendFileSync(log, message.method + "\n");
+      appendFileSync(log, message.method + (message.method === "textDocument/didOpen" ? ":" + message.params.textDocument.languageId : "") + "\n");
       send({ jsonrpc: "2.0", method: "textDocument/publishDiagnostics", params: { uri: new URL("other.ts", uri).href, diagnostics: [] } });
       const text = message.params.textDocument.text ?? message.params.contentChanges?.[0]?.text;
       const line = text === "invalid" ? -1 : 1;
@@ -60,11 +61,22 @@ test("LSP client starts lazily, reuses one process, navigates, and shuts down", 
   const source = join(cwd, "source.ts");
   await writeFile(script, fakeServer);
   await writeFile(source, "const broken = true;\n");
-  const client = new LspClient({ extensions: [".ts"], command: [process.execPath, script, log] }, cwd);
+  let childEnvironment: NodeJS.ProcessEnv | undefined;
+  const client = new LspClient({
+    extensions: [".ts"],
+    languageIds: { ".ts": "typescript" },
+    command: [process.execPath, script, log],
+  }, cwd, (command, args, options) => {
+    childEnvironment = options.env;
+    return spawn(command, args, options);
+  });
 
   try {
     await assert.rejects(readFile(log, "utf8"));
+    assert.equal(client.running, false);
     await client.sync(source);
+    assert.equal(client.running, true);
+    assert.notEqual(childEnvironment, process.env);
     await client.waitForDiagnostics(source, 0, 1_000);
     assert.equal(client.diagnosticsFor(source)[0]?.message, "broken");
 
@@ -88,6 +100,8 @@ test("LSP client starts lazily, reuses one process, navigates, and shuts down", 
     assert.equal(events.match(/^start$/gm)?.length, 1);
     assert.match(events, /server-request-response/);
     assert.equal(events.match(/textDocument\/didOpen/g)?.length, 1);
+    assert.match(events, /textDocument\/didOpen:typescript/);
+    assert.equal(client.running, false);
     assert.ok((events.match(/textDocument\/didChange/g)?.length ?? 0) >= 1);
     assert.match(events, /textDocument\/definition:0:1/);
     assert.match(events, /textDocument\/references:2:3/);

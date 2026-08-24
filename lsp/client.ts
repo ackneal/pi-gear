@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { LspServerConfig } from "../config/types.ts";
+import { commandEnvironment } from "../execution/sandbox/environment.ts";
 import { LspMessageDecoder, writeLspMessage, type JsonRpcMessage } from "./protocol.ts";
 import { parsePublishDiagnostics } from "./schema.ts";
 import type { LspDiagnostic, LspPosition } from "./types.ts";
@@ -42,6 +43,10 @@ export class LspClient {
     this.spawnProcess = spawnProcess;
   }
 
+  get running(): boolean {
+    return this.process !== undefined;
+  }
+
   async start(): Promise<void> {
     if (this.startPromise) return this.startPromise;
     if (this.process) return;
@@ -67,7 +72,7 @@ export class LspClient {
     this.failure = undefined;
     const child = this.spawnProcess(command, args, {
       cwd: this.cwd,
-      env: process.env,
+      env: commandEnvironment(undefined),
       shell: false,
       stdio: "pipe",
     });
@@ -159,8 +164,11 @@ export class LspClient {
     this.versions.set(uri, version);
 
     if (previous === undefined) {
+      const extension = extname(path);
+      const languageId = this.config.languageIds[extension];
+      if (!languageId) throw new Error(`No LSP languageId configured for ${extension || "this file"}`);
       this.notify("textDocument/didOpen", {
-        textDocument: { uri, languageId: extname(path).slice(1), version, text },
+        textDocument: { uri, languageId, version, text },
       });
     } else {
       this.notify("textDocument/didChange", {

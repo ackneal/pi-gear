@@ -69,22 +69,31 @@ Filesystem rules use workspace-relative paths, absolute paths, or `~/` selectors
 
 Review policy changes before using the extension. Do not weaken sensitive-file deny rules without understanding the resulting access boundary.
 
-LSP support is enabled only when `lsp` is present. Each server owns one or more extensions and supplies its executable plus arguments as an argv array; duplicate extension ownership is invalid:
+LSP support is enabled only when `lsp` is present. Each server owns one or more extensions, provides the exact LSP language ID for every extension, and supplies its executable plus arguments as an argv array. `languageIds` must be a complete mapping: missing or extra extension keys are invalid, and language IDs are never inferred from extensions. Duplicate extension ownership is also invalid.
+
+`idleTimeoutMinutes` defaults to 15 and controls how long an unused server remains running. Set it to `0` to disable idle shutdown.
 
 ```json
 {
   "lsp": {
+    "idleTimeoutMinutes": 15,
     "servers": [
       {
         "extensions": [".ts", ".tsx", ".js", ".jsx"],
-        "command": ["typescript-language-server", "--stdio"]
+        "languageIds": {
+          ".ts": "typescript",
+          ".tsx": "typescriptreact",
+          ".js": "javascript",
+          ".jsx": "javascriptreact"
+        },
+        "command": ["tsc", "--lsp", "--stdio"]
       }
     ]
   }
 }
 ```
 
-pi-gear does not install language servers. Commands run with `shell: false`, use the workspace cwd as their v1 root, and start only when a matching source file is first used. The client implements and runtime-validates the diagnostics and navigation subset of [LSP 3.17](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/); malformed server payloads report the incompatible field path.
+pi-gear does not install language servers. Commands run with `shell: false`, use the workspace cwd as their v1 root, and start only when a matching source file is first used. An empty `servers` array remains valid and disables LSP servers. The client implements and runtime-validates the diagnostics and navigation subset of [LSP 3.17](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/); malformed server payloads report the incompatible field path.
 
 ## Commands and tools
 
@@ -104,8 +113,9 @@ Subagents:
 - worker: enabled · override · (provider) model • medium
 
 LSP:
-- ✓ .go · gopls
-- ✗ .ts .tsx .js .jsx · typescript-language-server · not found
+- running .ts .tsx .js .jsx · tsc
+- available .go · gopls
+- not found .rs · rust-analyzer
 ```
 
 When the sandbox is unavailable, `/gear:doctor` inserts a `Reason:` line below the status.
@@ -129,7 +139,7 @@ A plan contains one goal and 1–10 todos. Each todo has a status and a `doneWhe
 
 ### `diagnostics` and `navigation`
 
-`diagnostics` reports normalized errors and warnings for Git working-tree changes by default, or configured files across the workspace with `scope: "workspace"`. In a non-Git workspace, changed scope falls back to workspace diagnostics.
+`diagnostics` reports normalized errors and warnings for Git working-tree changes by default, or configured files across the workspace with `scope: "workspace"`. In a non-Git workspace, changed scope returns no files instead of expanding into a workspace scan. Workspace scope is limited to 100 matching files and 5,000 visited entries, and synchronizes its bounded set concurrently.
 
 `navigation` resolves `definition` or `references` for a configured source path. Its input and output line/column positions are 1-based. Results are limited to workspace file locations.
 

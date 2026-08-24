@@ -37,9 +37,9 @@ test("doctor formats configured LSP server statuses", () => {
     "linux",
     undefined,
     [
-      { extensions: [".ts", ".tsx"], executable: "typescript-language-server", available: true },
-      { extensions: [".py"], executable: "pyright-langserver", available: false },
-      { extensions: [".rs"], executable: "rust-analyzer", available: false, reason: "missing initialization options" },
+      { extensions: [".ts", ".tsx"], executable: "typescript-language-server", available: true, running: true },
+      { extensions: [".py"], executable: "pyright-langserver", available: true, running: false },
+      { extensions: [".rs"], executable: "rust-analyzer", available: false, running: false },
     ],
   );
 
@@ -55,9 +55,9 @@ test("doctor formats configured LSP server statuses", () => {
     "Subagents:",
     "",
     "LSP:",
-    "- ✓ .ts .tsx · typescript-language-server",
-    "- ✗ .py · pyright-langserver · not found",
-    "- ✗ .rs · rust-analyzer · missing initialization options",
+    "- running .ts .tsx · typescript-language-server",
+    "- available .py · pyright-langserver",
+    "- not found .rs · rust-analyzer",
   ].join("\n"));
 });
 

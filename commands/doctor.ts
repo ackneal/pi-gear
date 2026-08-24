@@ -8,7 +8,7 @@ export interface LspServerSummary {
   extensions: readonly string[];
   executable: string;
   available: boolean;
-  reason?: string;
+  running: boolean;
 }
 
 export function formatDoctor(
@@ -49,9 +49,8 @@ export function formatDoctor(
   if (lspServers.length > 0) {
     lines.push("", "LSP:");
     for (const server of lspServers) {
-      const status = server.available ? "✓" : "✗";
-      const reason = server.available ? "" : ` · ${server.reason ?? "not found"}`;
-      lines.push(`- ${status} ${server.extensions.join(" ")} · ${server.executable}${reason}`);
+      const status = server.running ? "running" : server.available ? "available" : "not found";
+      lines.push(`- ${status} ${server.extensions.join(" ")} · ${server.executable}`);
     }
   }
 

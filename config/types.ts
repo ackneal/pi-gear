@@ -24,11 +24,13 @@ export interface AccessPolicy {
 
 export interface LspServerConfig {
   readonly extensions: readonly string[];
+  readonly languageIds: Readonly<Record<string, string>>;
   readonly command: readonly string[];
 }
 
 export interface LspConfig {
   readonly servers: readonly LspServerConfig[];
+  readonly idleTimeoutMinutes?: number;
 }
 
 export interface ExtensionConfig extends AccessPolicy {
