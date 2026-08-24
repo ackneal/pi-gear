@@ -228,7 +228,13 @@ export class LspManager {
     return results.flat().sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line || a.column - b.column);
   }
 
-  async navigate(action: "definition" | "references", path: string, line: number, column: number): Promise<SourceLocation[]> {
+  async navigate(
+    action: "definition" | "references",
+    path: string,
+    line: number,
+    column: number,
+    signal?: AbortSignal,
+  ): Promise<SourceLocation[]> {
     const absolute = await this.sourcePath(path);
     const config = this.match(absolute);
     if (!config) throw new Error(`No language server configured for ${extname(absolute) || "this file"}`);
@@ -236,6 +242,7 @@ export class LspManager {
       action === "definition" ? "textDocument/definition" : "textDocument/references",
       absolute,
       { line: line - 1, character: column - 1 },
+      signal,
     ));
     const values = parseNavigationResponse(action, response);
     const locations: SourceLocation[] = [];

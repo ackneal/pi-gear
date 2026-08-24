@@ -16,16 +16,26 @@ type FileToolResultEvent = {
   readonly content: readonly any[];
 };
 
+export async function primeLspErrors(manager: LspManager, path: string): Promise<void> {
+  try {
+    await manager.primeErrors(path);
+  } catch {}
+}
+
 export async function lspErrorPatch(manager: LspManager, event: FileToolResultEvent): Promise<{ content: any[] } | undefined> {
   if (event.isError || (event.toolName !== "edit" && event.toolName !== "write")) return;
   const path = event.input.path;
   if (typeof path !== "string" || !manager.match(path)) return;
 
-  const errors = await manager.newErrors(path);
-  if (errors.length === 0) return;
-  return {
-    content: [...event.content, { type: "text", text: `New LSP errors:\n${formatDiagnostics(errors)}` }],
-  };
+  try {
+    const errors = await manager.newErrors(path);
+    if (errors.length === 0) return;
+    return {
+      content: [...event.content, { type: "text", text: `New LSP errors:\n${formatDiagnostics(errors)}` }],
+    };
+  } catch {
+    return;
+  }
 }
 
 const diagnosticsParameters = Type.Object({
@@ -72,9 +82,9 @@ export function setupLsp(
       description: "Find language-server definitions or references. Path and positions are 1-based.",
       promptSnippet: "Find definitions or references through a configured language server",
       parameters: navigationParameters,
-      async execute(_toolCallId, { action, path, line, column }) {
+      async execute(_toolCallId, { action, path, line, column }, signal) {
         if (!manager) throw new Error("LSP is not configured for this session");
-        const locations = await manager.navigate(action, path, line, column);
+        const locations = await manager.navigate(action, path, line, column, signal);
         const text = locations.length > 0
           ? locations.map((location) => `${location.path}:${location.line}:${location.column}`).join("\n")
           : "No locations found.";
@@ -87,11 +97,7 @@ export function setupLsp(
     if (!manager || (event.toolName !== "edit" && event.toolName !== "write")) return;
     const path = event.input.path;
     if (typeof path !== "string" || !manager.match(path)) return;
-    try {
-      await manager.primeErrors(path);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
+    await primeLspErrors(manager, path);
   });
 
   pi.on("tool_result", async (event) => manager ? lspErrorPatch(manager, event) : undefined);

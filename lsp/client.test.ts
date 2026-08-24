@@ -86,6 +86,18 @@ test("LSP client starts lazily, reuses one process, navigates, and shuts down", 
     assert.equal(definitions.length, 1);
     assert.equal(references.length, 1);
 
+    await assert.rejects(
+      client.request("test/never", {}, { timeoutMs: 20 }),
+      /LSP request test\/never timed out after 20ms/,
+    );
+    assert.equal((client as unknown as { pending: Map<number, unknown> }).pending.size, 0);
+
+    const controller = new AbortController();
+    const aborted = client.request("test/abort", {}, { signal: controller.signal });
+    controller.abort();
+    await assert.rejects(aborted, { name: "AbortError", message: "LSP request test/abort aborted" });
+    assert.equal((client as unknown as { pending: Map<number, unknown> }).pending.size, 0);
+
     await new Promise((resolve) => setTimeout(resolve, 50));
     const revision = client.diagnosticsRevision(source);
     await writeFile(source, "invalid");

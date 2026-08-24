@@ -19,6 +19,13 @@ type PendingRequest = {
   reject(error: Error): void;
 };
 
+type LspRequestOptions = {
+  readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
+};
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+
 export class LspClient {
   private process: ChildProcessWithoutNullStreams | undefined;
   private startPromise: Promise<void> | undefined;
@@ -128,7 +135,6 @@ export class LspClient {
 
     const pending = typeof message.id === "number" ? this.pending.get(message.id) : undefined;
     if (!pending) return;
-    if (typeof message.id === "number") this.pending.delete(message.id);
     if (message.error) pending.reject(new Error(message.error.message));
     else pending.resolve(message.result);
   }
@@ -139,14 +145,43 @@ export class LspClient {
     this.pending.clear();
   }
 
-  request(method: string, params: unknown): Promise<unknown> {
+  request(method: string, params: unknown, options: LspRequestOptions = {}): Promise<unknown> {
     const child = this.process;
     if (!child) return Promise.reject(new Error("Language server is not running"));
     const id = this.nextId++;
+    const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
 
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      writeLspMessage(child, { jsonrpc: "2.0", id, method, params });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const cleanup = (): void => {
+        this.pending.delete(id);
+        if (timer) clearTimeout(timer);
+        options.signal?.removeEventListener("abort", abort);
+      };
+      const succeed = (value: unknown): void => {
+        cleanup();
+        resolve(value);
+      };
+      const fail = (error: Error): void => {
+        cleanup();
+        reject(error);
+      };
+      const abort = (): void => {
+        const error = new Error(`LSP request ${method} aborted`);
+        error.name = "AbortError";
+        fail(error);
+      };
+
+      if (options.signal?.aborted) return abort();
+      this.pending.set(id, { resolve: succeed, reject: fail });
+      options.signal?.addEventListener("abort", abort, { once: true });
+      timer = setTimeout(() => fail(new Error(`LSP request ${method} timed out after ${timeoutMs}ms`)), timeoutMs);
+
+      try {
+        writeLspMessage(child, { jsonrpc: "2.0", id, method, params });
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 
@@ -196,11 +231,20 @@ export class LspClient {
     return this.diagnosticsRevisions.get(pathToFileURL(path).href) ?? 0;
   }
 
-  async navigate(method: "textDocument/definition" | "textDocument/references", path: string, position: LspPosition): Promise<unknown> {
+  async navigate(
+    method: "textDocument/definition" | "textDocument/references",
+    path: string,
+    position: LspPosition,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
     await this.sync(path);
-    return this.request(method, method === "textDocument/references"
-      ? { textDocument: { uri: pathToFileURL(path).href }, position, context: { includeDeclaration: true } }
-      : { textDocument: { uri: pathToFileURL(path).href }, position });
+    return this.request(
+      method,
+      method === "textDocument/references"
+        ? { textDocument: { uri: pathToFileURL(path).href }, position, context: { includeDeclaration: true } }
+        : { textDocument: { uri: pathToFileURL(path).href }, position },
+      signal ? { signal } : {},
+    );
   }
 
   async shutdown(): Promise<void> {
@@ -208,10 +252,7 @@ export class LspClient {
     if (!child) return;
 
     try {
-      await Promise.race([
-        this.request("shutdown", null),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("LSP shutdown timed out")), 500)),
-      ]);
+      await this.request("shutdown", null, { timeoutMs: 500 });
       this.notify("exit", null);
     } catch {}
 
