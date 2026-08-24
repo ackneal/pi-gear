@@ -58,19 +58,24 @@ test("worker child arguments configure isolation, capabilities, and system promp
 test("worker extension configures filesystem guard and sandbox", () => {
   const registeredTools: string[] = [];
   const registeredCommands: string[] = [];
-  const registeredEvents: string[] = [];
+  const handlers = new Map<string, Array<(event: unknown, ctx: { cwd: string }) => unknown>>();
 
   const mockPi = {
     registerTool: (tool: { name: string }) => { registeredTools.push(tool.name); },
     registerCommand: (name: string) => { registeredCommands.push(name); },
-    on: (event: string) => { registeredEvents.push(event); },
+    on: (event: string, handler: (event: unknown, ctx: { cwd: string }) => unknown) => {
+      const eventHandlers = handlers.get(event) ?? [];
+      eventHandlers.push(handler);
+      handlers.set(event, eventHandlers);
+    },
     sendMessage: () => {},
   } as unknown as ExtensionAPI;
 
   workerExtension(mockPi);
+  handlers.get("session_start")?.at(-1)?.({}, { cwd: "/workspace" });
 
-  assert.ok(registeredEvents.includes("tool_call")); // filesystem guard
-  assert.ok(registeredEvents.includes("session_start")); // sandbox
+  assert.ok(handlers.has("tool_call")); // filesystem guard
+  assert.ok(handlers.has("session_start")); // sandbox
   assert.deepEqual(registeredCommands, []); // child runtime exposes no user commands
   assert.ok(registeredTools.includes("bash")); // sandbox bash
 });

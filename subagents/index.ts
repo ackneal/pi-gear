@@ -138,8 +138,3 @@ export function setupSubagents(pi: ExtensionAPI): SubagentServices {
     inspect: (ctx, toolCallId) => openSubagentDetailOverlay(ctx, toolCallId),
   };
 }
-
-export { RESEARCHER_TOOL_NAME, researcherProfile, runResearcher } from "./agents/researcher/index.ts";
-export { WORKER_TOOL_NAME, workerProfile, runWorker } from "./agents/worker/index.ts";
-export { openSubagentDetailOverlay } from "../ui/subagent/detail/index.ts";
-

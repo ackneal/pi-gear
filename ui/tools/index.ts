@@ -14,15 +14,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
-import * as PiTui from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 const LABEL_WIDTH = 16;
-
-const { truncateToWidth, wrapTextWithAnsi, visibleWidth } = PiTui as unknown as {
-  truncateToWidth(text: string, maxWidth: number, ellipsis?: string): string;
-  wrapTextWithAnsi(text: string, width: number): string[];
-  visibleWidth(text: string): number;
-};
 
 type AnyDefinition = ToolDefinition<any, any, any>;
 type AnyContext = {
@@ -225,18 +219,29 @@ function executionResult(base: AnyDefinition) {
   };
 }
 
-export function registerFileToolUi(pi: ExtensionAPI, cwd: string): void {
-  const read = createReadToolDefinition(cwd);
-  const edit = createEditToolDefinition(cwd);
-  const write = createWriteToolDefinition(cwd);
+type FileToolKind = "read" | "edit" | "write";
 
-  pi.registerTool({ ...read, renderShell: "default", renderCall: fileCall("READ"), renderResult: fileResult("read", read) });
-  pi.registerTool({ ...edit, renderShell: "default", renderCall: fileCall("EDIT"), renderResult: fileResult("edit", edit) });
-  pi.registerTool({ ...write, renderShell: "default", renderCall: writeCall, renderResult: fileResult("write", write) });
+function createFileToolDefinition(kind: FileToolKind, cwd: string): AnyDefinition {
+  if (kind === "read") {
+    const base = createReadToolDefinition(cwd);
+    return { ...base, renderShell: "default", renderCall: fileCall("READ"), renderResult: fileResult(kind, base) };
+  }
+  if (kind === "edit") {
+    const base = createEditToolDefinition(cwd);
+    return { ...base, renderShell: "default", renderCall: fileCall("EDIT"), renderResult: fileResult(kind, base) };
+  }
+
+  const base = createWriteToolDefinition(cwd);
+  return { ...base, renderShell: "default", renderCall: writeCall, renderResult: fileResult(kind, base) };
 }
 
-export function createSandboxBashTool(cwd: string, operations: BashOperations): AnyDefinition {
-  const base = createBashToolDefinition(cwd, { operations });
+export function registerFileToolUi(pi: ExtensionAPI, cwd: string): void {
+  for (const kind of ["read", "edit", "write"] as const) {
+    pi.registerTool(createFileToolDefinition(kind, cwd));
+  }
+}
+
+function decorateSandboxBash(base: AnyDefinition): AnyDefinition {
   return {
     ...base,
     renderShell: "default",
@@ -245,6 +250,10 @@ export function createSandboxBashTool(cwd: string, operations: BashOperations): 
     name: "bash",
     label: "bash (sandboxed)",
   };
+}
+
+export function createSandboxBashTool(cwd: string, operations: BashOperations): AnyDefinition {
+  return decorateSandboxBash(createBashToolDefinition(cwd, { operations }));
 }
 
 function mcpToolName(name: string): string {
@@ -302,34 +311,16 @@ function createMcpDefinition(name: string, cwd: string): AnyDefinition {
 }
 
 export function getCustomToolDefinition(name: string, cwd: string = process.cwd()): AnyDefinition | undefined {
-  if (name === "read") {
-    const read = createReadToolDefinition(cwd);
-    return { ...read, renderShell: "default", renderCall: fileCall("READ"), renderResult: fileResult("read", read) };
-  }
-  if (name === "edit") {
-    const edit = createEditToolDefinition(cwd);
-    return { ...edit, renderShell: "default", renderCall: fileCall("EDIT"), renderResult: fileResult("edit", edit) };
-  }
-  if (name === "write") {
-    const write = createWriteToolDefinition(cwd);
-    return { ...write, renderShell: "default", renderCall: writeCall, renderResult: fileResult("write", write) };
+  if (name === "read" || name === "edit" || name === "write") {
+    return createFileToolDefinition(name, cwd);
   }
   if (name === "bash") {
-    const bash = createBashToolDefinition(cwd);
-    return {
-      ...bash,
-      renderShell: "default",
-      renderCall: executionCall(true),
-      renderResult: executionResult(bash),
-      name: "bash",
-      label: "bash (sandboxed)",
-    };
+    return decorateSandboxBash(createBashToolDefinition(cwd));
   }
   // MCP capability tools: render with a compact tool-style header like the built-ins.
   return createMcpDefinition(name, cwd);
 }
 
 export function setupFileToolUi(pi: ExtensionAPI): void {
-  registerFileToolUi(pi, process.cwd());
   pi.on("session_start", (_event, ctx) => registerFileToolUi(pi, ctx.cwd));
 }

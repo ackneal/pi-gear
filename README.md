@@ -35,6 +35,7 @@ Pi runs shell commands in the host environment and its built-in file tools have 
 - **Task state** — Provides the `task_state` tool for goals, bounded outcome steps, constraints, findings, and observable completion conditions.
 - **Plan UI** — Renders task plans in the Pi interface and restores active state across session branches and compaction.
 - **Researcher** — Provides an isolated, read-only `researcher` subagent with the `read` tool and selected MCP research capabilities.
+- **Code intelligence** — Uses configured stdio language servers for diagnostics, definitions, and references. Servers start lazily and are never installed automatically.
 - **Loop guard** — Sends advisory check-ins after 15 and 25 consecutive turns, then resets after the agent settles.
 
 ## Requirements
@@ -68,6 +69,32 @@ Filesystem rules use workspace-relative paths, absolute paths, or `~/` selectors
 
 Review policy changes before using the extension. Do not weaken sensitive-file deny rules without understanding the resulting access boundary.
 
+LSP support is enabled only when `lsp` is present. Each server owns one or more extensions, provides the exact LSP language ID for every extension, and supplies its executable plus arguments as an argv array. `languageIds` must be a complete mapping: missing or extra extension keys are invalid, and language IDs are never inferred from extensions. Duplicate extension ownership is also invalid.
+
+`idleTimeoutMinutes` defaults to 15 and controls how long an unused server remains running. Set it to `0` to disable idle shutdown.
+
+```json
+{
+  "lsp": {
+    "idleTimeoutMinutes": 15,
+    "servers": [
+      {
+        "extensions": [".ts", ".tsx", ".js", ".jsx"],
+        "languageIds": {
+          ".ts": "typescript",
+          ".tsx": "typescriptreact",
+          ".js": "javascript",
+          ".jsx": "javascriptreact"
+        },
+        "command": ["tsc", "--lsp", "--stdio"]
+      }
+    ]
+  }
+}
+```
+
+pi-gear does not install language servers. Commands run with `shell: false`, use the workspace cwd as their v1 root, and start only when a matching source file is first used. An empty `servers` array remains valid and disables LSP servers. The client implements and runtime-validates the diagnostics and navigation subset of [LSP 3.17](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/); malformed server payloads report the incompatible field path.
+
 ## Commands and tools
 
 ### `/gear:doctor`
@@ -84,6 +111,11 @@ Network: configured rules; unknown hosts require approval
 Subagents:
 - researcher: enabled · inherit · (provider) model • low
 - worker: enabled · override · (provider) model • medium
+
+LSP:
+- running .ts .tsx .js .jsx · tsc
+- available .go · gopls
+- not found .rs · rust-analyzer
 ```
 
 When the sandbox is unavailable, `/gear:doctor` inserts a `Reason:` line below the status.
@@ -108,6 +140,14 @@ A `TaskState` contains one goal and 1–10 outcome steps, plus constraints and f
 Findings capture new facts that affect later decisions or replanning, not routine test or check results. Constraints and findings carry through active replanning.
 
 `TaskState` is working state. It clears automatically after the work is complete and the agent has settled. Use `clear` to abandon or reset the current state.
+
+### `diagnostics` and `navigation`
+
+`diagnostics` reports normalized errors and warnings for Git working-tree changes by default, or configured files across the workspace with `scope: "workspace"`. In a non-Git workspace, changed scope returns no files instead of expanding into a workspace scan. Workspace scope is limited to 100 matching files and 5,000 visited entries, and synchronizes its bounded set concurrently.
+
+`navigation` resolves `definition` or `references` for a configured source path. Its input and output line/column positions are 1-based. Results are limited to workspace file locations.
+
+Successful built-in `edit` and `write` calls synchronize matching files and append only new or changed errors. A workspace watcher refreshes language-server state for changes made by Bash, formatters, scripts, or external tools; it does not parse Bash commands. Warnings remain available through `diagnostics`.
 
 ### `researcher`
 
@@ -134,6 +174,7 @@ The researcher inherits the active session working directory so local reads reso
 - **Platform support** — Sandbox Runtime is currently supported only on macOS.
 - **Researcher networking** — Researcher MCP connections use their own child-process capability path and are not currently governed by the sandboxed Bash network approval flow.
 - **Environment inheritance** — Sandboxed Bash currently receives the host process environment, subject to the runtime configuration. Avoid exposing credentials through the shell environment.
+- **LSP workspace root** — LSP v1 uses the session cwd as one workspace root; root-marker and monorepo discovery are not implemented.
 - **Filesystem races** — File-tool authorization is a preflight check. It does not fully eliminate TOCTOU races caused by another local process changing paths concurrently.
 - **Runtime integration tests** — Sandbox-dependent tests require permission to create Sandbox Runtime sockets under `/tmp/claude`.
 

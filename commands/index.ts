@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ExecutionServices } from "../execution/index.ts";
+import type { LspServices } from "../lsp/index.ts";
 import type { SubagentServices } from "../subagents/index.ts";
 import { formatDoctor } from "./doctor.ts";
 
@@ -12,6 +13,7 @@ export const GEAR_COMMANDS = {
 export interface GearCommandServices {
   execution: ExecutionServices;
   subagents: SubagentServices;
+  lsp: LspServices;
 }
 
 export function setupCommands(pi: ExtensionAPI, services: GearCommandServices): void {
@@ -30,12 +32,14 @@ export function setupCommands(pi: ExtensionAPI, services: GearCommandServices): 
   pi.registerCommand(GEAR_COMMANDS.doctor, {
     description: "Show pi-gear runtime diagnostics",
     handler: async (_args, ctx) => {
+      const lspServers = await services.lsp.statuses(ctx.cwd);
       const output = formatDoctor(
         services.execution.sandbox.status(),
         services.subagents.settings.summaries(ctx),
         pi.getActiveTools(),
         process.platform,
         services.subagents.settings.runtimeError(),
+        lspServers,
       );
       ctx.ui.notify(output, "info");
     },

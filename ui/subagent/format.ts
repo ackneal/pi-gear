@@ -22,8 +22,15 @@ export type SubagentRendererProfile = { id: string; label: string; presentation?
 
 export const STALLED_THRESHOLD_MS = 15_000;
 export const STATUS_ICON = { running: "●", success: "✓", error: "✗", aborted: "✗" } as const;
-function titleCase(value: string): string {
+
+export function titleCase(value: string): string {
   return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+export function formatToolCount(tools: readonly Extract<SubagentItem, { kind: "tool" }>[]): string {
+  const completed = tools.filter((item) => item.status === "success").length;
+  const failed = tools.filter((item) => item.status === "error").length;
+  return failed > 0 ? `${completed}/${tools.length} tools · ${failed} failed` : `${completed}/${tools.length} tools`;
 }
 
 function profileLabel(profile: SubagentRendererProfile): string {
@@ -108,9 +115,7 @@ function metadata(run: SubagentRun | undefined, profile: SubagentRendererProfile
     const label = hasThought ? "Thinking" : run?.status === "success" ? activityPhrase(profile, "complete", `${name} complete`) : run?.status === "error" || run?.status === "aborted" ? failure(run, profile) : activityPhrase(profile, "starting", `Starting ${name.toLowerCase()}`);
     toolStr = compact(label);
   } else {
-    const completed = tools.filter((item) => item.status === "success").length;
-    const failed = tools.filter((item) => item.status === "error").length;
-    toolStr = failed > 0 ? `${completed}/${tools.length} tools · ${failed} failed` : `${completed}/${tools.length} tools`;
+    toolStr = formatToolCount(tools);
   }
   const usageStr = formatUsage(run?.usage);
   const durStr = formatDuration(runDuration(run, now));

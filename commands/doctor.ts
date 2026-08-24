@@ -4,12 +4,20 @@ import type { SubagentSummary } from "../subagents/settings.ts";
 
 const describeDomains = (domains: readonly string[]): string => domains.length > 0 ? domains.join(", ") : "(none)";
 
+export interface LspServerSummary {
+  extensions: readonly string[];
+  executable: string;
+  available: boolean;
+  running: boolean;
+}
+
 export function formatDoctor(
   status: SandboxStatus,
   subagents: SubagentSummary[],
   activeTools: readonly string[],
   platform: NodeJS.Platform = process.platform,
   runtimeError?: string,
+  lspServers: readonly LspServerSummary[] = [],
 ): string {
   const lines = [
     `Sandbox: ${status.enabled ? "enabled" : "unavailable"}`,
@@ -36,6 +44,14 @@ export function formatDoctor(
     const dispatch = formatSubagentDispatch(summary.dispatch) ?? "unresolved";
     const modelStatus = summary.available ? "" : " · model unavailable";
     lines.push(`- ${summary.id}: ${availability} · ${summary.source} ${summary.mode} · ${dispatch}${modelStatus}`);
+  }
+
+  if (lspServers.length > 0) {
+    lines.push("", "LSP:");
+    for (const server of lspServers) {
+      const status = server.running ? "running" : server.available ? "available" : "not found";
+      lines.push(`- ${status} ${server.extensions.join(" ")} · ${server.executable}`);
+    }
   }
 
   return lines.join("\n");
