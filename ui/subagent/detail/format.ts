@@ -10,9 +10,11 @@ import { getCustomToolDefinition } from "../../tools/index.ts";
 import { formatThinking, HIDDEN_THINKING_LABEL } from "../../thinking/index.ts";
 import {
   formatDuration,
+  formatToolCount,
   formatUsage,
   idleDuration,
   STALLED_THRESHOLD_MS,
+  titleCase,
   type Theme,
 } from "../format.ts";
 import type { SubagentViewEntry } from "./registry.ts";
@@ -20,7 +22,7 @@ import { cleanPlainText, readableProvider, usefulText } from "../text-policy.ts"
 
 export { cleanPlainText, usefulText } from "../text-policy.ts";
 
-export { STALLED_THRESHOLD_MS, formatDuration, formatUsage, idleDuration };
+export { STALLED_THRESHOLD_MS, formatDuration, formatUsage, idleDuration, titleCase };
 export type { Theme };
 
 // OSC 133 shell-integration zone markers (\x1b]133;A/B/C/D). The main transcript
@@ -32,12 +34,6 @@ const OSC133_ZONE_PATTERN = /\x1b\]133;[A-D](?:\x07|\x1b\\)?/g;
 export function stripTerminalZoneMarkers(line: string): string {
   return line.replace(OSC133_ZONE_PATTERN, "");
 }
-export function titleCase(value: string): string {
-  return value
-    .replace(/[_-]+/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
 export function formatDetailContent(
   entry: SubagentViewEntry,
   theme: Theme,
@@ -353,17 +349,7 @@ export function frameDetailBox(
       (item): item is Extract<SubagentItem, { kind: "tool" }> =>
         item.kind === "tool",
     ) ?? [];
-  let toolStr: string;
-  if (!tools.length) {
-    toolStr = "0 tools";
-  } else {
-    const completed = tools.filter((item) => item.status === "success").length;
-    const failed = tools.filter((item) => item.status === "error").length;
-    toolStr =
-      failed > 0
-        ? `${completed}/${tools.length} tools · ${failed} failed`
-        : `${completed}/${tools.length} tools`;
-  }
+  const toolStr = tools.length ? formatToolCount(tools) : "0 tools";
 
   let scrollInfo = "";
   if (totalContent > innerHeight) {

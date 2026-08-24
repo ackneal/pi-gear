@@ -19,7 +19,7 @@ export function composePrompt(
 ): string {
   const ownedBlock = /\n*<pi_gear_context>[\s\S]*?<\/pi_gear_context>\n*/;
   const base = ownedBlock.test(systemPrompt)
-    ? systemPrompt.replace(/\n*<pi_gear_context>[\s\S]*?<\/pi_gear_context>\n*/g, "\n").trimEnd()
+    ? systemPrompt.replace(new RegExp(ownedBlock.source, "g"), "\n").trimEnd()
     : systemPrompt;
 
   if (selectedTools === undefined) return base;

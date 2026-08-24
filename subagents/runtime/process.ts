@@ -5,11 +5,10 @@ import { fileURLToPath } from "node:url";
 import { bridgeToolName, type CapabilitySpec } from "../../capabilities/index.ts";
 import type { SubagentDispatch, SubagentProfile } from "./types.ts";
 
-export const MAX_OUTPUT_CHARS = 32_000;
 export const KILL_TIMEOUT_MS = 1_000;
 export type SpawnProcess = typeof spawn;
 
-export function appendBounded(current: string, value: string, max = MAX_OUTPUT_CHARS): string {
+export function appendBounded(current: string, value: string, max: number): string {
   const joined = `${current}${value}`;
   return joined.length > max ? `[truncated]\n${joined.slice(-(max - 12))}` : joined;
 }

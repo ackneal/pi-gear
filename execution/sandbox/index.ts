@@ -16,7 +16,6 @@ export function setupSandbox(pi: ExtensionAPI): SandboxDiagnostics {
   });
 
   pi.on("user_bash", () => ({ operations: controller.operations }));
-  pi.registerTool(createSandboxBashTool(process.cwd(), controller.operations));
   pi.on("session_start", (_event, ctx) => {
     pi.registerTool(createSandboxBashTool(ctx.cwd, controller.operations));
   });
