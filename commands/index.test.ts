@@ -26,6 +26,39 @@ test("doctor reports active subagents and their resolved model settings", () => 
   assert.match(output, /Runtime config: invalid · invalid JSON/);
   assert.match(output, /- researcher: enabled · main inherit · \(main\) model-a • low/);
   assert.match(output, /- worker: disabled · runtime override · \(provider\) model-b • high · model unavailable/);
+  assert.doesNotMatch(output, /\nLSP:/);
+});
+
+test("doctor formats configured LSP server statuses", () => {
+  const output = formatDoctor(
+    sandboxStatus,
+    [],
+    [],
+    "linux",
+    undefined,
+    [
+      { extensions: [".ts", ".tsx"], executable: "typescript-language-server", available: true },
+      { extensions: [".py"], executable: "pyright-langserver", available: false },
+      { extensions: [".rs"], executable: "rust-analyzer", available: false, reason: "missing initialization options" },
+    ],
+  );
+
+  assert.equal(output, [
+    "Sandbox: enabled",
+    "Platform: linux",
+    "Workspace: /workspace",
+    "Filesystem: read/edit/write guarded; other tools warn when unguarded",
+    "Network allow: (none)",
+    "Network deny: (none)",
+    "Network other hosts: require approval",
+    "",
+    "Subagents:",
+    "",
+    "LSP:",
+    "- ✓ .ts .tsx · typescript-language-server",
+    "- ✗ .py · pyright-langserver · not found",
+    "- ✗ .rs · rust-analyzer · missing initialization options",
+  ].join("\n"));
 });
 
 test("gear commands are centrally registered and delegate to their services", async () => {
@@ -39,6 +72,7 @@ test("gear commands are centrally registered and delegate to their services", as
   } as unknown as ExtensionAPI;
   const services = {
     execution: { sandbox: { status: () => sandboxStatus } },
+    lsp: { statuses: async (cwd: string) => { calls.push(`lsp:${cwd}`); return []; } },
     subagents: {
       inspect: async (_ctx: unknown, id?: string) => { calls.push(`inspect:${id ?? ""}`); },
       settings: {
@@ -49,7 +83,7 @@ test("gear commands are centrally registered and delegate to their services", as
       },
     },
   } as unknown as GearCommandServices;
-  const ctx = { ui: { notify: (message: string) => { calls.push(`doctor:${message.split("\n")[0]}`); } } };
+  const ctx = { cwd: "/workspace", ui: { notify: (message: string) => { calls.push(`doctor:${message.split("\n")[0]}`); } } };
 
   setupCommands(pi, services);
 
@@ -57,5 +91,5 @@ test("gear commands are centrally registered and delegate to their services", as
   await commands.get(GEAR_COMMANDS.subagentInspect)?.handler(" call-1 ", ctx);
   await commands.get(GEAR_COMMANDS.subagentModel)?.handler("worker", ctx);
   await commands.get(GEAR_COMMANDS.doctor)?.handler("", ctx);
-  assert.deepEqual(calls, ["inspect:call-1", "model:worker", "doctor:Sandbox: enabled"]);
+  assert.deepEqual(calls, ["inspect:call-1", "model:worker", "lsp:/workspace", "doctor:Sandbox: enabled"]);
 });

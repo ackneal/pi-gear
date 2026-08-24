@@ -22,6 +22,16 @@ export interface AccessPolicy {
   };
 }
 
+export interface LspServerConfig {
+  readonly extensions: readonly string[];
+  readonly command: readonly string[];
+}
+
+export interface LspConfig {
+  readonly servers: readonly LspServerConfig[];
+}
+
 export interface ExtensionConfig extends AccessPolicy {
   readonly version: 1;
+  readonly lsp?: LspConfig;
 }

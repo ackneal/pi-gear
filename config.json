@@ -1,5 +1,25 @@
 {
   "version": 1,
+  "lsp": {
+    "servers": [
+      {
+        "extensions": [".ts", ".tsx", ".js", ".jsx"],
+        "command": ["typescript-language-server", "--stdio"]
+      },
+      {
+        "extensions": [".go"],
+        "command": ["gopls"]
+      },
+      {
+        "extensions": [".rs"],
+        "command": ["rust-analyzer"]
+      },
+      {
+        "extensions": [".py", ".pyi"],
+        "command": ["basedpyright-langserver", "--stdio"]
+      }
+    ]
+  },
   "filesystem": {
     "rules": [
       {

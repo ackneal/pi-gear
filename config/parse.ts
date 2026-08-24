@@ -1,6 +1,23 @@
 import { validFilesystemSelector } from "./selectors.ts";
-import type { AccessPolicy, ExtensionConfig, FilesystemAccess, FilesystemRule, NetworkRule } from "./types.ts";
-export type { AccessPolicy, ExtensionConfig, FilesystemAccess, FilesystemRule, NetworkAccess, NetworkRule } from "./types.ts";
+import type {
+  AccessPolicy,
+  ExtensionConfig,
+  FilesystemAccess,
+  FilesystemRule,
+  LspConfig,
+  LspServerConfig,
+  NetworkRule,
+} from "./types.ts";
+export type {
+  AccessPolicy,
+  ExtensionConfig,
+  FilesystemAccess,
+  FilesystemRule,
+  LspConfig,
+  LspServerConfig,
+  NetworkAccess,
+  NetworkRule,
+} from "./types.ts";
 
 const object = (value: unknown, name: string): Record<string, unknown> => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -116,10 +133,45 @@ const networkRules = (value: unknown): readonly NetworkRule[] => {
   return Object.freeze(value.map(networkRule));
 };
 
+const nonemptyStringArray = (value: unknown, name: string): readonly string[] => {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`${name} must be a nonempty array`);
+  }
+  return Object.freeze(value.map((entry, index) => string(entry, `${name}[${index}]`)));
+};
+
+const lspConfig = (value: unknown): LspConfig => {
+  const lsp = object(value, "lsp");
+  exactKeys(lsp, "lsp", ["servers"]);
+  if (!Array.isArray(lsp.servers)) throw new Error("lsp.servers must be an array");
+
+  const ownedExtensions = new Set<string>();
+  const servers = lsp.servers.map((value, index): LspServerConfig => {
+    const server = object(value, `lsp.servers[${index}]`);
+    exactKeys(server, `lsp.servers[${index}]`, ["extensions", "command"]);
+    const extensions = nonemptyStringArray(server.extensions, `lsp.servers[${index}].extensions`);
+    for (const extension of extensions) {
+      if (!/^\.[^./\\]+$/.test(extension)) {
+        throw new Error(`lsp.servers[${index}].extensions contains invalid extension ${extension}`);
+      }
+      if (ownedExtensions.has(extension)) {
+        throw new Error(`lsp.servers contains duplicate extension ${extension}`);
+      }
+      ownedExtensions.add(extension);
+    }
+    return Object.freeze({
+      extensions,
+      command: nonemptyStringArray(server.command, `lsp.servers[${index}].command`),
+    });
+  });
+
+  return Object.freeze({ servers: Object.freeze(servers) });
+};
+
 export const parseExtensionConfig = (value: unknown): ExtensionConfig => {
   try {
     const root = object(value, "config");
-    exactKeys(root, "config", ["version", "filesystem", "network"]);
+    exactKeys(root, "config", ["version", "filesystem", "network"], ["lsp"]);
     const filesystem = object(root.filesystem, "filesystem");
     exactKeys(filesystem, "filesystem", ["rules"]);
     const network = object(root.network, "network");
@@ -139,6 +191,7 @@ export const parseExtensionConfig = (value: unknown): ExtensionConfig => {
     return Object.freeze({
       version: version(root.version),
       ...policy,
+      ...(root.lsp === undefined ? {} : { lsp: lspConfig(root.lsp) }),
     });
   } catch (error) {
     throw new Error(
