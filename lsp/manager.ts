@@ -8,7 +8,8 @@ import { canonicalizeWorkspace, normalizeToolPath, resolveAccessTarget, type Can
 import { evaluateFilesystem, followFallbackAccess, mostRestrictiveFilesystemDecision } from "../execution/policy/filesystem.ts";
 import { LspClient } from "./client.ts";
 import { diagnosticKey, normalizeDiagnostics } from "./normalize.ts";
-import type { LspDiagnostic, NormalizedDiagnostic, SourceLocation } from "./types.ts";
+import { parseNavigationResponse } from "./schema.ts";
+import type { NormalizedDiagnostic, SourceLocation } from "./types.ts";
 
 export interface LspServerStatus {
   readonly extensions: readonly string[];
@@ -183,13 +184,13 @@ export class LspManager {
       absolute,
       { line: line - 1, character: column - 1 },
     );
-    const values = response === null || response === undefined ? [] : Array.isArray(response) ? response : [response];
+    const values = parseNavigationResponse(action, response);
     const locations: SourceLocation[] = [];
 
-    for (const value of values as Array<Record<string, unknown>>) {
-      const uri = typeof value.uri === "string" ? value.uri : typeof value.targetUri === "string" ? value.targetUri : undefined;
-      const range = (value.range ?? value.targetSelectionRange) as { start?: { line?: unknown; character?: unknown } } | undefined;
-      if (!uri?.startsWith("file:") || typeof range?.start?.line !== "number" || typeof range.start.character !== "number") continue;
+    for (const value of values) {
+      const uri = "uri" in value ? value.uri : value.targetUri;
+      const range = "range" in value ? value.range : value.targetSelectionRange;
+      if (!uri.startsWith("file:")) continue;
       let target: string;
       try {
         target = await this.sourcePath(fileURLToPath(uri));

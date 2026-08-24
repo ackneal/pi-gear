@@ -4,6 +4,7 @@ import { extname } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { LspServerConfig } from "../config/types.ts";
 import { LspMessageDecoder, writeLspMessage, type JsonRpcMessage } from "./protocol.ts";
+import { parsePublishDiagnostics } from "./schema.ts";
 import type { LspDiagnostic, LspPosition } from "./types.ts";
 
 export type SpawnLspProcess = (
@@ -26,6 +27,7 @@ export class LspClient {
   private diagnostics = new Map<string, readonly LspDiagnostic[]>();
   private diagnosticsRevisions = new Map<string, number>();
   private stderr = "";
+  private failure: Error | undefined;
   readonly config: LspServerConfig;
   private readonly cwd: string;
   private readonly spawnProcess: SpawnLspProcess;
@@ -62,6 +64,7 @@ export class LspClient {
     if (!command) throw new Error("LSP command is empty");
 
     this.stderr = "";
+    this.failure = undefined;
     const child = this.spawnProcess(command, args, {
       cwd: this.cwd,
       env: process.env,
@@ -103,11 +106,9 @@ export class LspClient {
 
   private receive(message: JsonRpcMessage): void {
     if (message.method === "textDocument/publishDiagnostics") {
-      const params = message.params as { uri?: unknown; diagnostics?: unknown };
-      if (typeof params.uri === "string" && Array.isArray(params.diagnostics)) {
-        this.diagnostics.set(params.uri, params.diagnostics as LspDiagnostic[]);
-        this.diagnosticsRevisions.set(params.uri, (this.diagnosticsRevisions.get(params.uri) ?? 0) + 1);
-      }
+      const params = parsePublishDiagnostics(message.params);
+      this.diagnostics.set(params.uri, params.diagnostics);
+      this.diagnosticsRevisions.set(params.uri, (this.diagnosticsRevisions.get(params.uri) ?? 0) + 1);
       return;
     }
 
@@ -128,6 +129,7 @@ export class LspClient {
   }
 
   private fail(error: Error): void {
+    this.failure = error;
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
   }
@@ -176,8 +178,10 @@ export class LspClient {
     const uri = pathToFileURL(path).href;
     const deadline = Date.now() + timeoutMs;
     while ((this.diagnosticsRevisions.get(uri) ?? 0) === previousRevision && Date.now() < deadline) {
+      if (this.failure) throw this.failure;
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
+    if (this.failure) throw this.failure;
   }
 
   diagnosticsRevision(path: string): number {

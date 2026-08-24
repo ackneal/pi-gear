@@ -36,7 +36,9 @@ process.stdin.on("data", (chunk) => {
       const uri = message.params.textDocument.uri;
       appendFileSync(log, message.method + "\n");
       send({ jsonrpc: "2.0", method: "textDocument/publishDiagnostics", params: { uri: new URL("other.ts", uri).href, diagnostics: [] } });
-      setTimeout(() => send({ jsonrpc: "2.0", method: "textDocument/publishDiagnostics", params: { uri, diagnostics: [{ range: { start: { line: 1, character: 2 }, end: { line: 1, character: 3 } }, severity: 1, code: "E1", message: "broken" }] } }), 25);
+      const text = message.params.textDocument.text ?? message.params.contentChanges?.[0]?.text;
+      const line = text === "invalid" ? -1 : 1;
+      setTimeout(() => send({ jsonrpc: "2.0", method: "textDocument/publishDiagnostics", params: { uri, diagnostics: [{ range: { start: { line, character: 2 }, end: { line: 1, character: 3 } }, severity: 1, code: "E1", message: "broken" }] } }), 25);
     }
     if (message.method === "textDocument/definition" || message.method === "textDocument/references") {
       appendFileSync(log, message.method + ":" + message.params.position.line + ":" + message.params.position.character + "\n");
@@ -71,6 +73,15 @@ test("LSP client starts lazily, reuses one process, navigates, and shuts down", 
     const references = await client.navigate("textDocument/references", source, { line: 2, character: 3 }) as unknown[];
     assert.equal(definitions.length, 1);
     assert.equal(references.length, 1);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const revision = client.diagnosticsRevision(source);
+    await writeFile(source, "invalid");
+    await client.sync(source);
+    await assert.rejects(
+      client.waitForDiagnostics(source, revision, 1_000),
+      /Invalid LSP 3\.17 payload: publishDiagnostics\.params\.diagnostics\[0\]\.range\.start\.line/,
+    );
 
     await client.shutdown();
     const events = await readFile(log, "utf8");

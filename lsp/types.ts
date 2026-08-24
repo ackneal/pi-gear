@@ -25,6 +25,10 @@ export interface NormalizedDiagnostic {
   readonly code?: string;
 }
 
+export type SourceLocationResponse =
+  | { readonly uri: string; readonly range: LspRange }
+  | { readonly targetUri: string; readonly targetRange: LspRange; readonly targetSelectionRange: LspRange };
+
 export interface SourceLocation {
   readonly path: string;
   readonly line: number;

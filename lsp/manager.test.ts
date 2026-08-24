@@ -30,7 +30,10 @@ class FakeClient {
   }
   async navigate(method: string, path: string, position: unknown): Promise<unknown> {
     this.lastNavigation = { method, path, position };
-    return [{ uri: pathToFileURL(this.target).href, range: { start: { line: 8, character: 9 } } }];
+    return [{
+      uri: pathToFileURL(this.target).href,
+      range: { start: { line: 8, character: 9 }, end: { line: 8, character: 10 } },
+    }];
   }
   async shutdown(): Promise<void> { this.shutdownCount++; }
 }

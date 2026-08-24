@@ -84,7 +84,7 @@ LSP support is enabled only when `lsp` is present. Each server owns one or more 
 }
 ```
 
-pi-gear does not install language servers. Commands run with `shell: false`, use the workspace cwd as their v1 root, and start only when a matching source file is first used.
+pi-gear does not install language servers. Commands run with `shell: false`, use the workspace cwd as their v1 root, and start only when a matching source file is first used. The client implements and runtime-validates the diagnostics and navigation subset of [LSP 3.17](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/); malformed server payloads report the incompatible field path.
 
 ## Commands and tools
 
