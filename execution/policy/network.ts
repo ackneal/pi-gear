@@ -11,7 +11,7 @@ const matchesHost = (selector: string, host: string, port: number | undefined): 
 };
 
 export const evaluateNetwork = (policy: AccessPolicy, host: string, port?: number): NetworkDecision => {
-  const matches = policy.network.rules.filter((rule) => matchesHost(rule.host, host.toLowerCase(), port));
+  const matches = policy.sandbox.network.rules.filter((rule) => matchesHost(rule.host, host.toLowerCase(), port));
   if (matches.some((rule) => rule.access === "deny")) return "deny";
   if (matches.some((rule) => rule.access === "allow")) return "allow";
   return "ask";

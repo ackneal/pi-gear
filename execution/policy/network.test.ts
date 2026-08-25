@@ -5,11 +5,11 @@ import { evaluateNetwork } from "./network.ts";
 
 const policy: AccessPolicy = {
   filesystem: { rules: [] },
-  network: { rules: [
+  sandbox: { enabled: true, network: { strictAllowlist: false, rules: [
     { host: "api.example.com:443", access: "allow" },
     { host: "*.example.com", access: "allow" },
     { host: "blocked.example.com", access: "deny" },
-  ] },
+  ] } },
 };
 
 test("network policy honors exact and wildcard hosts, deny precedence, and unknown asks", () => {

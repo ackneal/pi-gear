@@ -44,7 +44,7 @@ test("global config takes priority over the bundled default", async () => {
   const globalConfig = {
     version: 1,
     filesystem: { rules: [] },
-    network: { rules: [{ host: "global.example", access: "allow" }] },
+    sandbox: { network: { rules: [{ host: "global.example", access: "allow" }] } },
   };
 
   try {
@@ -52,7 +52,7 @@ test("global config takes priority over the bundled default", async () => {
     await writeFile(join(configDir, "config.json"), JSON.stringify(globalConfig));
     const loaded = await loadFrom(agentDir);
 
-    assert.deepEqual(loaded.network.rules, globalConfig.network.rules);
+    assert.deepEqual(loaded.sandbox.network.rules, globalConfig.sandbox.network.rules);
   } finally {
     await rm(agentDir, { recursive: true, force: true });
   }

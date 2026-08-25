@@ -7,7 +7,10 @@ import { evaluateFilesystem, followFallbackAccess, matchesFilesystemSelector } f
 
 const policy = (overrides: Partial<AccessPolicy> = {}): AccessPolicy => ({
   filesystem: { rules: [], ...overrides.filesystem },
-  network: { rules: [], ...overrides.network },
+  sandbox: {
+    enabled: overrides.sandbox?.enabled ?? true,
+    network: { rules: [], strictAllowlist: false, ...overrides.sandbox?.network },
+  },
 });
 
 test("literal filesystem selectors include descendants but not similar prefixes", () => {

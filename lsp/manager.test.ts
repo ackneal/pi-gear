@@ -299,7 +299,7 @@ test("filesystem deny rules prevent LSP file synchronization", async () => {
     [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
     cwd,
     () => { clients++; throw new Error("should not start"); },
-    { filesystem: { rules: [{ path: "secret.ts", access: "deny" }] }, network: { rules: [] } },
+    { filesystem: { rules: [{ path: "secret.ts", access: "deny" }] }, sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } } },
   );
 
   try {
@@ -322,7 +322,7 @@ test("navigation omits destinations denied by workspace policy", async () => {
     [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
     cwd,
     () => fake as unknown as LspClient,
-    { filesystem: { rules: [{ path: "secret.ts", access: "deny" }] }, network: { rules: [] } },
+    { filesystem: { rules: [{ path: "secret.ts", access: "deny" }] }, sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } } },
   );
 
   try {

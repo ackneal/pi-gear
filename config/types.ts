@@ -17,8 +17,12 @@ export interface AccessPolicy {
   readonly filesystem: {
     readonly rules: readonly FilesystemRule[];
   };
-  readonly network: {
-    readonly rules: readonly NetworkRule[];
+  readonly sandbox: {
+    readonly enabled: boolean;
+    readonly network: {
+      readonly rules: readonly NetworkRule[];
+      readonly strictAllowlist: boolean;
+    };
   };
 }
 
@@ -34,6 +38,7 @@ export interface LspConfig {
 }
 
 export interface ExtensionConfig extends AccessPolicy {
+  readonly $schema?: string;
   readonly version: 1;
   readonly lsp?: LspConfig;
 }

@@ -94,7 +94,7 @@ export class LspManager {
     servers: readonly LspServerConfig[],
     cwd: string,
     createClient: LspClientFactory = (config, root) => new LspClient(config, root),
-    policy: AccessPolicy = { filesystem: { rules: [] }, network: { rules: [] } },
+    policy: AccessPolicy = { filesystem: { rules: [] }, sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } } },
     idleTimeoutMinutes = 15,
   ) {
     this.servers = servers;

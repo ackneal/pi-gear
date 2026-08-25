@@ -78,7 +78,10 @@ const block = (
 
 export function setupFilesystemGuard(
   pi: ExtensionAPI,
-  options: { readonly tempSource?: TempDirSource } = {},
+  options: {
+    readonly tempSource?: TempDirSource;
+    readonly loadConfig?: typeof loadExtensionConfig;
+  } = {},
 ): void {
   const workspaces = new Map<string, Promise<CanonicalWorkspace>>();
   const warnedTools = new Set<string>();
@@ -113,7 +116,7 @@ export function setupFilesystemGuard(
 
     try {
       const [config, workspace] = await Promise.all([
-        loadExtensionConfig(),
+        (options.loadConfig ?? loadExtensionConfig)(),
         workspaceFor(ctx.cwd),
       ]);
       const normalizedPath = normalizeToolPath(path, workspace.cwd);

@@ -25,7 +25,7 @@ test("LSP tool contracts describe optional diagnostics scope and unchanged navig
   const loadConfig = async () => ({
     version: 1,
     filesystem: { rules: [] },
-    network: { rules: [] },
+    sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } },
     lsp: {
       servers: [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
       idleTimeoutMinutes: 0,
@@ -159,7 +159,7 @@ test("empty LSP server configuration does not set up a manager, tools, or watche
   const loadConfig = async () => ({
     version: 1,
     filesystem: { rules: [] },
-    network: { rules: [] },
+    sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } },
     lsp: { servers: [] },
   }) as const;
 

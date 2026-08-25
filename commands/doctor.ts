@@ -19,21 +19,24 @@ export function formatDoctor(
   runtimeError?: string,
   lspServers: readonly LspServerSummary[] = [],
 ): string {
+  const sandboxState = !status.configured ? "disabled by configuration" : status.enabled ? "enabled" : "unavailable";
   const lines = [
-    `Sandbox: ${status.enabled ? "enabled" : "unavailable"}`,
+    `Sandbox: ${sandboxState}`,
     `Platform: ${platform}`,
     `Workspace: ${status.workspace}`,
     "Filesystem: read/edit/write guarded; other tools warn when unguarded",
   ];
 
-  if (status.network !== undefined) {
+  if (!status.configured) {
+    lines.push("Network: not applied; Bash runs on the host");
+  } else if (status.network !== undefined) {
     lines.push(`Network allow: ${describeDomains(status.network.allowedDomains)}`);
     lines.push(`Network deny: ${describeDomains(status.network.deniedDomains)}`);
-    lines.push("Network other hosts: require approval");
+    lines.push(`Network other hosts: ${status.network.strictAllowlist ? "denied" : "require approval"}`);
   } else {
     lines.push("Network: unavailable");
   }
-  if (!status.enabled && status.reason !== undefined) {
+  if (status.configured && !status.enabled && status.reason !== undefined) {
     lines.splice(1, 0, `Reason: ${status.reason}`);
   }
 
