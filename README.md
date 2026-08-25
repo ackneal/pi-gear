@@ -20,7 +20,7 @@ Install pi-gear through Pi's package manager:
 pi install git:github.com/ackneal/pi-gear
 ```
 
-Requirements: Node.js 22.19 or newer and macOS when sandboxing is enabled. Tested with Pi 0.84.1.
+Requirements: Node.js 22.19 or newer and macOS when sandboxing is enabled. Tested with Pi 0.84.3.
 
 Update installed Pi packages with:
 
@@ -28,7 +28,6 @@ Update installed Pi packages with:
 pi update --extensions
 ```
 
-An unpinned Git install follows new commits through Pi package updates. A source pinned with a tag or commit, such as `git:github.com/ackneal/pi-gear@v0.1.0`, remains on that ref. pi-gear does not implement its own updater.
 
 ## Configuration location and JSON Schema
 

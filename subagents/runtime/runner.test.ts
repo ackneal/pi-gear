@@ -97,7 +97,7 @@ test("decoder and reducer bound retained data and aggregate multipart reports", 
 });
 
 // Hand-written minimized transcript, not a literal `pi --mode json` capture.
-// Message shapes mirror the pinned 0.84.1 types (AssistantMessage, ToolResultMessage,
+// Message shapes mirror the pinned 0.84.3 types (AssistantMessage, ToolResultMessage,
 // ThinkingContent, ToolCall) so decoder regressions against imagined protocols fail here.
 test("decodes the minimized Pi JSON-mode transcript", async () => {
   const { readFile } = await import("node:fs/promises");

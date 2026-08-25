@@ -2,7 +2,6 @@
   "$schema": "https://raw.githubusercontent.com/ackneal/pi-gear/main/config.schema.json",
   "version": 1,
   "sandbox": {
-    "enabled": true,
     "network": {
       "strictAllowlist": false,
       "rules": [
@@ -22,64 +21,7 @@
     }
   },
   "lsp": {
-    "idleTimeoutMinutes": 15,
-    "servers": [
-      {
-        "extensions": [
-          ".ts",
-          ".tsx",
-          ".js",
-          ".jsx"
-        ],
-        "languageIds": {
-          ".ts": "typescript",
-          ".tsx": "typescriptreact",
-          ".js": "javascript",
-          ".jsx": "javascriptreact"
-        },
-        "command": [
-          "tsc",
-          "--lsp",
-          "--stdio"
-        ]
-      },
-      {
-        "extensions": [
-          ".go"
-        ],
-        "languageIds": {
-          ".go": "go"
-        },
-        "command": [
-          "gopls"
-        ]
-      },
-      {
-        "extensions": [
-          ".rs"
-        ],
-        "languageIds": {
-          ".rs": "rust"
-        },
-        "command": [
-          "rust-analyzer"
-        ]
-      },
-      {
-        "extensions": [
-          ".py",
-          ".pyi"
-        ],
-        "languageIds": {
-          ".py": "python",
-          ".pyi": "python"
-        },
-        "command": [
-          "basedpyright-langserver",
-          "--stdio"
-        ]
-      }
-    ]
+    "servers": []
   },
   "filesystem": {
     "rules": [
