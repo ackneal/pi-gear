@@ -33,7 +33,7 @@ export const normalizeToolPath = (path: string, cwd: string): string => {
   return resolve(cwd, normalized);
 };
 
-/** Produces Pi 0.84.1's ordered, deduplicated read fallback spellings. */
+/** Produces Pi 0.84.3's ordered, deduplicated read fallback spellings. */
 export const readFallbackCandidates = (path: string): readonly string[] => {
   const nfd = path.normalize("NFD");
   return [...new Set([
