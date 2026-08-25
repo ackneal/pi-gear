@@ -15,6 +15,7 @@ import {
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import type { NormalizedDiagnostic, SourceLocation } from "../../lsp/types.ts";
 
 const LABEL_WIDTH = 16;
 
@@ -113,11 +114,12 @@ function readRange(args: Record<string, unknown>): string {
   return limit === undefined ? `:${start}` : `:${start}-${start + limit - 1}`;
 }
 
-function headerText(marker: "+" | "-", label: string, target: string, theme: Theme): string {
-  return `${theme.fg("muted", marker)} ${theme.fg("toolTitle", theme.bold(label.padEnd(LABEL_WIDTH)))}${theme.fg("text", target)}`;
+function headerText(marker: "+" | "-" | "✓", label: string, target: string, theme: Theme): string {
+  const markerColor = marker === "✓" ? "success" : "muted";
+  return `${theme.fg(markerColor, marker)} ${theme.fg("toolTitle", theme.bold(label.padEnd(LABEL_WIDTH)))}${theme.fg("text", target)}`;
 }
 
-function header(marker: "+" | "-", label: string, target: string, theme: Theme): CompactText {
+function header(marker: "+" | "-" | "✓", label: string, target: string, theme: Theme): CompactText {
   return new CompactText(headerText(marker, label, target, theme));
 }
 
@@ -142,6 +144,80 @@ function fileCall(label: string) {
 
 function textResult(result: AnyResult): string {
   return result.content.filter((item) => item.type === "text").map((item) => item.text).join("\n");
+}
+
+const count = (value: number, noun: string): string => `${value} ${value === 1 ? noun : `${noun}s`}`;
+
+function diagnosticsSummary(diagnostics: readonly NormalizedDiagnostic[]): string {
+  const errors = diagnostics.filter(({ severity }) => severity === "error").length;
+  const warnings = diagnostics.filter(({ severity }) => severity === "warning").length;
+  const suggestions = diagnostics.length - errors - warnings;
+  return [
+    errors > 0 ? count(errors, "error") : undefined,
+    warnings > 0 ? count(warnings, "warning") : undefined,
+    suggestions > 0 ? count(suggestions, "suggestion") : undefined,
+  ].filter((item): item is string => item !== undefined).join(" · ");
+}
+
+function diagnosticLine(diagnostic: NormalizedDiagnostic): string {
+  const identity = [diagnostic.severity, diagnostic.source, diagnostic.code].filter(Boolean).join(" ");
+  return `${diagnostic.path}:${diagnostic.line}:${diagnostic.column} [${identity}] ${diagnostic.message}`;
+}
+
+function navigationLabel(args: unknown): "DEFINITION" | "REFERENCES" {
+  return parseArgsObject(args).action === "references" ? "REFERENCES" : "DEFINITION";
+}
+
+function lspCall(kind: "diagnostics" | "navigation") {
+  return (rawArgs: unknown, theme: Theme, context: AnyContext) => {
+    const label = kind === "diagnostics" ? "DIAGNOSTICS" : navigationLabel(rawArgs ?? context.args);
+    if (!context.isPartial && !context.isError) return empty();
+    return header(context.expanded ? "-" : "+", label, "", theme);
+  };
+}
+
+function diagnosticsResult(result: AnyResult, options: ToolRenderResultOptions, theme: Theme, context: AnyContext) {
+  if (context.isError) {
+    const text = textResult(result);
+    return text ? new CompactText(theme.fg("error", text), "detail") : empty();
+  }
+
+  const diagnostics = Array.isArray(result.details?.diagnostics)
+    ? result.details.diagnostics as NormalizedDiagnostic[]
+    : [];
+  if (diagnostics.length === 0) return header("✓", "DIAGNOSTICS", "", theme);
+
+  const title = headerText(options.expanded ? "-" : "+", "DIAGNOSTICS", ` ${diagnosticsSummary(diagnostics)}`, theme);
+  if (!options.expanded) return new CompactText(title);
+  return CompactText.headerAndDetail(title, `\n${diagnostics.map(diagnosticLine).join("\n")}`);
+}
+
+function navigationResult(result: AnyResult, options: ToolRenderResultOptions, theme: Theme, context: AnyContext) {
+  if (context.isError) {
+    const text = textResult(result);
+    return text ? new CompactText(theme.fg("error", text), "detail") : empty();
+  }
+
+  const label = navigationLabel(context.args);
+  const locations = Array.isArray(result.details?.locations)
+    ? result.details.locations as SourceLocation[]
+    : [];
+  if (locations.length === 0) {
+    return header("✓", label, label === "DEFINITION" ? " no result" : " no results", theme);
+  }
+
+  const title = headerText(options.expanded ? "-" : "+", label, ` ${count(locations.length, "location")}`, theme);
+  if (!options.expanded) return new CompactText(title);
+  const lines = locations.map(({ path, line, column }) => `${path}:${line}:${column}`).join("\n");
+  return CompactText.headerAndDetail(title, `\n${lines}`);
+}
+
+export function lspToolRenderers(kind: "diagnostics" | "navigation"): Pick<AnyDefinition, "renderShell" | "renderCall" | "renderResult"> {
+  return {
+    renderShell: "default",
+    renderCall: lspCall(kind),
+    renderResult: kind === "diagnostics" ? diagnosticsResult : navigationResult,
+  };
 }
 
 function fileResult(kind: "read" | "edit" | "write", base: AnyDefinition) {

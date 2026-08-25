@@ -5,6 +5,7 @@ import type { LspServerSummary } from "../commands/doctor.ts";
 import { formatDiagnostics } from "./normalize.ts";
 import { LspManager } from "./manager.ts";
 import type { NormalizedDiagnostic } from "./types.ts";
+import { lspToolRenderers } from "../ui/tools/index.ts";
 
 export interface LspServices {
   statuses(cwd: string): Promise<readonly LspServerSummary[]>;
@@ -92,10 +93,11 @@ export function setupLsp(
 
     pi.registerTool({
       name: "diagnostics",
-      label: "Diagnostics",
+      label: "DIAGNOSTICS",
       description: "Return concise language-server diagnostics for changed files or the workspace.",
       promptSnippet: "Inspect configured language-server diagnostics for changed files or the workspace",
       parameters: diagnosticsParameters,
+      ...lspToolRenderers("diagnostics"),
       async execute(_toolCallId, { scope = "changed" }) {
         if (!manager) throw new Error("LSP is not configured for this session");
         const diagnostics = await manager.diagnostics(scope);
@@ -105,10 +107,11 @@ export function setupLsp(
 
     pi.registerTool({
       name: "navigation",
-      label: "Navigation",
+      label: "NAVIGATION",
       description: "Find language-server definitions or references. Path and positions are 1-based.",
       promptSnippet: "Find definitions or references through a configured language server",
       parameters: navigationParameters,
+      ...lspToolRenderers("navigation"),
       async execute(_toolCallId, { action, path, line, column }, signal) {
         if (!manager) throw new Error("LSP is not configured for this session");
         const locations = await manager.navigate(action, path, line, column, signal);
