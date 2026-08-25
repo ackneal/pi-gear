@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createEditToolDefinition, createReadToolDefinition, createWriteToolDefinition, initTheme } from "@earendil-works/pi-coding-agent";
-import { createSandboxBashTool, registerFileToolUi } from "./index.ts";
+import { createSandboxBashTool, lspToolRenderers, registerFileToolUi } from "./index.ts";
 import * as PiTui from "@earendil-works/pi-tui";
 
 initTheme();
@@ -31,6 +31,20 @@ function assertFits(component: { render(width: number): string[] }, width: numbe
 
 function renderedLines(component: { render(width: number): string[] }, width: number): string[] {
   return component.render(width).map((line) => line.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, ""));
+}
+
+function renderedText(component: { render(width: number): string[] }, width = 200): string {
+  return renderedLines(component, width).map((line) => line.trimEnd()).join("\n");
+}
+
+function lspResult(kind: "diagnostics" | "navigation", args: Record<string, unknown>, details: unknown, expanded: boolean) {
+  const renderers = lspToolRenderers(kind);
+  return renderers.renderResult!(
+    { content: [], details } as never,
+    { expanded, isPartial: false },
+    theme,
+    context(args, expanded),
+  );
 }
 
 test("custom tool components truncate adversarial lines at the supplied terminal width", () => {
@@ -79,4 +93,82 @@ test("headers remain a single ellipsized line", () => {
   assertFits(header, 92);
   assert.equal(output.length, 1);
   assert.match(output[0] ?? "", /…/);
+});
+
+test("LSP diagnostics use terminal empty state and collapsible complete results", () => {
+  const emptyCollapsed = renderedText(lspResult("diagnostics", {}, { diagnostics: [] }, false));
+  const emptyExpanded = renderedText(lspResult("diagnostics", {}, { diagnostics: [] }, true));
+  assert.equal(emptyCollapsed, emptyExpanded);
+  assert.match(emptyCollapsed, /^✓ DIAGNOSTICS\s*$/);
+  assert.doesNotMatch(emptyCollapsed, /^[+-]/);
+  assert.equal(
+    renderedText(lspResult("diagnostics", { scope: "changed" }, { diagnostics: [] }, false)),
+    emptyCollapsed,
+  );
+  assert.match(
+    renderedText(lspResult("diagnostics", { scope: "workspace" }, { diagnostics: [] }, false)),
+    /^✓ DIAGNOSTICS\s+workspace$/,
+  );
+
+  const diagnostics = [
+    { path: "src/a.rs", line: 12, column: 5, endLine: 12, endColumn: 6, severity: "error", source: "rust-analyzer", code: "E0308", message: "mismatched types" },
+    { path: "src/b.rs", line: 30, column: 9, endLine: 30, endColumn: 10, severity: "warning", message: "unused variable `x`" },
+    { path: "src/c.rs", line: 18, column: 3, endLine: 18, endColumn: 4, severity: "information", message: "information detail" },
+    { path: "src/d.rs", line: 20, column: 7, endLine: 20, endColumn: 8, severity: "hint", message: "hint detail" },
+  ];
+  const collapsed = renderedText(lspResult("diagnostics", {}, { diagnostics }, false));
+  const changed = renderedText(lspResult("diagnostics", { scope: "changed" }, { diagnostics }, false));
+  const workspaceCollapsed = renderedText(lspResult("diagnostics", { scope: "workspace" }, { diagnostics }, false));
+  const workspaceExpanded = renderedText(lspResult("diagnostics", { scope: "workspace" }, { diagnostics }, true));
+
+  assert.match(collapsed, /^\+ DIAGNOSTICS\s+1 error · 1 warning · 2 suggestions$/);
+  assert.equal(changed, collapsed);
+  assert.doesNotMatch(changed, /changed/);
+  assert.doesNotMatch(collapsed, /mismatched types/);
+  assert.match(workspaceCollapsed, /^\+ DIAGNOSTICS\s+workspace 1 error · 1 warning · 2 suggestions$/);
+  assert.match(workspaceExpanded, /^- DIAGNOSTICS\s+workspace 1 error · 1 warning · 2 suggestions/m);
+  for (const expected of [
+    "src/a.rs:12:5 [error rust-analyzer E0308] mismatched types",
+    "src/b.rs:30:9 [warning] unused variable `x`",
+    "src/c.rs:18:3 [information] information detail",
+    "src/d.rs:20:7 [hint] hint detail",
+  ]) assert.match(workspaceExpanded, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("partial LSP navigation uses a neutral label until action is available", () => {
+  const renderers = lspToolRenderers("navigation");
+  const partialContext = context({}) as unknown as { isPartial: boolean };
+  partialContext.isPartial = true;
+
+  const partial = renderers.renderCall!({}, theme, partialContext as never);
+
+  assert.match(renderedText(partial), /^\+ NAVIGATION\s*$/);
+});
+
+test("LSP navigation renders action labels, result states, complete locations, and plurals", () => {
+  const cases = [
+    { action: "definition", empty: "✓ DEFINITION       no result", one: "+ DEFINITION       1 location" },
+    { action: "references", empty: "✓ REFERENCES       no results", one: "+ REFERENCES       1 location" },
+  ] as const;
+
+  for (const { action, empty, one } of cases) {
+    const emptyCollapsed = renderedText(lspResult("navigation", { action }, { locations: [] }, false));
+    const emptyExpanded = renderedText(lspResult("navigation", { action }, { locations: [] }, true));
+    assert.equal(emptyCollapsed, emptyExpanded, action);
+    assert.equal(emptyCollapsed, empty, action);
+    assert.doesNotMatch(emptyCollapsed, /NAVIGATION/, action);
+
+    const oneLocation = [{ path: "src/foo.ts", line: 42, column: 5 }];
+    const oneCollapsed = renderedText(lspResult("navigation", { action }, { locations: oneLocation }, false));
+    assert.equal(oneCollapsed, one, action);
+
+    const locations = [...oneLocation, { path: "src/bar.ts", line: 18, column: 3 }];
+    const collapsed = renderedText(lspResult("navigation", { action }, { locations }, false));
+    const expanded = renderedText(lspResult("navigation", { action }, { locations }, true));
+    assert.match(collapsed, new RegExp(`^\\+ ${action.toUpperCase()}\\s+2 locations$`), action);
+    assert.match(expanded, new RegExp(`^- ${action.toUpperCase()}\\s+2 locations`), action);
+    assert.match(expanded, /src\/foo\.ts:42:5/, action);
+    assert.match(expanded, /src\/bar\.ts:18:3/, action);
+    assert.doesNotMatch(expanded, /NAVIGATION/, action);
+  }
 });

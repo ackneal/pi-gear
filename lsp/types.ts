@@ -16,13 +16,18 @@ export interface LspDiagnostic {
   readonly message: string;
 }
 
+export type DiagnosticSeverity = "error" | "warning" | "information" | "hint";
+
 export interface NormalizedDiagnostic {
   readonly path: string;
   readonly line: number;
   readonly column: number;
-  readonly severity: "error" | "warning";
+  readonly endLine: number;
+  readonly endColumn: number;
+  readonly severity: DiagnosticSeverity;
   readonly message: string;
   readonly code?: string;
+  readonly source?: string;
 }
 
 export type SourceLocationResponse =
