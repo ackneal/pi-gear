@@ -7,7 +7,7 @@ import type { AccessPolicy, LspServerConfig } from "../config/types.ts";
 import { canonicalizeWorkspace, normalizeToolPath, resolveAccessTarget, type CanonicalWorkspace } from "../execution/filesystem/paths.ts";
 import { evaluateFilesystem, followFallbackAccess, mostRestrictiveFilesystemDecision } from "../execution/policy/filesystem.ts";
 import { LspClient } from "./client.ts";
-import { diagnosticKey, normalizeDiagnostics } from "./normalize.ts";
+import { deduplicateAndOrderDiagnostics, diagnosticKey, normalizeDiagnostics } from "./normalize.ts";
 import { parseNavigationResponse } from "./schema.ts";
 import type { NormalizedDiagnostic, SourceLocation } from "./types.ts";
 
@@ -87,10 +87,10 @@ export class LspManager {
   private readonly byExtension = new Map<string, LspServerConfig>();
   private readonly clients = new Map<LspServerConfig, ActiveClient>();
   private readonly retiring = new Map<LspServerConfig, Promise<void>>();
-  private readonly surfacedErrors = new Map<string, Set<string>>();
   private workspace: CanonicalWorkspace | undefined;
   private watcher: FSWatcher | undefined;
   private debounce = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly diagnosticsBeforeEdit = new Map<string, Set<string>>();
   private closing = false;
   readonly servers: readonly LspServerConfig[];
   readonly cwd: string;
@@ -189,19 +189,20 @@ export class LspManager {
     });
   }
 
-  async primeErrors(path: string): Promise<void> {
+  async primeDiagnostics(path: string): Promise<void> {
     const diagnostics = await this.sync(path);
-    const errors = diagnostics.filter((diagnostic) => diagnostic.severity === "error");
-    this.surfacedErrors.set(resolve(this.cwd, path), new Set(errors.map(diagnosticKey)));
+    this.diagnosticsBeforeEdit.set(resolve(this.cwd, path), new Set(diagnostics.map(diagnosticKey)));
   }
 
-  async newErrors(path: string): Promise<NormalizedDiagnostic[]> {
+  async changedDiagnostics(path: string): Promise<NormalizedDiagnostic[]> {
     const diagnostics = await this.sync(path);
-    const errors = diagnostics.filter((diagnostic) => diagnostic.severity === "error");
-    const previous = this.surfacedErrors.get(resolve(this.cwd, path)) ?? new Set<string>();
-    const current = new Set(errors.map(diagnosticKey));
-    this.surfacedErrors.set(resolve(this.cwd, path), current);
-    return errors.filter((diagnostic) => !previous.has(diagnosticKey(diagnostic)));
+    const absolute = resolve(this.cwd, path);
+    const previous = this.diagnosticsBeforeEdit.get(absolute) ?? new Set<string>();
+    this.diagnosticsBeforeEdit.delete(absolute);
+
+    return deduplicateAndOrderDiagnostics(
+      diagnostics.filter((diagnostic) => !previous.has(diagnosticKey(diagnostic))),
+    );
   }
 
   async diagnostics(scope: "changed" | "workspace"): Promise<NormalizedDiagnostic[]> {

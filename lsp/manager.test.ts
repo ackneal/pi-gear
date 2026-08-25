@@ -9,6 +9,7 @@ import test from "node:test";
 import type { LspClient } from "./client.ts";
 import { LspManager } from "./manager.ts";
 import { formatDiagnostics, normalizeDiagnostics } from "./normalize.ts";
+import type { DiagnosticSeverity, NormalizedDiagnostic } from "./types.ts";
 
 const exec = promisify(execFile);
 
@@ -75,7 +76,7 @@ test("manager matches configured extensions, reuses clients, normalizes diagnost
     const second = await manager.sync(source);
     assert.equal(fake.syncCount, 2);
     assert.deepEqual(first, second);
-    assert.equal(formatDiagnostics(first), "source.ts:2:3 error [10]: first error\nsource.ts:5:6 warning: warning");
+    assert.equal(formatDiagnostics(first), "source.ts:2:3 [error] 10\nfirst error\nsource.ts:5:6 [warning]\nwarning\nsource.ts:8:9 [information]\nignore");
 
     const locations = await manager.navigate("definition", source, 3, 4);
     assert.deepEqual(fake.lastNavigation, {
@@ -91,13 +92,67 @@ test("manager matches configured extensions, reuses clients, normalizes diagnost
   }
 });
 
-test("diagnostic normalization keeps only errors and warnings", () => {
+test("diagnostic normalization preserves all severities, ranges, source, and code", () => {
   const diagnostics = normalizeDiagnostics("/workspace/a.ts", "/workspace", [
-    { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, severity: 1, message: "error" },
-    { range: { start: { line: 1, character: 1 }, end: { line: 1, character: 2 } }, severity: 2, message: "warning" },
-    { range: { start: { line: 2, character: 2 }, end: { line: 2, character: 3 } }, severity: 4, message: "hint" },
+    { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, severity: 1, source: "rust-analyzer", code: "E1", message: "error" },
+    { range: { start: { line: 1, character: 1 }, end: { line: 1, character: 2 } }, severity: 2, source: "gopls", message: "warning" },
+    { range: { start: { line: 2, character: 2 }, end: { line: 2, character: 3 } }, severity: 3, source: "basedpyright", message: "information" },
+    { range: { start: { line: 3, character: 3 }, end: { line: 4, character: 4 } }, severity: 4, source: "typescript", message: "hint" },
   ]);
-  assert.deepEqual(diagnostics.map(({ severity }) => severity), ["error", "warning"]);
+
+  assert.deepEqual(diagnostics.map(({ severity }) => severity), ["error", "warning", "information", "hint"]);
+  assert.deepEqual(diagnostics.at(-1), {
+    path: "a.ts", line: 4, column: 4, endLine: 5, endColumn: 5,
+    severity: "hint", source: "typescript", message: "hint",
+  });
+  assert.match(formatDiagnostics(diagnostics.slice(0, 1)), /a\.ts:1:1 \[error\] rust-analyzer E1\nerror/);
+});
+
+const normalized = (
+  severity: DiagnosticSeverity,
+  message: string,
+  overrides: Partial<NormalizedDiagnostic> = {},
+): NormalizedDiagnostic => ({
+  path: "source.ts",
+  line: 1,
+  column: 1,
+  endLine: 1,
+  endColumn: 2,
+  severity,
+  message,
+  ...overrides,
+});
+
+test("edit feedback returns only deduplicated new or meaningfully changed diagnostics in severity order", async () => {
+  const manager = new LspManager([], "/workspace");
+  const unchanged = normalized("warning", "unchanged", { source: "gopls" });
+  const beforeChange = normalized("warning", "before", { line: 2, source: "basedpyright" });
+  const snapshots = [
+    [unchanged, beforeChange, normalized("hint", "severity change", { line: 5 })],
+    [
+      unchanged,
+      normalized("hint", "new hint", { source: "typescript" }),
+      normalized("information", "new information", { source: "basedpyright" }),
+      normalized("warning", "changed message", { line: 2, source: "basedpyright" }),
+      normalized("warning", "changed range", { line: 3, endLine: 4, source: "gopls" }),
+      normalized("warning", "severity change", { line: 5 }),
+      normalized("error", "new error", { source: "rust-analyzer" }),
+      normalized("error", "new error", { source: "rust-analyzer" }),
+    ],
+  ];
+  manager.sync = async () => snapshots.shift() ?? [];
+
+  await manager.primeDiagnostics("source.ts");
+  const feedback = await manager.changedDiagnostics("source.ts");
+
+  assert.deepEqual(feedback.map(({ severity, message }) => [severity, message]), [
+    ["error", "new error"],
+    ["warning", "changed message"],
+    ["warning", "changed range"],
+    ["warning", "severity change"],
+    ["information", "new information"],
+    ["hint", "new hint"],
+  ]);
 });
 
 test("diagnostics keeps changed scope Git-focused and scans bounded workspace files concurrently", async () => {
@@ -114,9 +169,11 @@ test("diagnostics keeps changed scope Git-focused and scans bounded workspace fi
   const manager = new LspManager([{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }], cwd, () => fake as unknown as LspClient);
 
   try {
-    assert.deepEqual((await manager.diagnostics("changed")).map(({ path }) => path), ["changed.ts", "changed.ts"]);
+    assert.deepEqual((await manager.diagnostics("changed")).map(({ path }) => path), ["changed.ts", "changed.ts", "changed.ts"]);
     fake.maxActiveWaits = 0;
-    assert.deepEqual((await manager.diagnostics("workspace")).map(({ path }) => path), ["changed.ts", "changed.ts", "clean.ts", "clean.ts"]);
+    assert.deepEqual((await manager.diagnostics("workspace")).map(({ path }) => path), [
+      "changed.ts", "changed.ts", "changed.ts", "clean.ts", "clean.ts", "clean.ts",
+    ]);
     assert.equal(fake.maxActiveWaits, 2);
     await rm(join(cwd, ".git"), { recursive: true, force: true });
     assert.deepEqual(await manager.diagnostics("changed"), []);

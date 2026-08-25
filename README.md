@@ -143,11 +143,11 @@ Findings capture new facts that affect later decisions or replanning, not routin
 
 ### `diagnostics` and `navigation`
 
-`diagnostics` reports normalized errors and warnings for Git working-tree changes by default, or configured files across the workspace with `scope: "workspace"`. In a non-Git workspace, changed scope returns no files instead of expanding into a workspace scan. Workspace scope is limited to 100 matching files and 5,000 visited entries, and synchronizes its bounded set concurrently.
+`diagnostics` reports normalized diagnostics of every standard LSP severity for Git working-tree changes by default, or configured files across the workspace with `scope: "workspace"`. In a non-Git workspace, changed scope returns no files instead of expanding into a workspace scan. Workspace scope is limited to 100 matching files and 5,000 visited entries, and synchronizes its bounded set concurrently.
 
 `navigation` resolves `definition` or `references` for a configured source path. Its input and output line/column positions are 1-based. Results are limited to workspace file locations.
 
-Successful built-in `edit` and `write` calls synchronize matching files and append only new or changed errors. A workspace watcher refreshes language-server state for changes made by Bash, formatters, scripts, or external tools; it does not parse Bash commands. Warnings remain available through `diagnostics`.
+Successful built-in `edit` and `write` calls synchronize matching files and append only diagnostics that are new or meaningfully changed by the edit. Automatic feedback lists each new or changed error on one concise line, while warnings and information/hints (reported together as suggestions) appear only as counts. Zero-count categories are omitted, and an empty diff produces no feedback. A workspace watcher refreshes language-server state for changes made by Bash, formatters, scripts, or external tools; it does not parse Bash commands.
 
 ### `researcher`
 

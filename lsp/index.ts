@@ -4,6 +4,7 @@ import { loadExtensionConfig } from "../config/index.ts";
 import type { LspServerSummary } from "../commands/doctor.ts";
 import { formatDiagnostics } from "./normalize.ts";
 import { LspManager } from "./manager.ts";
+import type { NormalizedDiagnostic } from "./types.ts";
 
 export interface LspServices {
   statuses(cwd: string): Promise<readonly LspServerSummary[]>;
@@ -16,22 +17,43 @@ type FileToolResultEvent = {
   readonly content: readonly any[];
 };
 
-export async function primeLspErrors(manager: LspManager, path: string): Promise<void> {
+const diagnosticCount = (count: number, singular: string): string =>
+  `${count} ${count === 1 ? singular : `${singular}s`}`;
+
+function formatAutomaticDiagnostics(diagnostics: readonly NormalizedDiagnostic[]): string {
+  const errors = diagnostics.filter((diagnostic) => diagnostic.severity === "error");
+  const warningCount = diagnostics.filter((diagnostic) => diagnostic.severity === "warning").length;
+  const suggestionCount = diagnostics.length - errors.length - warningCount;
+  const counts = [
+    errors.length > 0 ? diagnosticCount(errors.length, "error") : undefined,
+    warningCount > 0 ? diagnosticCount(warningCount, "warning") : undefined,
+    suggestionCount > 0 ? diagnosticCount(suggestionCount, "suggestion") : undefined,
+  ].filter((count): count is string => count !== undefined).join(" · ");
+  const details = errors.map((diagnostic) => {
+    const code = diagnostic.code ? ` ${diagnostic.code}` : "";
+    return `${diagnostic.path}:${diagnostic.line}:${diagnostic.column} [error${code}] ${diagnostic.message}`;
+  });
+
+  return ["LSP", counts, ...details].join("\n");
+}
+
+export async function primeLspDiagnostics(manager: LspManager, path: string): Promise<void> {
   try {
-    await manager.primeErrors(path);
+    await manager.primeDiagnostics(path);
   } catch {}
 }
 
-export async function lspErrorPatch(manager: LspManager, event: FileToolResultEvent): Promise<{ content: any[] } | undefined> {
+export async function lspDiagnosticsPatch(manager: LspManager, event: FileToolResultEvent): Promise<{ content: any[] } | undefined> {
   if (event.isError || (event.toolName !== "edit" && event.toolName !== "write")) return;
   const path = event.input.path;
   if (typeof path !== "string" || !manager.match(path)) return;
 
   try {
-    const errors = await manager.newErrors(path);
-    if (errors.length === 0) return;
+    const diagnostics = await manager.changedDiagnostics(path);
+    if (diagnostics.length === 0) return;
+
     return {
-      content: [...event.content, { type: "text", text: `New LSP errors:\n${formatDiagnostics(errors)}` }],
+      content: [...event.content, { type: "text", text: formatAutomaticDiagnostics(diagnostics) }],
     };
   } catch {
     return;
@@ -66,7 +88,7 @@ export function setupLsp(
     pi.registerTool({
       name: "diagnostics",
       label: "Diagnostics",
-      description: "Return concise language-server errors and warnings for changed files or the workspace.",
+      description: "Return concise language-server diagnostics for changed files or the workspace.",
       promptSnippet: "Inspect configured language-server diagnostics for changed files or the workspace",
       parameters: diagnosticsParameters,
       async execute(_toolCallId, { scope = "changed" }) {
@@ -97,10 +119,10 @@ export function setupLsp(
     if (!manager || (event.toolName !== "edit" && event.toolName !== "write")) return;
     const path = event.input.path;
     if (typeof path !== "string" || !manager.match(path)) return;
-    await primeLspErrors(manager, path);
+    await primeLspDiagnostics(manager, path);
   });
 
-  pi.on("tool_result", async (event) => manager ? lspErrorPatch(manager, event) : undefined);
+  pi.on("tool_result", async (event) => manager ? lspDiagnosticsPatch(manager, event) : undefined);
 
   pi.on("session_shutdown", async () => {
     await manager?.shutdown();
