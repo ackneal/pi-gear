@@ -12,31 +12,23 @@ A user-facing extension for the [Pi coding agent](https://github.com/earendil-wo
 - **LSP tools** for diagnostics, definitions, and references.
 - **Loop guard** advisory check-ins during long agent runs.
 
-## Install and enable in Pi
+## Install
 
-pi-gear is a local Pi extension, not a standalone CLI. It imports local npm dependencies at runtime, so install them after cloning:
+Install pi-gear through Pi's package manager:
 
 ```sh
-git clone https://github.com/ackneal/pi-gear.git ~/Developer/pi-gear
-cd ~/Developer/pi-gear
-bun install
+pi install git:github.com/ackneal/pi-gear
 ```
 
-Requirements: Node.js 22.19 or newer, Bun, and macOS when sandboxing is enabled.
+Requirements: Node.js 22.19 or newer and macOS when sandboxing is enabled. Tested with Pi 0.84.1.
 
-Add the repository directory to `~/.pi/agent/settings.json`:
+Update installed Pi packages with:
 
-```json
-{
-  "extensions": [
-    "~/Developer/pi-gear"
-  ]
-}
+```sh
+pi update --extensions
 ```
 
-Pi resolves the repository's root `index.ts`; an explicit file path is not needed. To enable pi-gear for one project only, put the same `extensions` setting in that project's `.pi/settings.json` instead. Project-local extensions require the project to be trusted.
-
-Restart Pi or reload extensions after changing settings.
+An unpinned Git install follows new commits through Pi package updates. A source pinned with a tag or commit, such as `git:github.com/ackneal/pi-gear@v0.1.0`, remains on that ref. pi-gear does not implement its own updater.
 
 ## Configuration location and JSON Schema
 
@@ -160,18 +152,38 @@ Successful Pi `edit` and `write` calls synchronize matching LSP files and report
 - File paths are checked for traversal, symlink escape, and dangling-symlink writes, but authorization remains a preflight check and cannot eliminate all filesystem races.
 - Pi recursive tools such as `grep`, `find`, and `ls` are not filesystem-policy guarded; pi-gear warns when they are active.
 - Network approvals are scoped to the current sandbox generation and cleared on shutdown.
-- Researcher MCP connections are outside the sandboxed Bash network approval path.
+- Researcher queries may be sent to the remote Exa, Context7, and grep.app MCP services. These MCP connections are separate from sandboxed Bash network policy and approval. Understand this external trust and privacy boundary before using researcher.
 - Sandboxed Bash inherits the host process environment subject to runtime configuration; avoid exposing credentials through environment variables.
 - Sandbox Runtime currently supports macOS. LSP uses one session working directory as its workspace root and does not discover monorepo roots.
 
 ## Development
+
+For local hacking, clone the repository and install with Bun:
+
+```sh
+git clone https://github.com/ackneal/pi-gear.git ~/Developer/pi-gear
+cd ~/Developer/pi-gear
+bun install
+```
+
+Load the checkout by adding it to `~/.pi/agent/settings.json` (or a trusted project's `.pi/settings.json`):
+
+```json
+{
+  "extensions": [
+    "~/Developer/pi-gear"
+  ]
+}
+```
+
+Then run:
 
 ```sh
 bun run typecheck
 bun run test
 ```
 
-Sandbox integration tests need permission to create Runtime sockets under `/tmp/claude`; restricted environments may report `EPERM`.
+Sandbox integration tests require macOS, `/usr/bin/sandbox-exec`, and permission to create Runtime sockets under `/tmp/claude`; restricted environments may report `EPERM`.
 
 Main areas: `config/` parses policy, `execution/` implements sandbox and filesystem enforcement, `context/` manages prompt/task state, `subagents/` runs delegated agents, `lsp/` provides code intelligence, and `ui/` renders Pi components.
 
