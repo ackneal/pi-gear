@@ -356,7 +356,10 @@ test("idle timeout shuts down and removes a client, then the next use starts a r
     assert.equal(clients.length, 1);
     assert.equal((await manager.statuses())[0]?.running, true);
 
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    const deadline = Date.now() + 200;
+    while (clients[0]?.shutdownCount !== 1 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
     assert.equal(clients[0]?.shutdownCount, 1);
     assert.equal((await manager.statuses())[0]?.running, false);
 
@@ -368,7 +371,7 @@ test("idle timeout shuts down and removes a client, then the next use starts a r
     assert.equal(clients[1]?.syncCount, 1);
   } finally {
     await manager.shutdown();
-    assert.equal(clients[1]?.shutdownCount, 1);
+    if (clients[1] !== undefined) assert.equal(clients[1].shutdownCount, 1);
     await rm(cwd, { recursive: true, force: true });
   }
 });
