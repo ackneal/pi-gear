@@ -132,7 +132,7 @@ LSP support is enabled only when `lsp` is present. Servers start lazily and are 
           ".js": "javascript",
           ".jsx": "javascriptreact"
         },
-        "command": ["typescript-language-server", "--stdio"]
+        "command": ["tsc", "--lsp", "--stdio"]
       }
     ]
   }
