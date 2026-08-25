@@ -108,6 +108,15 @@ test("diagnostic normalization preserves all severities, ranges, source, and cod
   assert.match(formatDiagnostics(diagnostics.slice(0, 1)), /a\.ts:1:1 \[error\] rust-analyzer E1\nerror/);
 });
 
+test("diagnostic normalization skips unspecified severity", () => {
+  const diagnostics = normalizeDiagnostics("/workspace/a.ts", "/workspace", [{
+    range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+    message: "must not become an error",
+  }]);
+
+  assert.deepEqual(diagnostics, []);
+});
+
 const normalized = (
   severity: DiagnosticSeverity,
   message: string,

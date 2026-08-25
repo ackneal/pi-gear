@@ -1,11 +1,11 @@
 import { relative } from "node:path";
 import type { DiagnosticSeverity, LspDiagnostic, NormalizedDiagnostic } from "./types.ts";
 
-const severityName = (severity: number | undefined): DiagnosticSeverity => {
+const severityName = (severity: number | undefined): DiagnosticSeverity | undefined => {
+  if (severity === 1) return "error";
   if (severity === 2) return "warning";
   if (severity === 3) return "information";
   if (severity === 4) return "hint";
-  return "error";
 };
 
 const SEVERITY_ORDER: Record<DiagnosticSeverity, number> = {
@@ -20,17 +20,22 @@ export function normalizeDiagnostics(
   cwd: string,
   diagnostics: readonly LspDiagnostic[],
 ): NormalizedDiagnostic[] {
-  return diagnostics.map((diagnostic) => ({
-    path: relative(cwd, path) || ".",
-    line: diagnostic.range.start.line + 1,
-    column: diagnostic.range.start.character + 1,
-    endLine: diagnostic.range.end.line + 1,
-    endColumn: diagnostic.range.end.character + 1,
-    severity: severityName(diagnostic.severity),
-    message: diagnostic.message.replace(/\s+/g, " ").trim(),
-    ...(diagnostic.code === undefined ? {} : { code: String(diagnostic.code) }),
-    ...(diagnostic.source === undefined ? {} : { source: diagnostic.source }),
-  }));
+  return diagnostics.flatMap((diagnostic) => {
+    const severity = severityName(diagnostic.severity);
+    if (!severity) return [];
+
+    return [{
+      path: relative(cwd, path) || ".",
+      line: diagnostic.range.start.line + 1,
+      column: diagnostic.range.start.character + 1,
+      endLine: diagnostic.range.end.line + 1,
+      endColumn: diagnostic.range.end.character + 1,
+      severity,
+      message: diagnostic.message.replace(/\s+/g, " ").trim(),
+      ...(diagnostic.code === undefined ? {} : { code: String(diagnostic.code) }),
+      ...(diagnostic.source === undefined ? {} : { source: diagnostic.source }),
+    }];
+  });
 }
 
 export function formatDiagnostics(diagnostics: readonly NormalizedDiagnostic[]): string {
