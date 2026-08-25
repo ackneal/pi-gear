@@ -44,11 +44,16 @@ export async function primeLspDiagnostics(manager: LspManager, path: string): Pr
 }
 
 export async function lspDiagnosticsPatch(manager: LspManager, event: FileToolResultEvent): Promise<{ content: any[] } | undefined> {
-  if (event.isError || (event.toolName !== "edit" && event.toolName !== "write")) return;
+  if (event.toolName !== "edit" && event.toolName !== "write") return;
   const path = event.input.path;
   if (typeof path !== "string" || !manager.match(path)) return;
 
   try {
+    if (event.isError) {
+      manager.clearDiagnosticsBaseline(path);
+      return;
+    }
+
     const diagnostics = await manager.changedDiagnostics(path);
     if (diagnostics.length === 0) return;
 

@@ -194,6 +194,10 @@ export class LspManager {
     this.diagnosticsBeforeEdit.set(resolve(this.cwd, path), new Set(diagnostics.map(diagnosticKey)));
   }
 
+  clearDiagnosticsBaseline(path: string): void {
+    this.diagnosticsBeforeEdit.delete(resolve(this.cwd, path));
+  }
+
   async changedDiagnostics(path: string): Promise<NormalizedDiagnostic[]> {
     const absolute = resolve(this.cwd, path);
     const previous = this.diagnosticsBeforeEdit.get(absolute);

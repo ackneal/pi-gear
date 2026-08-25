@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { lspDiagnosticsPatch, primeLspDiagnostics, setupLsp } from "./index.ts";
-import type { LspManager } from "./manager.ts";
+import { LspManager } from "./manager.ts";
 
 const event = (toolName: string, isError = false) => ({
   toolName,
@@ -62,6 +62,27 @@ test("successful edit/write hide automatic feedback when the diff is empty", asy
   assert.equal(await lspDiagnosticsPatch(manager, event("read")), undefined);
   assert.equal(await lspDiagnosticsPatch(manager, event("edit", true)), undefined);
   assert.equal(calls, 1);
+});
+
+test("failed edit/write clears its pre-edit diagnostic baseline", async () => {
+  const manager = new LspManager([{
+    extensions: [".ts"],
+    languageIds: { ".ts": "typescript" },
+    command: ["server"],
+  }], "/workspace");
+  let syncCalls = 0;
+  manager.sync = async () => {
+    syncCalls++;
+    return [{
+      path: "source.ts", line: 1, column: 1, endLine: 1, endColumn: 2,
+      severity: "error", message: "existing diagnostic",
+    }];
+  };
+
+  await manager.primeDiagnostics("source.ts");
+  assert.equal(await lspDiagnosticsPatch(manager, event("edit", true)), undefined);
+  assert.deepEqual(await manager.changedDiagnostics("source.ts"), []);
+  assert.equal(syncCalls, 1);
 });
 
 test("automatic edit/write LSP failures are advisory", async () => {

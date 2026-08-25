@@ -124,20 +124,22 @@ const normalized = (
 });
 
 test("edit feedback skips diagnostics when no pre-edit baseline exists", async () => {
-  const manager = new LspManager([], "/workspace");
-  const snapshots = [[], [normalized("error", "reliably new")]];
-  let syncCalls = 0;
-  manager.sync = async () => {
-    syncCalls++;
-    return snapshots.shift() ?? [];
+  const withoutBaseline = new LspManager([], "/workspace");
+  let missingBaselineSyncs = 0;
+  withoutBaseline.sync = async () => {
+    missingBaselineSyncs++;
+    return [normalized("error", "existing diagnostic")];
   };
 
-  assert.deepEqual(await manager.changedDiagnostics("source.ts"), []);
-  assert.equal(syncCalls, 0);
+  assert.deepEqual(await withoutBaseline.changedDiagnostics("source.ts"), []);
+  assert.equal(missingBaselineSyncs, 0);
 
-  await manager.primeDiagnostics("source.ts");
-  assert.deepEqual(await manager.changedDiagnostics("source.ts"), [normalized("error", "reliably new")]);
-  assert.equal(syncCalls, 2);
+  const emptyBaseline = new LspManager([], "/workspace");
+  const snapshots = [[], [normalized("error", "reliably new")]];
+  emptyBaseline.sync = async () => snapshots.shift() ?? [];
+
+  await emptyBaseline.primeDiagnostics("source.ts");
+  assert.deepEqual(await emptyBaseline.changedDiagnostics("source.ts"), [normalized("error", "reliably new")]);
 });
 
 test("edit feedback returns only deduplicated new or meaningfully changed diagnostics in severity order", async () => {
