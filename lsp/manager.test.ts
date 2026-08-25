@@ -123,6 +123,23 @@ const normalized = (
   ...overrides,
 });
 
+test("edit feedback skips diagnostics when no pre-edit baseline exists", async () => {
+  const manager = new LspManager([], "/workspace");
+  const snapshots = [[], [normalized("error", "reliably new")]];
+  let syncCalls = 0;
+  manager.sync = async () => {
+    syncCalls++;
+    return snapshots.shift() ?? [];
+  };
+
+  assert.deepEqual(await manager.changedDiagnostics("source.ts"), []);
+  assert.equal(syncCalls, 0);
+
+  await manager.primeDiagnostics("source.ts");
+  assert.deepEqual(await manager.changedDiagnostics("source.ts"), [normalized("error", "reliably new")]);
+  assert.equal(syncCalls, 2);
+});
+
 test("edit feedback returns only deduplicated new or meaningfully changed diagnostics in severity order", async () => {
   const manager = new LspManager([], "/workspace");
   const unchanged = normalized("warning", "unchanged", { source: "gopls" });

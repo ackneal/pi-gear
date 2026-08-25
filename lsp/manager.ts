@@ -195,11 +195,12 @@ export class LspManager {
   }
 
   async changedDiagnostics(path: string): Promise<NormalizedDiagnostic[]> {
-    const diagnostics = await this.sync(path);
     const absolute = resolve(this.cwd, path);
-    const previous = this.diagnosticsBeforeEdit.get(absolute) ?? new Set<string>();
+    const previous = this.diagnosticsBeforeEdit.get(absolute);
+    if (!previous) return [];
     this.diagnosticsBeforeEdit.delete(absolute);
 
+    const diagnostics = await this.sync(path);
     return deduplicateAndOrderDiagnostics(
       diagnostics.filter((diagnostic) => !previous.has(diagnosticKey(diagnostic))),
     );
