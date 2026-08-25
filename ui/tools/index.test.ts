@@ -101,6 +101,14 @@ test("LSP diagnostics use terminal empty state and collapsible complete results"
   assert.equal(emptyCollapsed, emptyExpanded);
   assert.match(emptyCollapsed, /^✓ DIAGNOSTICS\s*$/);
   assert.doesNotMatch(emptyCollapsed, /^[+-]/);
+  assert.equal(
+    renderedText(lspResult("diagnostics", { scope: "changed" }, { diagnostics: [] }, false)),
+    emptyCollapsed,
+  );
+  assert.match(
+    renderedText(lspResult("diagnostics", { scope: "workspace" }, { diagnostics: [] }, false)),
+    /^✓ DIAGNOSTICS\s+workspace$/,
+  );
 
   const diagnostics = [
     { path: "src/a.rs", line: 12, column: 5, endLine: 12, endColumn: 6, severity: "error", source: "rust-analyzer", code: "E0308", message: "mismatched types" },
@@ -109,17 +117,22 @@ test("LSP diagnostics use terminal empty state and collapsible complete results"
     { path: "src/d.rs", line: 20, column: 7, endLine: 20, endColumn: 8, severity: "hint", message: "hint detail" },
   ];
   const collapsed = renderedText(lspResult("diagnostics", {}, { diagnostics }, false));
-  const expanded = renderedText(lspResult("diagnostics", {}, { diagnostics }, true));
+  const changed = renderedText(lspResult("diagnostics", { scope: "changed" }, { diagnostics }, false));
+  const workspaceCollapsed = renderedText(lspResult("diagnostics", { scope: "workspace" }, { diagnostics }, false));
+  const workspaceExpanded = renderedText(lspResult("diagnostics", { scope: "workspace" }, { diagnostics }, true));
 
   assert.match(collapsed, /^\+ DIAGNOSTICS\s+1 error · 1 warning · 2 suggestions$/);
+  assert.equal(changed, collapsed);
+  assert.doesNotMatch(changed, /changed/);
   assert.doesNotMatch(collapsed, /mismatched types/);
-  assert.match(expanded, /^- DIAGNOSTICS\s+1 error · 1 warning · 2 suggestions/m);
+  assert.match(workspaceCollapsed, /^\+ DIAGNOSTICS\s+workspace 1 error · 1 warning · 2 suggestions$/);
+  assert.match(workspaceExpanded, /^- DIAGNOSTICS\s+workspace 1 error · 1 warning · 2 suggestions/m);
   for (const expected of [
     "src/a.rs:12:5 [error rust-analyzer E0308] mismatched types",
     "src/b.rs:30:9 [warning] unused variable `x`",
     "src/c.rs:18:3 [information] information detail",
     "src/d.rs:20:7 [hint] hint detail",
-  ]) assert.match(expanded, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  ]) assert.match(workspaceExpanded, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
 test("partial LSP navigation uses a neutral label until action is available", () => {

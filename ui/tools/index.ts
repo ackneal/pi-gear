@@ -188,9 +188,11 @@ function diagnosticsResult(result: AnyResult, options: ToolRenderResultOptions, 
   const diagnostics = Array.isArray(result.details?.diagnostics)
     ? result.details.diagnostics as NormalizedDiagnostic[]
     : [];
-  if (diagnostics.length === 0) return header("✓", "DIAGNOSTICS", "", theme);
+  const qualifier = parseArgsObject(context.args).scope === "workspace" ? "workspace" : "";
+  if (diagnostics.length === 0) return header("✓", "DIAGNOSTICS", qualifier ? ` ${qualifier}` : "", theme);
 
-  const title = headerText(options.expanded ? "-" : "+", "DIAGNOSTICS", ` ${diagnosticsSummary(diagnostics)}`, theme);
+  const summary = [qualifier, diagnosticsSummary(diagnostics)].filter(Boolean).join(" ");
+  const title = headerText(options.expanded ? "-" : "+", "DIAGNOSTICS", ` ${summary}`, theme);
   if (!options.expanded) return new CompactText(title);
   return CompactText.headerAndDetail(title, `\n${diagnostics.map(diagnosticLine).join("\n")}`);
 }

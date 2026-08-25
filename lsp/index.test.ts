@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { lspDiagnosticsPatch, primeLspDiagnostics, setupLsp } from "./index.ts";
 import { LspManager } from "./manager.ts";
 
@@ -9,6 +12,56 @@ const event = (toolName: string, isError = false) => ({
   isError,
   input: { path: "source.ts" },
   content: [{ type: "text" as const, text: "Updated source.ts" }],
+});
+
+test("LSP tool contracts describe optional diagnostics scope and unchanged navigation parameters", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-contract-"));
+  const handlers = new Map<string, (...args: any[]) => any>();
+  const tools = new Map<string, any>();
+  const pi = {
+    on: (name: string, handler: (...args: any[]) => any) => { handlers.set(name, handler); },
+    registerTool: (tool: any) => { tools.set(tool.name, tool); },
+  } as unknown as ExtensionAPI;
+  const loadConfig = async () => ({
+    version: 1,
+    filesystem: { rules: [] },
+    network: { rules: [] },
+    lsp: {
+      servers: [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
+      idleTimeoutMinutes: 0,
+    },
+  }) as const;
+  const startWatching = LspManager.prototype.startWatching;
+  LspManager.prototype.startWatching = () => {};
+
+  try {
+    setupLsp(pi, loadConfig as never);
+    await handlers.get("session_start")?.({}, { cwd });
+    const diagnostics = tools.get("diagnostics");
+    const navigation = tools.get("navigation");
+
+    assert.equal(diagnostics.description, "Inspect language-server diagnostics for changed files or the workspace.");
+    assert.equal(diagnostics.promptSnippet, "Use diagnostics to check code errors, warnings, and suggestions after changes or during verification.");
+    assert.equal(diagnostics.parameters.required, undefined);
+    assert.equal(diagnostics.parameters.properties.scope.description, "Diagnostic scope. Defaults to changed files; use workspace to inspect the full workspace.");
+    assert.deepEqual(diagnostics.parameters.properties.scope.anyOf.map((entry: any) => entry.const), ["changed", "workspace"]);
+    assert.deepEqual((await diagnostics.execute("default", {})).details.diagnostics, []);
+    assert.deepEqual((await diagnostics.execute("workspace", { scope: "workspace" })).details.diagnostics, []);
+
+    assert.equal(navigation.description, "Find symbol definitions or references using the language server. Path and positions are 1-based.");
+    assert.equal(navigation.promptSnippet, "Use navigation to locate a symbol's definition or references when tracing code relationships.");
+    assert.deepEqual(navigation.parameters.required, ["action", "path", "line", "column"]);
+    assert.equal(navigation.parameters.properties.action.description, "Navigation operation.");
+    assert.equal(navigation.parameters.properties.path.description, "Source file path.");
+    assert.equal(navigation.parameters.properties.line.description, "1-based source line.");
+    assert.equal(navigation.parameters.properties.line.minimum, 1);
+    assert.equal(navigation.parameters.properties.column.description, "1-based source column.");
+    assert.equal(navigation.parameters.properties.column.minimum, 1);
+  } finally {
+    await handlers.get("session_shutdown")?.();
+    LspManager.prototype.startWatching = startWatching;
+    await rm(cwd, { recursive: true, force: true });
+  }
 });
 
 test("automatic diagnostics render error details and collapse other severities to counts", async () => {

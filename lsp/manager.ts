@@ -26,8 +26,8 @@ interface ActiveClient {
   idleTimer?: ReturnType<typeof setTimeout>;
 }
 
-const MAX_DIAGNOSTIC_FILES = 100;
-const MAX_WORKSPACE_ENTRIES = 5_000;
+const MAX_CHANGED_DIAGNOSTIC_FILES = 100;
+const MAX_WORKSPACE_CONCURRENCY = 8;
 
 const gitStatus = (cwd: string): Promise<string[] | undefined> => new Promise((resolveResult) => {
   execFile("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], { cwd, encoding: "utf8" }, (error, stdout) => {
@@ -45,23 +45,15 @@ const gitStatus = (cwd: string): Promise<string[] | undefined> => new Promise((r
 
 const workspaceFiles = async (cwd: string, extensions: ReadonlySet<string>): Promise<string[]> => {
   const files: string[] = [];
-  let entries = 0;
 
   const visit = async (directory: string): Promise<void> => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
-      entries++;
-      if (entries > MAX_WORKSPACE_ENTRIES) {
-        throw new Error(`Workspace diagnostics exceeded the ${MAX_WORKSPACE_ENTRIES}-entry scan limit; use scope "changed"`);
-      }
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
         if (entry.name === ".git" || entry.name === "node_modules") continue;
         await visit(join(directory, entry.name));
       } else if (entry.isFile() && extensions.has(extname(entry.name))) {
         files.push(join(directory, entry.name));
-        if (files.length > MAX_DIAGNOSTIC_FILES) {
-          throw new Error(`Diagnostics exceeded the ${MAX_DIAGNOSTIC_FILES}-file limit; use scope "changed"`);
-        }
       }
     }
   };
@@ -210,27 +202,47 @@ export class LspManager {
     );
   }
 
+  private async syncDiagnosticPath(path: string): Promise<NormalizedDiagnostic[]> {
+    try {
+      return await this.sync(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+  }
+
+  private async syncWorkspaceDiagnostics(paths: readonly string[]): Promise<NormalizedDiagnostic[][]> {
+    const results = new Array<NormalizedDiagnostic[]>(paths.length);
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      while (next < paths.length) {
+        const index = next++;
+        results[index] = await this.syncDiagnosticPath(paths[index]!);
+      }
+    };
+
+    await Promise.all(Array.from(
+      { length: Math.min(MAX_WORKSPACE_CONCURRENCY, paths.length) },
+      worker,
+    ));
+    return results;
+  }
+
   async diagnostics(scope: "changed" | "workspace"): Promise<NormalizedDiagnostic[]> {
     const extensions = new Set(this.byExtension.keys());
-    let paths: string[];
+    let results: NormalizedDiagnostic[][];
     if (scope === "workspace") {
-      paths = await workspaceFiles(this.cwd, extensions);
+      const paths = await workspaceFiles(this.cwd, extensions);
+      results = await this.syncWorkspaceDiagnostics(paths);
     } else {
       const changed = await gitStatus(this.cwd);
-      paths = changed?.map((path) => resolve(this.cwd, path)).filter((path) => extensions.has(extname(path))) ?? [];
-    }
-    if (paths.length > MAX_DIAGNOSTIC_FILES) {
-      throw new Error(`Diagnostics exceeded the ${MAX_DIAGNOSTIC_FILES}-file limit; narrow the changed set`);
+      const paths = changed?.map((path) => resolve(this.cwd, path)).filter((path) => extensions.has(extname(path))) ?? [];
+      if (paths.length > MAX_CHANGED_DIAGNOSTIC_FILES) {
+        throw new Error(`Diagnostics exceeded the ${MAX_CHANGED_DIAGNOSTIC_FILES}-file limit; narrow the changed set`);
+      }
+      results = await Promise.all(paths.map((path) => this.syncDiagnosticPath(path)));
     }
 
-    const results = await Promise.all(paths.map(async (path) => {
-      try {
-        return await this.sync(path);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-        throw error;
-      }
-    }));
     return results.flat().sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line || a.column - b.column);
   }
 

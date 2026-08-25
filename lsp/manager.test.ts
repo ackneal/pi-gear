@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -183,7 +183,7 @@ test("edit feedback returns only deduplicated new or meaningfully changed diagno
   ]);
 });
 
-test("diagnostics keeps changed scope Git-focused and scans bounded workspace files concurrently", async () => {
+test("diagnostics keeps changed scope Git-focused and scans workspace files concurrently", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-scope-"));
   const changed = join(cwd, "changed.ts");
   const clean = join(cwd, "clean.ts");
@@ -212,25 +212,52 @@ test("diagnostics keeps changed scope Git-focused and scans bounded workspace fi
 });
 
 
-test("workspace diagnostics reject source sets above the file limit before starting clients", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-workspace-limit-"));
+test("workspace diagnostics scan beyond the former 100-file cap with bounded concurrency", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-workspace-files-"));
   await Promise.all(Array.from(
     { length: 101 },
     (_, index) => writeFile(join(cwd, `source-${index}.ts`), "const value = 1;\n"),
   ));
-  let clients = 0;
+  const fake = new FakeClient(join(cwd, "source-0.ts"));
   const manager = new LspManager(
     [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
     cwd,
-    () => {
-      clients++;
-      throw new Error("must reject before starting clients");
-    },
+    () => fake as unknown as LspClient,
   );
 
   try {
-    await assert.rejects(manager.diagnostics("workspace"), /exceeded the 100-file limit/);
-    assert.equal(clients, 0);
+    const diagnostics = await manager.diagnostics("workspace");
+    assert.equal(diagnostics.length, 303);
+    assert.equal(fake.syncCount, 101);
+    assert.ok(fake.maxActiveWaits <= 8);
+  } finally {
+    await manager.shutdown();
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("workspace traversal continues beyond the former 5,000-entry cap", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-workspace-entries-"));
+  for (let directory = 0; directory < 50; directory++) {
+    const path = join(cwd, `fixtures-${directory}`);
+    await mkdir(path);
+    await Promise.all(Array.from(
+      { length: 100 },
+      (_, index) => writeFile(join(path, `entry-${index}.txt`), "fixture\n"),
+    ));
+  }
+  const source = join(cwd, "source.ts");
+  await writeFile(source, "const value = 1;\n");
+  const fake = new FakeClient(source);
+  const manager = new LspManager(
+    [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
+    cwd,
+    () => fake as unknown as LspClient,
+  );
+
+  try {
+    assert.equal((await manager.diagnostics("workspace")).length, 3);
+    assert.equal(fake.syncCount, 1);
   } finally {
     await manager.shutdown();
     await rm(cwd, { recursive: true, force: true });
