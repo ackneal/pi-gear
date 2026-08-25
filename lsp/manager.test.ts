@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 import type { LspClient } from "./client.ts";
-import { LspManager } from "./manager.ts";
+import { LspManager, type IdleScheduler } from "./manager.ts";
 import { formatDiagnostics, normalizeDiagnostics } from "./normalize.ts";
 import type { DiagnosticSeverity, NormalizedDiagnostic } from "./types.ts";
 
@@ -21,10 +21,10 @@ class FakeClient {
   activeWaits = 0;
   maxActiveWaits = 0;
   private readonly target: string;
-  private readonly shutdownDelayMs: number;
-  constructor(target: string, shutdownDelayMs = 0) {
+  private readonly shutdownGate: Promise<void> | undefined;
+  constructor(target: string, shutdownGate?: Promise<void>) {
     this.target = target;
-    this.shutdownDelayMs = shutdownDelayMs;
+    this.shutdownGate = shutdownGate;
   }
   diagnosticsRevision(): number { return 0; }
   async sync(): Promise<void> { this.running = true; this.syncCount++; }
@@ -52,7 +52,28 @@ class FakeClient {
   async shutdown(): Promise<void> {
     this.running = false;
     this.shutdownCount++;
-    if (this.shutdownDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.shutdownDelayMs));
+    await this.shutdownGate;
+  }
+}
+
+class TestIdleScheduler implements IdleScheduler {
+  private callbacks = new Map<object, () => void>();
+
+  schedule(callback: () => void): object {
+    const handle = {};
+    this.callbacks.set(handle, callback);
+    return handle;
+  }
+
+  cancel(handle: unknown): void {
+    this.callbacks.delete(handle as object);
+  }
+
+  runNext(): void {
+    const next = this.callbacks.entries().next().value as [object, () => void] | undefined;
+    assert.ok(next);
+    this.callbacks.delete(next[0]);
+    next[1]();
   }
 }
 
@@ -338,17 +359,21 @@ test("idle timeout shuts down and removes a client, then the next use starts a r
   const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-idle-"));
   const source = join(cwd, "source.ts");
   await writeFile(source, "const value = 1;\n");
+  let releaseShutdown!: () => void;
+  const shutdownGate = new Promise<void>((resolve) => { releaseShutdown = resolve; });
+  const scheduler = new TestIdleScheduler();
   const clients: FakeClient[] = [];
   const manager = new LspManager(
     [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
     cwd,
     () => {
-      const client = new FakeClient(source, clients.length === 0 ? 30 : 0);
+      const client = new FakeClient(source, clients.length === 0 ? shutdownGate : undefined);
       clients.push(client);
       return client as unknown as LspClient;
     },
     undefined,
     0.0002,
+    scheduler,
   );
 
   try {
@@ -356,20 +381,20 @@ test("idle timeout shuts down and removes a client, then the next use starts a r
     assert.equal(clients.length, 1);
     assert.equal((await manager.statuses())[0]?.running, true);
 
-    const deadline = Date.now() + 200;
-    while (clients[0]?.shutdownCount !== 1 && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
+    scheduler.runNext();
     assert.equal(clients[0]?.shutdownCount, 1);
     assert.equal((await manager.statuses())[0]?.running, false);
 
     const restarted = manager.sync(source);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await Promise.resolve();
     assert.equal(clients.length, 1);
+
+    releaseShutdown();
     await restarted;
     assert.equal(clients.length, 2);
     assert.equal(clients[1]?.syncCount, 1);
   } finally {
+    releaseShutdown();
     await manager.shutdown();
     if (clients[1] !== undefined) assert.equal(clients[1].shutdownCount, 1);
     await rm(cwd, { recursive: true, force: true });
