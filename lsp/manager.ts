@@ -20,20 +20,10 @@ export interface LspServerStatus {
 
 export type LspClientFactory = (config: LspServerConfig, cwd: string) => LspClient;
 
-export interface IdleScheduler {
-  schedule(callback: () => void, delayMs: number): unknown;
-  cancel(handle: unknown): void;
-}
-
-const defaultIdleScheduler: IdleScheduler = {
-  schedule: (callback, delayMs) => setTimeout(callback, delayMs),
-  cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
-};
-
 interface ActiveClient {
   readonly client: LspClient;
   activeOperations: number;
-  idleTimer?: unknown;
+  idleTimer?: ReturnType<typeof setTimeout>;
 }
 
 const MAX_CHANGED_DIAGNOSTIC_FILES = 100;
@@ -99,7 +89,6 @@ export class LspManager {
   private readonly createClient: LspClientFactory;
   private readonly policy: AccessPolicy;
   private readonly idleTimeoutMs: number;
-  private readonly idleScheduler: IdleScheduler;
 
   constructor(
     servers: readonly LspServerConfig[],
@@ -107,14 +96,12 @@ export class LspManager {
     createClient: LspClientFactory = (config, root) => new LspClient(config, root),
     policy: AccessPolicy = { filesystem: { rules: [] }, sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } } },
     idleTimeoutMinutes = 15,
-    scheduler: IdleScheduler = defaultIdleScheduler,
   ) {
     this.servers = servers;
     this.cwd = cwd;
     this.createClient = createClient;
     this.policy = policy;
     this.idleTimeoutMs = idleTimeoutMinutes * 60_000;
-    this.idleScheduler = scheduler;
     for (const server of servers) {
       for (const extension of server.extensions) this.byExtension.set(extension, server);
     }
@@ -138,7 +125,7 @@ export class LspManager {
       entry = { client: this.createClient(config, this.cwd), activeOperations: 0 };
       this.clients.set(config, entry);
     }
-    if (entry.idleTimer) this.idleScheduler.cancel(entry.idleTimer);
+    if (entry.idleTimer) clearTimeout(entry.idleTimer);
     delete entry.idleTimer;
     entry.activeOperations++;
 
@@ -148,7 +135,7 @@ export class LspManager {
       entry.activeOperations--;
       if (!this.closing && entry.activeOperations === 0 && this.idleTimeoutMs > 0) {
         const activeEntry = entry;
-        entry.idleTimer = this.idleScheduler.schedule(() => {
+        entry.idleTimer = setTimeout(() => {
           if (this.clients.get(config) !== activeEntry || activeEntry.activeOperations !== 0) return;
           this.clients.delete(config);
           const retirement = activeEntry.client.shutdown()
@@ -328,7 +315,7 @@ export class LspManager {
     for (const timeout of this.debounce.values()) clearTimeout(timeout);
     this.debounce.clear();
     for (const entry of this.clients.values()) {
-      if (entry.idleTimer) this.idleScheduler.cancel(entry.idleTimer);
+      if (entry.idleTimer) clearTimeout(entry.idleTimer);
     }
     await Promise.all([
       ...[...this.clients.values()].map(({ client }) => client.shutdown()),

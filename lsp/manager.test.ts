@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 import type { LspClient } from "./client.ts";
-import { LspManager, type IdleScheduler } from "./manager.ts";
+import { LspManager } from "./manager.ts";
 import { formatDiagnostics, normalizeDiagnostics } from "./normalize.ts";
 import type { DiagnosticSeverity, NormalizedDiagnostic } from "./types.ts";
 
@@ -53,27 +53,6 @@ class FakeClient {
     this.running = false;
     this.shutdownCount++;
     await this.shutdownGate;
-  }
-}
-
-class TestIdleScheduler implements IdleScheduler {
-  private callbacks = new Map<object, () => void>();
-
-  schedule(callback: () => void): object {
-    const handle = {};
-    this.callbacks.set(handle, callback);
-    return handle;
-  }
-
-  cancel(handle: unknown): void {
-    this.callbacks.delete(handle as object);
-  }
-
-  runNext(): void {
-    const next = this.callbacks.entries().next().value as [object, () => void] | undefined;
-    assert.ok(next);
-    this.callbacks.delete(next[0]);
-    next[1]();
   }
 }
 
@@ -355,33 +334,33 @@ test("navigation omits destinations denied by workspace policy", async () => {
 });
 
 
-test("idle timeout shuts down and removes a client, then the next use starts a replacement", async () => {
+test("idle timeout shuts down and removes a client, then the next use starts a replacement", async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-idle-"));
   const source = join(cwd, "source.ts");
   await writeFile(source, "const value = 1;\n");
   let releaseShutdown!: () => void;
   const shutdownGate = new Promise<void>((resolve) => { releaseShutdown = resolve; });
-  const scheduler = new TestIdleScheduler();
   const clients: FakeClient[] = [];
   const manager = new LspManager(
     [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
     cwd,
     () => {
       const client = new FakeClient(source, clients.length === 0 ? shutdownGate : undefined);
+      client.waitForDiagnostics = async () => {};
       clients.push(client);
       return client as unknown as LspClient;
     },
     undefined,
     0.0002,
-    scheduler,
   );
 
   try {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
     await manager.sync(source);
     assert.equal(clients.length, 1);
     assert.equal((await manager.statuses())[0]?.running, true);
 
-    scheduler.runNext();
+    t.mock.timers.tick(12);
     assert.equal(clients[0]?.shutdownCount, 1);
     assert.equal((await manager.statuses())[0]?.running, false);
 
