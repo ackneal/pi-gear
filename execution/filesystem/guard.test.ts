@@ -4,7 +4,18 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { setupFilesystemGuard } from "./guard.ts";
+import { setupFilesystemGuard as setupFilesystemGuardImpl } from "./guard.ts";
+
+const testConfig = {
+  version: 1,
+  filesystem: { rules: [{ path: "~/.ssh", access: "deny" as const }] },
+  sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } },
+} as const;
+
+const setupFilesystemGuard = (
+  pi: ExtensionAPI,
+  options: Parameters<typeof setupFilesystemGuardImpl>[1] = {},
+): void => setupFilesystemGuardImpl(pi, { ...options, loadConfig: async () => testConfig });
 
 type ToolCall = { type: "tool_call"; toolName: string; toolCallId: string; input: Record<string, unknown> };
 

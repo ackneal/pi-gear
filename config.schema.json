@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ackneal/pi-gear/main/config.schema.json",
+  "title": "pi-gear configuration",
+  "description": "Configuration for pi-gear sandboxing, filesystem and network policy, and language servers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "filesystem"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema URL used by editors for validation and autocomplete. It does not affect runtime behavior."
+    },
+    "version": {
+      "const": 1,
+      "description": "pi-gear configuration format version. The current and only supported version is 1."
+    },
+    "sandbox": {
+      "type": "object",
+      "description": "Controls Anthropic Sandbox Runtime integration for Bash.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Runs Bash through Anthropic Sandbox Runtime when true. When false, Pi's normal Bash runs directly on the host. Filesystem guards still apply to read, edit, and write."
+        },
+        "network": {
+          "type": "object",
+          "description": "Network policy for sandboxed Bash.",
+          "additionalProperties": false,
+          "properties": {
+            "strictAllowlist": {
+              "type": "boolean",
+              "default": false,
+              "description": "When true, denies hosts not matched by an allow rule without requesting interactive approval."
+            },
+            "rules": {
+              "type": "array",
+              "default": [],
+              "description": "Allow and deny rules for hosts reached by sandboxed Bash. Unknown hosts require approval unless strictAllowlist is true.",
+              "items": { "$ref": "#/$defs/networkRule" }
+            }
+          }
+        }
+      }
+    },
+    "filesystem": {
+      "type": "object",
+      "description": "Ordered policy rules for Pi's read, edit, and write tools. More restrictive matching rules take precedence.",
+      "additionalProperties": false,
+      "required": ["rules"],
+      "properties": {
+        "rules": {
+          "type": "array",
+          "description": "Filesystem access rules. Paths must be unique selectors.",
+          "items": { "$ref": "#/$defs/filesystemRule" }
+        }
+      }
+    },
+    "lsp": {
+      "type": "object",
+      "description": "Optional language-server configuration. Omit this property to disable pi-gear LSP support.",
+      "additionalProperties": false,
+      "required": ["servers"],
+      "properties": {
+        "idleTimeoutMinutes": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 35791,
+          "default": 15,
+          "description": "Minutes before an unused language server stops. Use 0 to disable idle shutdown."
+        },
+        "servers": {
+          "type": "array",
+          "description": "Language servers launched lazily for matching file extensions.",
+          "items": { "$ref": "#/$defs/lspServer" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "filesystemRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "access"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Workspace-relative, absolute, or ~/ path selector. Glob patterns are supported; parent traversal is rejected."
+        },
+        "access": {
+          "enum": ["deny", "read-only", "read-write"],
+          "description": "Maximum access allowed for paths matching this selector."
+        },
+        "follow": {
+          "type": "boolean",
+          "description": "Also applies this rule to the symlink-resolved target. Explicit deny rules on the target still take precedence."
+        }
+      }
+    },
+    "networkRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "access"],
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "description": "DNS host, optional wildcard subdomain (for example *.github.com), and optional port."
+        },
+        "access": {
+          "enum": ["allow", "deny"],
+          "description": "Whether sandboxed Bash may connect to the matching host without approval."
+        }
+      }
+    },
+    "lspServer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["extensions", "languageIds", "command"],
+      "properties": {
+        "extensions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "File extensions owned by this server, each beginning with a dot.",
+          "items": { "type": "string", "pattern": "^\\.[^./\\\\]+$" }
+        },
+        "languageIds": {
+          "type": "object",
+          "description": "Complete mapping from every configured extension to its exact LSP language ID.",
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        },
+        "command": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Executable and arguments as an argv array. The command runs without a shell and is not installed automatically.",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

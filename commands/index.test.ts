@@ -5,10 +5,11 @@ import { formatDoctor } from "./doctor.ts";
 import { GEAR_COMMANDS, setupCommands, type GearCommandServices } from "./index.ts";
 
 const sandboxStatus = {
+  configured: true,
   enabled: true,
   workspace: "/workspace",
   reason: undefined,
-  network: { allowedDomains: [], deniedDomains: [] },
+  network: { allowedDomains: [], deniedDomains: [], strictAllowlist: false },
 } as const;
 
 test("doctor reports active subagents and their resolved model settings", () => {
@@ -47,7 +48,8 @@ test("doctor formats configured LSP server statuses", () => {
     "Sandbox: enabled",
     "Platform: linux",
     "Workspace: /workspace",
-    "Filesystem: read/edit/write guarded; other tools warn when unguarded",
+    "Bash: sandboxed",
+    "Filesystem: read/edit/write guarded",
     "Network allow: (none)",
     "Network deny: (none)",
     "Network other hosts: require approval",

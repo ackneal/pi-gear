@@ -1,77 +1,123 @@
 # pi-gear
 
-**Sandboxed Bash, filesystem and network policy, and task planning for the [Pi coding agent](https://github.com/earendil-works/pi-coding-agent).**
+A user-facing extension for the [Pi coding agent](https://github.com/earendil-works/pi-coding-agent) that adds sandboxed Bash, filesystem and network policy, task planning, research subagents, and language-server tools.
 
-pi-gear is a security-focused extension for `@earendil-works/pi-coding-agent`. It runs agent Bash inside [Anthropic Sandbox Runtime](https://github.com/anthropics/sandbox-runtime) on macOS, applies policy checks to Pi's `read`/`edit`/`write` tools, renders task plans in the Pi interface, and delegates focused research to an isolated read-only subagent.
+## What pi-gear adds to Pi
 
-## Table of contents
+- **Sandboxed Bash** through [Anthropic Sandbox Runtime](https://github.com/anthropics/sandbox-runtime) on macOS. Initialization failures block Bash instead of falling back to the host.
+- **Filesystem policy** for Pi's `read`, `edit`, and `write` tools, including path normalization and symlink-aware checks.
+- **Network policy and approvals** for sandboxed Bash.
+- **Task state and Plan UI** through the `task_state` tool.
+- **Read-only research and worker subagents** with configurable model defaults.
+- **LSP tools** for diagnostics, definitions, and references.
+- **Loop guard** advisory check-ins during long agent runs.
 
-- [Why pi-gear](#why-pi-gear)
-- [Features](#features)
-- [Requirements](#requirements)
-- [Install and load](#install-and-load)
-- [Configuration](#configuration)
-- [Commands and tools](#commands-and-tools)
-- [Security model](#security-model)
-- [Known limitations](#known-limitations)
-- [Development](#development)
-- [Project layout](#project-layout)
+## Install and enable in Pi
 
-## Why pi-gear
-
-Pi runs shell commands in the host environment and its built-in file tools have no policy layer. pi-gear closes both gaps:
-
-- **Bash is sandboxed.** Agent commands execute inside Anthropic Sandbox Runtime with constrained filesystem and network access. If the sandbox cannot initialize, Bash does not run — there is no unsandboxed fallback.
-- **Filesystem access is policy-driven.** Pi's `read`, `edit`, and `write` tools are checked against a deny/read-only/read-write rule set with path normalization and symlink-aware resolution.
-- **Plans and research are structured.** `task_state` tracks goals, outcome steps, constraints, and findings inside the session; a child-process researcher keeps read-only investigation isolated from the main agent.
-
-## Features
-
-- **Sandboxed Bash** — Runs Bash through Anthropic Sandbox Runtime on macOS. Sandbox initialization failures block Bash; the extension never falls back to unsandboxed host execution.
-- **Filesystem guard** — Applies policy checks to Pi's `read`, `edit`, and `write` tools. Outside-workspace access requires confirmation in interactive sessions and is denied in headless sessions.
-- **Sensitive-path protection** — Credential files and directories are denied by default, and deny rules always outrank allow rules.
-- **Recursive-tool warning** — Warns when Pi enables unguarded recursive filesystem tools (`grep`, `find`, `ls`), but does not block them.
-- **Network approvals** — Sandboxed Bash uses configured allow, deny, and approval rules. Unknown hosts require approval by default.
-- **Task state** — Provides the `task_state` tool for goals, bounded outcome steps, constraints, findings, and observable completion conditions.
-- **Plan UI** — Renders task plans in the Pi interface and restores active state across session branches and compaction.
-- **Researcher** — Provides an isolated, read-only `researcher` subagent with the `read` tool and selected MCP research capabilities.
-- **Code intelligence** — Uses configured stdio language servers for diagnostics, definitions, and references. Servers start lazily and are never installed automatically.
-- **Loop guard** — Sends advisory check-ins after 15 and 25 consecutive turns, then resets after the agent settles.
-
-## Requirements
-
-| Requirement | Version or platform |
-| --- | --- |
-| **Operating system** | macOS for Sandbox Runtime |
-| **Node.js** | >= 22.19.0 |
-| **Package manager** | bun |
-| **Pi** | `@earendil-works/pi-coding-agent` runtime |
-
-## Install and load
-
-Install dependencies from the repository root:
+pi-gear is a local Pi extension, not a standalone CLI. It imports local npm dependencies at runtime, so install them after cloning:
 
 ```sh
+git clone https://github.com/ackneal/pi-gear.git ~/Developer/pi-gear
+cd ~/Developer/pi-gear
 bun install
 ```
 
-pi-gear is a Pi extension, not a standalone CLI. Configure your Pi runtime to load the extension entry point:
+Requirements: Node.js 22.19 or newer, Bun, and macOS when sandboxing is enabled.
 
-```text
-/path/to/pi-gear/index.ts
+Add the repository directory to `~/.pi/agent/settings.json`:
+
+```json
+{
+  "extensions": [
+    "~/Developer/pi-gear"
+  ]
+}
 ```
 
-## Configuration
+Pi resolves the repository's root `index.ts`; an explicit file path is not needed. To enable pi-gear for one project only, put the same `extensions` setting in that project's `.pi/settings.json` instead. Project-local extensions require the project to be trusted.
 
-Policy is loaded from `<PI_CODING_AGENT_DIR>/pi-gear/config.json` (default: `~/.pi/agent/pi-gear/config.json`). If that file does not exist, the repository-root `config.json` is used as the default and copyable example. An invalid global config fails closed instead of falling back silently.
+Restart Pi or reload extensions after changing settings.
 
-Filesystem rules use workspace-relative paths, absolute paths, or `~/` selectors. More restrictive rules take precedence over less restrictive rules. A rule with `"follow": true` also authorizes the symlink-resolved target of a matching path, so opt-in rules work through symlinks without prompting; explicit deny rules on the target still win.
+## Configuration location and JSON Schema
 
-Review policy changes before using the extension. Do not weaken sensitive-file deny rules without understanding the resulting access boundary.
+pi-gear loads policy from:
 
-LSP support is enabled only when `lsp` is present. Each server owns one or more extensions, provides the exact LSP language ID for every extension, and supplies its executable plus arguments as an argv array. `languageIds` must be a complete mapping: missing or extra extension keys are invalid, and language IDs are never inferred from extensions. Duplicate extension ownership is also invalid.
+```text
+~/.pi/agent/pi-gear/config.json
+```
 
-`idleTimeoutMinutes` defaults to 15 and controls how long an unused server remains running. Set it to `0` to disable idle shutdown.
+More precisely, it uses `<PI_CODING_AGENT_DIR>/pi-gear/config.json`. If that file does not exist, the repository's [`config.json`](config.json) is used as the default and copyable example. An invalid user config fails closed; pi-gear does not silently fall back to defaults.
+
+Start a user config from `config.json` and retain its schema reference for editor validation, autocomplete, and tooltips:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/ackneal/pi-gear/main/config.schema.json",
+  "version": 1,
+  "sandbox": {
+    "enabled": true,
+    "network": { "strictAllowlist": false, "rules": [] }
+  },
+  "filesystem": { "rules": [] }
+}
+```
+
+`$schema` is optional metadata and does not affect runtime behavior. Unknown fields and invalid values are rejected. The complete contract is in [`config.schema.json`](config.schema.json).
+
+## Sandbox configuration
+
+Sandboxing defaults to enabled, including when `sandbox` or `sandbox.enabled` is omitted:
+
+```json
+{
+  "sandbox": {
+    "enabled": true
+  }
+}
+```
+
+When enabled, pi-gear replaces Pi's Bash tool and `user_bash` operations with Sandbox Runtime implementations. If initialization or dependency checks fail, Bash remains unavailable; there is no automatic host fallback.
+
+To intentionally use Pi's normal host Bash:
+
+```json
+{
+  "sandbox": {
+    "enabled": false
+  }
+}
+```
+
+With sandboxing disabled, pi-gear does not initialize Sandbox Runtime or replace Pi's Bash behavior. **Bash commands execute directly on the host.** Each new interactive session shows one warning; headless sessions do not prompt. Filesystem guards for Pi's `read`, `edit`, and `write` tools and all other pi-gear capabilities remain active.
+
+## Filesystem and network policy
+
+Filesystem selectors may be workspace-relative, absolute, or begin with `~/`. Access is `deny`, `read-only`, or `read-write`; more restrictive matching rules take precedence. A rule with `"follow": true` also authorizes the symlink-resolved target, while explicit target deny rules still win.
+
+Outside-workspace file-tool access requires confirmation in interactive sessions and is denied in headless sessions. Sensitive credential paths are denied by the bundled policy. Review policy changes before use.
+
+Network rules live under `sandbox.network` and use a DNS host, optional wildcard subdomain, and optional port:
+
+```json
+{
+  "sandbox": {
+    "network": {
+      "strictAllowlist": false,
+      "rules": [
+        { "host": "github.com", "access": "allow" },
+        { "host": "*.githubusercontent.com", "access": "allow" },
+        { "host": "example.com:443", "access": "deny" }
+      ]
+    }
+  }
+}
+```
+
+Rules apply only to sandboxed Bash. `strictAllowlist` defaults to `false`, so unknown hosts require interactive approval. Set it to `true` to deny unknown hosts without prompting. When sandboxing is disabled, host Bash networking is not governed by this policy.
+
+## LSP configuration
+
+LSP support is enabled only when `lsp` is present. Servers start lazily and are never installed automatically.
 
 ```json
 {
@@ -93,123 +139,40 @@ LSP support is enabled only when `lsp` is present. Each server owns one or more 
 }
 ```
 
-pi-gear does not install language servers. Commands run with `shell: false`, use the workspace cwd as their v1 root, and start only when a matching source file is first used. An empty `servers` array remains valid and disables LSP servers. The client implements and runtime-validates the diagnostics and navigation subset of [LSP 3.17](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/); malformed server payloads report the incompatible field path.
+Each extension may belong to only one server. `languageIds` must map every configured extension and no others. Commands run with `shell: false` from the workspace root. `idleTimeoutMinutes` defaults to 15; use `0` to disable idle shutdown. An empty `servers` array disables all servers.
 
 ## Commands and tools
 
-### `/gear:doctor`
+- **`/gear:doctor`** — reports sandbox state (enabled and available, enabled but unavailable, or disabled by configuration), filesystem/network behavior, subagent settings, and LSP availability.
+- **`/gear:subagent-inspect`** — inspects recorded subagent runs.
+- **`/gear:subagent-model`** — sets persistent model and thinking defaults in `~/.pi/agent/pi-gear/runtime.json`.
+- **`task_state`** — manages a goal, outcome steps, constraints, and decision-relevant findings.
+- **`diagnostics`** — returns LSP diagnostics for changed files or the workspace.
+- **`navigation`** — resolves definitions or references with 1-based positions.
+- **`researcher`** — delegates focused read-only research to an isolated Pi child process.
+- **`worker`** — delegates bounded implementation work to a child process.
 
-Shows sandbox diagnostics plus each active subagent's resolved model and thinking level:
+Successful Pi `edit` and `write` calls synchronize matching LSP files and report new or changed diagnostics automatically.
 
-```text
-Sandbox: enabled
-Platform: darwin
-Workspace: /path/to/workspace
-Filesystem: read/edit/write guarded; other tools warn when unguarded
-Network: configured rules; unknown hosts require approval
+## Security behavior and limitations
 
-Subagents:
-- researcher: enabled · inherit · (provider) model • low
-- worker: enabled · override · (provider) model • medium
-
-LSP:
-- running .ts .tsx .js .jsx · tsc
-- available .go · gopls
-- not found .rs · rust-analyzer
-```
-
-When the sandbox is unavailable, `/gear:doctor` inserts a `Reason:` line below the status.
-
-Other commands:
-
-- `/gear:subagent-inspect` — inspect recorded subagent runs.
-- `/gear:subagent-model` — set the persistent model and thinking default for a subagent.
-
-Settings are written to `<PI_CODING_AGENT_DIR>/pi-gear/runtime.json` (default: `~/.pi/agent/pi-gear/runtime.json`) and apply across sessions. Each subagent can inherit the current main model or override provider, model, and thinking level.
-
-### `task_state`
-
-Use `task_state` for non-trivial work. Its semantic actions are:
-
-- Plan and steps: `set_plan`, `add_step`, `revise_step`, `remove_step`, `start_step`, `complete_step`
-- Context: `add_constraint`, `remove_constraint`, `add_finding`, `remove_finding`
-- State: `show`, `clear`
-
-A `TaskState` contains one goal and 1–10 outcome steps, plus constraints and findings. Each step's `doneWhen` is its observable completion condition. New steps are `pending`; use `start_step` and `complete_step` for status transitions because status cannot be mutated directly.
-
-Findings capture new facts that affect later decisions or replanning, not routine test or check results. Constraints and findings carry through active replanning.
-
-`TaskState` is working state. It clears automatically after the work is complete and the agent has settled. Use `clear` to abandon or reset the current state.
-
-### `diagnostics` and `navigation`
-
-`diagnostics` returns full details for error, warning, information, and hint diagnostics. Its optional scope defaults to Git working-tree changes, so `diagnostics({})` is equivalent to `diagnostics({ scope: "changed" })`; in a non-Git workspace this returns no files. `scope: "workspace"` scans every workspace file matching a configured LSP extension, without fixed file or traversal caps, and synchronizes files with bounded concurrency.
-
-`navigation` resolves `definition` or `references` for a configured source path. Input and output line/column positions are 1-based, and results are restricted to workspace file locations.
-
-Successful built-in `edit` and `write` calls synchronize matching files and append only diagnostics that are new or meaningfully changed by the edit. Automatic feedback lists each new or changed error in full, reports warnings as a count, and combines information/hints into a suggestions count. The explicit `diagnostics` tool remains available for complete details. A workspace watcher refreshes language-server state for changes made by Bash, formatters, scripts, or external tools; it does not parse Bash commands.
-
-### `researcher`
-
-The researcher runs in a separate Pi child process. It is read-only and cannot modify files, run Bash, or update task state.
-
-Available research capabilities:
-
-- **Exa** — Web search, code context, papers, and crawling
-- **Context7** — Library and framework documentation
-- **grep.app** — GitHub code search
-
-The researcher inherits the active session working directory so local reads resolve against the same project.
-
-## Security model
-
-- **No fallback** — If Sandbox Runtime cannot initialize, Bash and `user_bash` remain unavailable.
-- **Path normalization** — File paths are normalized and checked for traversal, symlink escape, and dangling symlink writes.
-- **Approval isolation** — Network approvals are scoped to the current sandbox generation and cleared on session shutdown.
-- **Process cleanup** — Abort, timeout, and session shutdown terminate sandboxed command process groups and clean up runtime state.
-- **Headless safety** — Operations requiring user approval are denied when no UI is available.
-
-## Known limitations
-
-- **Platform support** — Sandbox Runtime is currently supported only on macOS.
-- **Researcher networking** — Researcher MCP connections use their own child-process capability path and are not currently governed by the sandboxed Bash network approval flow.
-- **Environment inheritance** — Sandboxed Bash currently receives the host process environment, subject to the runtime configuration. Avoid exposing credentials through the shell environment.
-- **LSP workspace root** — LSP v1 uses the session cwd as one workspace root; root-marker and monorepo discovery are not implemented.
-- **Filesystem races** — File-tool authorization is a preflight check. It does not fully eliminate TOCTOU races caused by another local process changing paths concurrently.
-- **Runtime integration tests** — Sandbox-dependent tests require permission to create Sandbox Runtime sockets under `/tmp/claude`.
+- Sandbox failures fail closed only when sandboxing is enabled. Explicitly disabling sandboxing opts into direct host command execution.
+- File paths are checked for traversal, symlink escape, and dangling-symlink writes, but authorization remains a preflight check and cannot eliminate all filesystem races.
+- Pi recursive tools such as `grep`, `find`, and `ls` are not filesystem-policy guarded; pi-gear warns when they are active.
+- Network approvals are scoped to the current sandbox generation and cleared on shutdown.
+- Researcher MCP connections are outside the sandboxed Bash network approval path.
+- Sandboxed Bash inherits the host process environment subject to runtime configuration; avoid exposing credentials through environment variables.
+- Sandbox Runtime currently supports macOS. LSP uses one session working directory as its workspace root and does not discover monorepo roots.
 
 ## Development
 
-Run the type checker:
-
 ```sh
 bun run typecheck
-```
-
-Run the test suite:
-
-```sh
 bun run test
 ```
 
-The suite covers policy, path, sandbox lifecycle, researcher runtime, task-state, Plan UI, and tool-renderer behavior. Two tests exercise the real Sandbox Runtime (sandbox integration and spawn lifecycle); in restricted environments they fail with `EPERM` when `/tmp/claude/srt-mux-*.sock` cannot be created — an environment permission issue, not an assertion failure.
+Sandbox integration tests need permission to create Runtime sockets under `/tmp/claude`; restricted environments may report `EPERM`.
 
-## Project layout
-
-| Path | Purpose |
-| --- | --- |
-| **`index.ts`** | Extension entry point |
-| **`config.json`** | Filesystem and network policy |
-| **`config/`** | Policy loading, parsing, and selector helpers |
-| **`execution/`** | Sandbox controller, filesystem guard, and policy evaluation |
-| **`lifecycle/`** | Loop guard |
-| **`context/`** | Prompt composition and task state |
-| **`subagents/`** | Isolated researcher runtime and profiles |
-| **`capabilities/`** | MCP capability definitions and adapters |
-| **`ui/`** | Plan, subagent, and tool renderers |
-
----
-
-Built for the [Pi coding agent](https://github.com/earendil-works/pi-coding-agent). Related: [pi-tui](https://github.com/earendil-works/pi-tui), [Anthropic Sandbox Runtime](https://github.com/anthropics/sandbox-runtime).
+Main areas: `config/` parses policy, `execution/` implements sandbox and filesystem enforcement, `context/` manages prompt/task state, `subagents/` runs delegated agents, `lsp/` provides code intelligence, and `ui/` renders Pi components.
 
 Released under the [MIT License](LICENSE).

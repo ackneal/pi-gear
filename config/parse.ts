@@ -41,6 +41,34 @@ const exactKeys = (
   }
 };
 
+const optionalSchema = (value: unknown): string | undefined => {
+  if (value === undefined) return undefined;
+  return string(value, "$schema");
+};
+
+const sandboxConfig = (value: unknown): ExtensionConfig["sandbox"] => {
+  const sandbox = value === undefined ? {} : object(value, "sandbox");
+  exactKeys(sandbox, "sandbox", [], ["enabled", "network"]);
+  if (sandbox.enabled !== undefined && typeof sandbox.enabled !== "boolean") {
+    throw new Error("sandbox.enabled must be a boolean");
+  }
+
+  const network = sandbox.network === undefined ? {} : object(sandbox.network, "sandbox.network");
+  exactKeys(network, "sandbox.network", [], ["rules", "strictAllowlist"]);
+  if (network.strictAllowlist !== undefined && typeof network.strictAllowlist !== "boolean") {
+    throw new Error("sandbox.network.strictAllowlist must be a boolean");
+  }
+
+  const rules = network.rules === undefined ? Object.freeze([]) : networkRules(network.rules);
+  return Object.freeze({
+    enabled: sandbox.enabled ?? true,
+    network: Object.freeze({
+      rules,
+      strictAllowlist: network.strictAllowlist ?? false,
+    }),
+  });
+};
+
 const version = (value: unknown): 1 => {
   if (value !== 1) {
     throw new Error("version must be 1");
@@ -96,15 +124,15 @@ const validHost = (host: string): boolean => {
 };
 
 const networkRule = (value: unknown, index: number): NetworkRule => {
-  const rule = object(value, `network.rules[${index}]`);
-  exactKeys(rule, `network.rules[${index}]`, ["host", "access"]);
-  const host = string(rule.host, `network.rules[${index}].host`).toLowerCase();
+  const rule = object(value, `sandbox.network.rules[${index}]`);
+  exactKeys(rule, `sandbox.network.rules[${index}]`, ["host", "access"]);
+  const host = string(rule.host, `sandbox.network.rules[${index}].host`).toLowerCase();
   if (!validHost(host)) {
-    throw new Error(`network.rules[${index}].host is invalid`);
+    throw new Error(`sandbox.network.rules[${index}].host is invalid`);
   }
-  const access = string(rule.access, `network.rules[${index}].access`);
+  const access = string(rule.access, `sandbox.network.rules[${index}].access`);
   if (access !== "allow" && access !== "deny") {
-    throw new Error(`network.rules[${index}].access is invalid`);
+    throw new Error(`sandbox.network.rules[${index}].access is invalid`);
   }
   return Object.freeze({ host, access });
 };
@@ -128,7 +156,7 @@ const filesystemRules = (
 
 const networkRules = (value: unknown): readonly NetworkRule[] => {
   if (!Array.isArray(value)) {
-    throw new Error("network.rules must be an array");
+    throw new Error("sandbox.network.rules must be an array");
   }
   return Object.freeze(value.map(networkRule));
 };
@@ -197,24 +225,21 @@ const lspConfig = (value: unknown): LspConfig => {
 export const parseExtensionConfig = (value: unknown): ExtensionConfig => {
   try {
     const root = object(value, "config");
-    exactKeys(root, "config", ["version", "filesystem", "network"], ["lsp"]);
+    exactKeys(root, "config", ["version", "filesystem"], ["$schema", "sandbox", "lsp"]);
     const filesystem = object(root.filesystem, "filesystem");
     exactKeys(filesystem, "filesystem", ["rules"]);
-    const network = object(root.network, "network");
-    exactKeys(network, "network", ["rules"]);
 
     const policy: AccessPolicy = {
       filesystem: {
         rules: filesystemRules(filesystem.rules),
       },
-      network: {
-        rules: networkRules(network.rules),
-      },
+      sandbox: sandboxConfig(root.sandbox),
     };
 
     Object.freeze(policy.filesystem);
-    Object.freeze(policy.network);
+    const schema = optionalSchema(root.$schema);
     return Object.freeze({
+      ...(schema === undefined ? {} : { $schema: schema }),
       version: version(root.version),
       ...policy,
       ...(root.lsp === undefined ? {} : { lsp: lspConfig(root.lsp) }),

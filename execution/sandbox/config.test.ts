@@ -12,7 +12,7 @@ const policy: AccessPolicy = {
   filesystem: {
     rules: [{ path: "/tmp/**", access: "read-write", follow: true }],
   },
-  network: { rules: [] },
+  sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } },
 };
 
 test("follow rules add canonical paths to the sandbox boundary", { skip: process.platform !== "darwin" }, async () => {
@@ -43,7 +43,7 @@ test("follow rules map read-only and deny access to sandbox write and read bound
         { path: `${denied}/**`, access: "deny", follow: true },
       ],
     },
-    network: { rules: [] },
+    sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } },
   };
 
   try {
@@ -71,13 +71,33 @@ test("follow rules map read-only and deny access to sandbox write and read bound
 
 const barePolicy: AccessPolicy = {
   filesystem: { rules: [] },
-  network: { rules: [] },
+  sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } },
 };
 
 const tmpOptInPolicy: AccessPolicy = {
   ...barePolicy,
   filesystem: { ...barePolicy.filesystem, rules: [{ path: "/tmp/**", access: "read-write", follow: true }] },
 };
+
+test("sandbox network policy maps strict allowlist behavior", () => {
+  const config = createSandboxConfig("/workspace", {
+    filesystem: { rules: [] },
+    sandbox: {
+      enabled: true,
+      network: {
+        strictAllowlist: true,
+        rules: [
+          { host: "allowed.example", access: "allow" },
+          { host: "denied.example", access: "deny" },
+        ],
+      },
+    },
+  });
+
+  assert.equal(config.network.strictAllowlist, true);
+  assert.deepEqual(config.network.allowedDomains, ["allowed.example"]);
+  assert.deepEqual(config.network.deniedDomains, ["denied.example"]);
+});
 
 test("the OS temp dir becomes a runtime writable root", async () => {
   const tempRoot = await mkdtemp(join(tmpdir(), "pi-gear-tmpdir-"));

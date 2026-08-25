@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { setupCommands } from "./commands/index.ts";
+import { loadExtensionConfig } from "./config/index.ts";
 import { setupPromptComposer } from "./context/prompt/index.ts";
 import { setupTaskState } from "./context/state/index.ts";
 import { setupExecution } from "./execution/index.ts";
@@ -8,8 +9,9 @@ import { setupLsp } from "./lsp/index.ts";
 import { setupSubagents } from "./subagents/index.ts";
 import { setupThinkingDisplay } from "./ui/thinking/index.ts";
 
-export default function gear(pi: ExtensionAPI): void {
-  const execution = setupExecution(pi);
+export default async function gear(pi: ExtensionAPI): Promise<void> {
+  const config = await loadExtensionConfig();
+  const execution = setupExecution(pi, config);
   setupLifecycle(pi);
 
   setupTaskState(pi);

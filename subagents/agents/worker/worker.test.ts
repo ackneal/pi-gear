@@ -55,7 +55,7 @@ test("worker child arguments configure isolation, capabilities, and system promp
   assert.equal(args[args.length - 1], "implement feature");
 });
 
-test("worker extension configures filesystem guard and sandbox", () => {
+test("worker extension configures filesystem guard and sandbox", async () => {
   const registeredTools: string[] = [];
   const registeredCommands: string[] = [];
   const handlers = new Map<string, Array<(event: unknown, ctx: { cwd: string }) => unknown>>();
@@ -71,7 +71,11 @@ test("worker extension configures filesystem guard and sandbox", () => {
     sendMessage: () => {},
   } as unknown as ExtensionAPI;
 
-  workerExtension(mockPi);
+  await workerExtension(mockPi, async () => ({
+    version: 1,
+    filesystem: { rules: [] },
+    sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } },
+  }));
   handlers.get("session_start")?.at(-1)?.({}, { cwd: "/workspace" });
 
   assert.ok(handlers.has("tool_call")); // filesystem guard

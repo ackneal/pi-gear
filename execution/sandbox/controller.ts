@@ -29,10 +29,11 @@ type SandboxState =
   | { readonly kind: "stopped" };
 
 export interface SandboxStatus {
+  readonly configured: boolean;
   readonly enabled: boolean;
   readonly workspace: string;
   readonly reason: string | undefined;
-  readonly network: { allowedDomains: readonly string[]; deniedDomains: readonly string[] } | undefined;
+  readonly network: { allowedDomains: readonly string[]; deniedDomains: readonly string[]; strictAllowlist: boolean } | undefined;
 }
 
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
@@ -42,13 +43,16 @@ const NETWORK_PROMPT_TIMEOUT_MS = 30_000;
 export class SandboxController {
   private readonly sendApprovalMessage: (content: string) => void | Promise<void>;
   private readonly manager: SandboxManagerLike;
+  private readonly loadConfig: typeof loadExtensionConfig;
 
   constructor(
     sendApprovalMessage: (content: string) => void | Promise<void>,
     manager: SandboxManagerLike = SandboxManager,
+    loadConfig: typeof loadExtensionConfig = loadExtensionConfig,
   ) {
     this.sendApprovalMessage = sendApprovalMessage;
     this.manager = manager;
+    this.loadConfig = loadConfig;
   }
 
   private state: SandboxState = { kind: "starting" };
@@ -93,7 +97,7 @@ export class SandboxController {
         throw new Error(`platform ${process.platform} is unsupported`);
       }
       const [extensionConfig, workspace, tempDir] = await Promise.all([
-        loadExtensionConfig(),
+        this.loadConfig(),
         canonicalizeWorkspace(ctx.cwd),
         resolveRuntimeTempDir(),
       ]);
@@ -150,15 +154,17 @@ export class SandboxController {
   status(): SandboxStatus {
     return this.state.kind === "ready"
       ? {
+          configured: true,
           enabled: true,
           workspace: this.state.workspace.canonicalRoot,
           reason: undefined,
           network: {
             allowedDomains: this.state.config.network.allowedDomains ?? [],
             deniedDomains: this.state.config.network.deniedDomains ?? [],
+            strictAllowlist: this.state.config.network.strictAllowlist ?? false,
           },
         }
-      : { enabled: false, workspace: "unavailable", reason: this.state.kind === "unavailable" ? this.state.reason : this.state.kind, network: undefined };
+      : { configured: true, enabled: false, workspace: "unavailable", reason: this.state.kind === "unavailable" ? this.state.reason : this.state.kind, network: undefined };
   }
 
   private enqueue(operation: () => Promise<void>): Promise<void> {

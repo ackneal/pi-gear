@@ -5,7 +5,28 @@ import { parseExtensionConfig } from "./parse.ts";
 const validConfig = (): unknown => ({
   version: 1,
   filesystem: { rules: [] },
-  network: { rules: [] },
+});
+
+test("sandbox defaults to enabled, accepts explicit values, and accepts schema metadata", () => {
+  const cases = [
+    { input: validConfig(), enabled: true, strictAllowlist: false, schema: undefined },
+    { input: { ...validConfig() as object, sandbox: { enabled: true } }, enabled: true, strictAllowlist: false, schema: undefined },
+    { input: { ...validConfig() as object, sandbox: { enabled: false } }, enabled: false, strictAllowlist: false, schema: undefined },
+    { input: { ...validConfig() as object, sandbox: { network: { strictAllowlist: true } } }, enabled: true, strictAllowlist: true, schema: undefined },
+    {
+      input: { ...validConfig() as object, $schema: "https://example.com/config.schema.json" },
+      enabled: true,
+      strictAllowlist: false,
+      schema: "https://example.com/config.schema.json",
+    },
+  ] as const;
+
+  for (const entry of cases) {
+    const config = parseExtensionConfig(entry.input);
+    assert.equal(config.sandbox.enabled, entry.enabled);
+    assert.equal(config.sandbox.network.strictAllowlist, entry.strictAllowlist);
+    assert.equal(config.$schema, entry.schema);
+  }
 });
 
 test("configuration parsing fails closed for invalid shapes and unsafe selectors", () => {
@@ -16,8 +37,14 @@ test("configuration parsing fails closed for invalid shapes and unsafe selectors
   }), /Invalid policy configuration/);
   assert.throws(() => parseExtensionConfig({
     ...validConfig() as object,
-    network: { defaultAccess: "allow", rules: [] },
-  }), /Invalid policy configuration/);
+    network: { rules: [] },
+  }), /invalid keys/);
+  assert.throws(() => parseExtensionConfig({ ...validConfig() as object, unknown: true }), /invalid keys/);
+  assert.throws(() => parseExtensionConfig({ ...validConfig() as object, sandbox: { enabled: "yes" } }), /sandbox.enabled/);
+  assert.throws(() => parseExtensionConfig({ ...validConfig() as object, sandbox: { extra: true } }), /invalid keys/);
+  assert.throws(() => parseExtensionConfig({ ...validConfig() as object, sandbox: { network: { strictAllowlist: "yes" } } }), /strictAllowlist/);
+  assert.throws(() => parseExtensionConfig({ ...validConfig() as object, sandbox: { network: { extra: true } } }), /invalid keys/);
+  assert.throws(() => parseExtensionConfig({ ...validConfig() as object, $schema: 1 }), /\$schema/);
 });
 
 test("LSP configuration is optional, applies defaults, and is deeply frozen", () => {

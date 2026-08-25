@@ -21,10 +21,10 @@ class FakeClient {
   activeWaits = 0;
   maxActiveWaits = 0;
   private readonly target: string;
-  private readonly shutdownDelayMs: number;
-  constructor(target: string, shutdownDelayMs = 0) {
+  private readonly shutdownGate: Promise<void> | undefined;
+  constructor(target: string, shutdownGate?: Promise<void>) {
     this.target = target;
-    this.shutdownDelayMs = shutdownDelayMs;
+    this.shutdownGate = shutdownGate;
   }
   diagnosticsRevision(): number { return 0; }
   async sync(): Promise<void> { this.running = true; this.syncCount++; }
@@ -52,7 +52,7 @@ class FakeClient {
   async shutdown(): Promise<void> {
     this.running = false;
     this.shutdownCount++;
-    if (this.shutdownDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.shutdownDelayMs));
+    await this.shutdownGate;
   }
 }
 
@@ -299,7 +299,7 @@ test("filesystem deny rules prevent LSP file synchronization", async () => {
     [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
     cwd,
     () => { clients++; throw new Error("should not start"); },
-    { filesystem: { rules: [{ path: "secret.ts", access: "deny" }] }, network: { rules: [] } },
+    { filesystem: { rules: [{ path: "secret.ts", access: "deny" }] }, sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } } },
   );
 
   try {
@@ -322,7 +322,7 @@ test("navigation omits destinations denied by workspace policy", async () => {
     [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
     cwd,
     () => fake as unknown as LspClient,
-    { filesystem: { rules: [{ path: "secret.ts", access: "deny" }] }, network: { rules: [] } },
+    { filesystem: { rules: [{ path: "secret.ts", access: "deny" }] }, sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } } },
   );
 
   try {
@@ -334,16 +334,19 @@ test("navigation omits destinations denied by workspace policy", async () => {
 });
 
 
-test("idle timeout shuts down and removes a client, then the next use starts a replacement", async () => {
+test("idle timeout shuts down and removes a client, then the next use starts a replacement", async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-idle-"));
   const source = join(cwd, "source.ts");
   await writeFile(source, "const value = 1;\n");
+  let releaseShutdown!: () => void;
+  const shutdownGate = new Promise<void>((resolve) => { releaseShutdown = resolve; });
   const clients: FakeClient[] = [];
   const manager = new LspManager(
     [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
     cwd,
     () => {
-      const client = new FakeClient(source, clients.length === 0 ? 30 : 0);
+      const client = new FakeClient(source, clients.length === 0 ? shutdownGate : undefined);
+      client.waitForDiagnostics = async () => {};
       clients.push(client);
       return client as unknown as LspClient;
     },
@@ -352,23 +355,27 @@ test("idle timeout shuts down and removes a client, then the next use starts a r
   );
 
   try {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
     await manager.sync(source);
     assert.equal(clients.length, 1);
     assert.equal((await manager.statuses())[0]?.running, true);
 
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    t.mock.timers.tick(12);
     assert.equal(clients[0]?.shutdownCount, 1);
     assert.equal((await manager.statuses())[0]?.running, false);
 
     const restarted = manager.sync(source);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await Promise.resolve();
     assert.equal(clients.length, 1);
+
+    releaseShutdown();
     await restarted;
     assert.equal(clients.length, 2);
     assert.equal(clients[1]?.syncCount, 1);
   } finally {
+    releaseShutdown();
     await manager.shutdown();
-    assert.equal(clients[1]?.shutdownCount, 1);
+    if (clients[1] !== undefined) assert.equal(clients[1].shutdownCount, 1);
     await rm(cwd, { recursive: true, force: true });
   }
 });

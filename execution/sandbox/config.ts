@@ -102,8 +102,9 @@ export const createSandboxConfig = (workspaceRoot: string, policy: AccessPolicy,
       denyWrite: [...denyWrite, selectorPath("~/.npm/_logs", workspace), selectorPath("~/.claude/debug", workspace)],
     },
     network: {
-      allowedDomains: policy.network.rules.filter((rule) => rule.access === "allow").map((rule) => rule.host),
-      deniedDomains: policy.network.rules.filter((rule) => rule.access === "deny").map((rule) => rule.host),
+      allowedDomains: policy.sandbox.network.rules.filter((rule) => rule.access === "allow").map((rule) => rule.host),
+      deniedDomains: policy.sandbox.network.rules.filter((rule) => rule.access === "deny").map((rule) => rule.host),
+      strictAllowlist: policy.sandbox.network.strictAllowlist,
     },
     enableWeakerNetworkIsolation: true,
   };
