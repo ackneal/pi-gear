@@ -122,6 +122,16 @@ test("LSP diagnostics use terminal empty state and collapsible complete results"
   ]) assert.match(expanded, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
+test("partial LSP navigation uses a neutral label until action is available", () => {
+  const renderers = lspToolRenderers("navigation");
+  const partialContext = context({}) as unknown as { isPartial: boolean };
+  partialContext.isPartial = true;
+
+  const partial = renderers.renderCall!({}, theme, partialContext as never);
+
+  assert.match(renderedText(partial), /^\+ NAVIGATION\s*$/);
+});
+
 test("LSP navigation renders action labels, result states, complete locations, and plurals", () => {
   const cases = [
     { action: "definition", empty: "✓ DEFINITION       no result", one: "+ DEFINITION       1 location" },

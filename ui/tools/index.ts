@@ -164,8 +164,11 @@ function diagnosticLine(diagnostic: NormalizedDiagnostic): string {
   return `${diagnostic.path}:${diagnostic.line}:${diagnostic.column} [${identity}] ${diagnostic.message}`;
 }
 
-function navigationLabel(args: unknown): "DEFINITION" | "REFERENCES" {
-  return parseArgsObject(args).action === "references" ? "REFERENCES" : "DEFINITION";
+function navigationLabel(args: unknown): "DEFINITION" | "REFERENCES" | "NAVIGATION" {
+  const action = parseArgsObject(args).action;
+  if (action === "definition") return "DEFINITION";
+  if (action === "references") return "REFERENCES";
+  return "NAVIGATION";
 }
 
 function lspCall(kind: "diagnostics" | "navigation") {
