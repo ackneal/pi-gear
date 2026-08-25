@@ -20,11 +20,13 @@ export function formatDoctor(
   lspServers: readonly LspServerSummary[] = [],
 ): string {
   const sandboxState = !status.configured ? "disabled by configuration" : status.enabled ? "enabled" : "unavailable";
+  const bashState = !status.configured ? "host (sandbox disabled)" : status.enabled ? "sandboxed" : "unavailable";
   const lines = [
     `Sandbox: ${sandboxState}`,
     `Platform: ${platform}`,
     `Workspace: ${status.workspace}`,
-    "Filesystem: read/edit/write guarded; other tools warn when unguarded",
+    `Bash: ${bashState}`,
+    "Filesystem: read/edit/write guarded",
   ];
 
   if (!status.configured) {

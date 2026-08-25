@@ -18,7 +18,8 @@ test("doctor reports only actionable sandbox diagnostics", () => {
     "Sandbox: enabled",
     "Platform: darwin",
     "Workspace: /workspace",
-    "Filesystem: read/edit/write guarded; other tools warn when unguarded",
+    "Bash: sandboxed",
+    "Filesystem: read/edit/write guarded",
     "Network allow: github.com",
     "Network deny: (none)",
     "Network other hosts: require approval",
@@ -90,6 +91,7 @@ test("disabled sandbox leaves Bash untouched, does not create a controller, and 
 test("doctor reports disabled sandbox separately from unavailable", () => {
   const output = formatDoctor({ configured: false, enabled: false, workspace: "host", reason: undefined, network: undefined }, [], [], "darwin");
   assert.match(output, /^Sandbox: disabled by configuration\nPlatform: darwin/);
+  assert.match(output, /Bash: host \(sandbox disabled\)/);
   assert.match(output, /Network: not applied; Bash runs on the host/);
   assert.doesNotMatch(output, /Reason:/);
 });
