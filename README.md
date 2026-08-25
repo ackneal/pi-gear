@@ -1,6 +1,6 @@
 # pi-gear
 
-A user-facing extension for the [Pi coding agent](https://github.com/earendil-works/pi-coding-agent) that adds sandboxed Bash, filesystem and network policy, task planning, research subagents, and language-server tools.
+**pi-gear is a [Pi coding-agent](https://github.com/earendil-works/pi-coding-agent) extension that adds macOS-sandboxed Bash, filesystem and network policy, task planning, researcher and worker subagents, and Language Server Protocol (LSP) tools.**
 
 ## What pi-gear adds to Pi
 
