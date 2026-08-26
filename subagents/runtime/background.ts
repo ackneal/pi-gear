@@ -10,6 +10,13 @@ export const MAX_RETAINED_BACKGROUND_RUNS = 20;
 export type BackgroundStatus = SubagentRun["status"] | "cancelling";
 export type WaitReason = "changed" | "terminal" | "timeout";
 
+export interface ActiveBackgroundRun {
+  runId: string;
+  status: "running" | "cancelling";
+  revision: number;
+  profile: string;
+}
+
 export interface BackgroundSnapshot {
   runId: string;
   status: BackgroundStatus;
@@ -154,6 +161,12 @@ export class BackgroundRunRegistry {
 
   get(runId: string): BackgroundSnapshot {
     return this.snapshot(this.require(runId));
+  }
+
+  listActive(): ActiveBackgroundRun[] {
+    return [...this.entries.values()]
+      .filter((entry): entry is Entry & { status: "running" | "cancelling" } => !terminal(entry.status))
+      .map((entry) => ({ runId: entry.runId, status: entry.status, revision: entry.revision, profile: entry.profile.id }));
   }
 
   async wait(runId: string, afterRevision = 0, timeoutSeconds = 30): Promise<{ reason: WaitReason; snapshot: BackgroundSnapshot }> {

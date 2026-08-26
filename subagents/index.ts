@@ -21,7 +21,10 @@ import {
   workerProfile,
   runWorker,
 } from "./agents/worker/index.ts";
-import { BackgroundRunRegistry, type BackgroundSnapshot } from "./runtime/background.ts";
+import { BackgroundRunRegistry, type BackgroundSnapshot, type WaitReason } from "./runtime/background.ts";
+import { setupSubagentRuntimeLifecycle } from "./runtime/lifecycle.ts";
+import { compactSubagentOutput } from "./runtime/output.ts";
+import { setupSubagentSettleGuard } from "./runtime/settle-guard.ts";
 import type { SubagentRun } from "./runtime/types.ts";
 import { setupSubagentSettings, type SubagentSettings } from "./settings.ts";
 
@@ -38,9 +41,9 @@ function backgroundResult(snapshot: BackgroundSnapshot): AgentToolResult<Subagen
   };
 }
 
-function snapshotResult(snapshot: BackgroundSnapshot, reason?: string): AgentToolResult<BackgroundSnapshot> {
+function snapshotResult(snapshot: BackgroundSnapshot, reason?: WaitReason): AgentToolResult<BackgroundSnapshot> {
   return {
-    content: [{ type: "text", text: JSON.stringify(reason ? { reason, ...snapshot } : snapshot) }],
+    content: [{ type: "text", text: JSON.stringify(compactSubagentOutput(snapshot, reason)) }],
     details: snapshot,
     ...(snapshot.usage ? { usage: snapshot.usage as any } : {}),
   };
@@ -54,9 +57,8 @@ export function setupSubagents(pi: ExtensionAPI): SubagentServices {
   const settings = setupSubagentSettings(pi);
   const background = new BackgroundRunRegistry();
 
-  pi.on("session_start", () => background.beginSession());
-  pi.on("session_before_switch", () => background.shutdown());
-  pi.on("session_shutdown", () => background.shutdown());
+  setupSubagentRuntimeLifecycle(pi, background);
+  setupSubagentSettleGuard(pi, () => background.listActive());
 
   pi.registerTool({
     name: RESEARCHER_TOOL_NAME,

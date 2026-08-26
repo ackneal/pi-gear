@@ -116,6 +116,10 @@ test("cancelling one run is independent and preserves its latest partial state",
   const subject = registry();
   const a = subject.start({ profile, task: "a", run: (signal, update) => { firstSignal = signal; firstUpdate = update; return first.promise; } });
   const b = subject.start({ profile, task: "b", run: () => second.promise });
+  assert.deepEqual(subject.listActive().map(({ runId, status }) => ({ runId, status })), [
+    { runId: a.runId, status: "running" },
+    { runId: b.runId, status: "running" },
+  ]);
   firstUpdate({ ...run(), result: "useful partial", items: [
     { kind: "thinking", text: "kept" },
     { kind: "tool", id: "tool-1", name: "bash", status: "running" },
@@ -126,6 +130,7 @@ test("cancelling one run is independent and preserves its latest partial state",
   first.reject(new Error("stopped"));
   const cancelled = await cancelling;
   assert.equal(cancelled.status, "aborted");
+  assert.deepEqual(subject.listActive().map(({ runId }) => runId), [b.runId]);
   assert.equal(cancelled.partialResult, "useful partial");
   assert.equal(cancelled.run.items[0]?.kind, "thinking");
   assert.deepEqual(cancelled.activeTools, ["bash"]);

@@ -62,8 +62,8 @@ test("delegation guidance preserves research terms and explains asynchronous sub
   assert.match(prompt, /Do not parallelize dependencies or overlapping edits/);
   assert.match(prompt, /Workers should satisfy focused completion checks/);
   assert.match(prompt, /Keep integration and final verification in the main agent/);
-  assert.match(prompt, /Researcher and worker calls return a runId immediately/);
-  assert.match(prompt, /Do independent work before observing; use bounded subagent_observe calls and avoid repeated polling/);
+  assert.match(prompt, /Do independent work before observing\. Use bounded subagent_observe calls and avoid repeated polling/);
+  assert.doesNotMatch(prompt, /resolve background runs before|before completing/i);
   assert.match(prompt, /Cancel or redispatch narrower work when stalled, repeatedly failing, unnecessary, or over budget/);
   assert.match(prompt, /Do not edit an active worker's targetFiles/);
 });
