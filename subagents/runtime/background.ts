@@ -125,8 +125,14 @@ export class BackgroundRunRegistry {
   }
 
   start(options: StartBackgroundOptions): BackgroundSnapshot {
+    // Evict resolved terminal history first so the total bound reflects only
+    // state that cannot be trimmed. Unresolved terminal runs are never evicted.
+    this.evict();
     const active = [...this.entries.values()].filter((entry) => !terminal(entry.status));
     if (active.length >= this.maxActive) throw new Error(`Background subagent limit reached (${this.maxActive}).`);
+    if (this.entries.size >= this.maxRetained + this.maxActive) {
+      throw new Error("Background subagent retained-state limit reached; resolve existing runs first.");
+    }
 
     const writerScopes = options.writerScopes?.map((scope) => resolve(scope));
     if (writerScopes?.length) {

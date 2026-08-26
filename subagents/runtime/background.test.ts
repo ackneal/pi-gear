@@ -257,6 +257,40 @@ test("retention eviction skips unresolved terminal runs", async () => {
   assert.deepEqual(subject.listUnresolved().map(({ runId }) => runId), [b.runId]);
 });
 
+test("repeated unresolved terminal runs eventually hit the retained-state bound", async () => {
+  const subject = registry({ maxActive: 2, maxRetained: 2 });
+  const ids: string[] = [];
+  for (let i = 0; i < 4; i++) {
+    const started = subject.start({ profile, task: `${i}`, run: async () => run("success") });
+    ids.push(started.runId);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  assert.throws(() => subject.start({ profile, task: "overflow", run: async () => run("success") }), /retained-state limit reached/);
+  assert.equal(subject.listUnresolved().length, 4);
+  for (const id of ids) assert.equal(subject.get(id).status, "success");
+});
+
+test("resolving terminal runs frees the retained-state bound for new runs", async () => {
+  const subject = registry({ maxActive: 2, maxRetained: 2 });
+  const ids: string[] = [];
+  for (let i = 0; i < 4; i++) {
+    const started = subject.start({ profile, task: `${i}`, run: async () => run("success") });
+    ids.push(started.runId);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.throws(() => subject.start({ profile, task: "full", run: async () => run("success") }), /retained-state limit reached/);
+
+  // Resolving three runs fills resolved history past maxRetained so eviction frees a slot.
+  for (let i = 0; i < 3; i++) await subject.wait(ids[i]!, 0);
+  const next = subject.start({ profile, task: "next", run: async () => run("success") });
+  assert.equal(next.status, "running");
+  assert.equal(subject.get(ids[1]!).status, "success");
+  assert.equal(subject.get(ids[2]!).status, "success");
+  assert.equal(subject.get(ids[3]!).status, "success");
+  assert.throws(() => subject.get(ids[0]!), /Unknown/);
+});
+
 test("cancel returns a resolved terminal snapshot but other runs stay unresolved", async () => {
   const used = deferred<SubagentRun>();
   const other = deferred<SubagentRun>();
