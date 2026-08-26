@@ -46,12 +46,18 @@ const gitStatus = (cwd: string): Promise<string[] | undefined> => new Promise((r
   });
 });
 
+const isGitWorkspace = (cwd: string): Promise<boolean> => new Promise((resolveResult) => {
+  execFile("git", ["rev-parse", "--is-inside-work-tree"], { cwd, encoding: "utf8" }, (error, stdout) => {
+    resolveResult(!error && stdout.trim() === "true");
+  });
+});
+
 const gitWorkspaceFiles = (
   cwd: string,
   extensions: ReadonlySet<string>,
-): Promise<string[] | undefined> => new Promise((resolveResult) => {
+): Promise<string[]> => new Promise((resolveResult, reject) => {
   execFile("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], { cwd, encoding: "utf8" }, (error, stdout) => {
-    if (error) return resolveResult(undefined);
+    if (error) return reject(error);
     resolveResult(stdout.split("\0")
       .filter(Boolean)
       .map((path) => resolve(cwd, path))
@@ -59,9 +65,23 @@ const gitWorkspaceFiles = (
   });
 });
 
-const workspaceFiles = async (cwd: string, extensions: ReadonlySet<string>): Promise<string[]> => {
-  const gitFiles = await gitWorkspaceFiles(cwd, extensions);
-  if (gitFiles) return gitFiles;
+const gitSourceEligible = (cwd: string, path: string): Promise<boolean> => new Promise((resolveResult, reject) => {
+  execFile("git", ["check-ignore", "--quiet", "--", relative(cwd, path)], { cwd }, (error) => {
+    if (!error) return resolveResult(false);
+    if (error.code === 1) return resolveResult(true);
+    reject(error);
+  });
+});
+
+const fallbackSourceEligible = (cwd: string, path: string, excluded: ReadonlySet<string>): boolean =>
+  !relative(cwd, path).split(sep).slice(0, -1).some((directory) => excluded.has(directory));
+
+const workspaceFiles = async (
+  cwd: string,
+  extensions: ReadonlySet<string>,
+  gitWorkspace: boolean,
+): Promise<string[]> => {
+  if (gitWorkspace) return gitWorkspaceFiles(cwd, extensions);
 
   const excluded = await excludedWorkspaceDirectories;
   const files: string[] = [];
@@ -102,7 +122,9 @@ export class LspManager {
   private workspace: CanonicalWorkspace | undefined;
   private watcher: FSWatcher | undefined;
   private debounce = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly watcherOperations = new Set<Promise<void>>();
   private readonly diagnosticsBeforeEdit = new Map<string, Set<string>>();
+  private readonly gitWorkspace: Promise<boolean>;
   private closing = false;
   readonly servers: readonly LspServerConfig[];
   readonly cwd: string;
@@ -122,6 +144,7 @@ export class LspManager {
     this.createClient = createClient;
     this.policy = policy;
     this.idleTimeoutMs = idleTimeoutMinutes * 60_000;
+    this.gitWorkspace = isGitWorkspace(cwd);
     for (const server of servers) {
       for (const extension of server.extensions) this.byExtension.set(extension, server);
     }
@@ -252,7 +275,7 @@ export class LspManager {
     const extensions = new Set(this.byExtension.keys());
     let results: NormalizedDiagnostic[][];
     if (scope === "workspace") {
-      const paths = await workspaceFiles(this.cwd, extensions);
+      const paths = await workspaceFiles(this.cwd, extensions, await this.gitWorkspace);
       results = await this.syncWorkspaceDiagnostics(paths);
     } else {
       const changed = await gitStatus(this.cwd);
@@ -301,17 +324,36 @@ export class LspManager {
     return locations;
   }
 
+  private async watcherSourceEligible(path: string): Promise<boolean> {
+    if (!this.match(path)) return false;
+    if (await this.gitWorkspace) return gitSourceEligible(this.cwd, path);
+    return fallbackSourceEligible(this.cwd, path, await excludedWorkspaceDirectories);
+  }
+
+  private scheduleWatcherSync(filename: string): void {
+    if (!this.match(filename)) return;
+    const path = resolve(this.cwd, filename);
+    const previous = this.debounce.get(path);
+    if (previous) clearTimeout(previous);
+    this.debounce.set(path, setTimeout(() => {
+      this.debounce.delete(path);
+      if (this.closing) return;
+
+      const operation = this.syncWatcherPath(path).catch(() => {});
+      this.watcherOperations.add(operation);
+      void operation.finally(() => this.watcherOperations.delete(operation));
+    }, 100));
+  }
+
+  private async syncWatcherPath(path: string): Promise<void> {
+    if (!await this.watcherSourceEligible(path) || this.closing) return;
+    await this.sync(path);
+  }
+
   startWatching(): void {
     if (this.watcher || this.closing || this.servers.length === 0) return;
     this.watcher = watch(this.cwd, { recursive: true }, (_event, filename) => {
-      if (!filename || !this.match(filename)) return;
-      const path = resolve(this.cwd, filename);
-      const previous = this.debounce.get(path);
-      if (previous) clearTimeout(previous);
-      this.debounce.set(path, setTimeout(() => {
-        this.debounce.delete(path);
-        if (!this.closing) void this.sync(path).catch(() => {});
-      }, 100));
+      if (filename) this.scheduleWatcherSync(filename);
     });
   }
 
@@ -334,6 +376,7 @@ export class LspManager {
     this.watcher = undefined;
     for (const timeout of this.debounce.values()) clearTimeout(timeout);
     this.debounce.clear();
+    await Promise.all(this.watcherOperations);
     for (const entry of this.clients.values()) {
       if (entry.idleTimer) clearTimeout(entry.idleTimer);
     }
