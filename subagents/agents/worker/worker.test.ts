@@ -84,7 +84,7 @@ test("worker extension configures filesystem guard and sandbox", async () => {
   assert.ok(registeredTools.includes("bash")); // sandbox bash
 });
 
-test("setupSubagents registers researcher and worker tools", async () => {
+test("setupSubagents registers asynchronous subagent and control tools", async () => {
   const tools = new Map<string, {
     label: string;
     description: string;
@@ -109,39 +109,17 @@ test("setupSubagents registers researcher and worker tools", async () => {
 
   setupSubagents(mockPi);
 
-  assert.ok(tools.has("researcher"));
-  assert.ok(tools.has("worker"));
+  assert.deepEqual([...tools.keys()], ["researcher", "worker", "subagent_observe", "subagent_cancel"]);
 
   const workerTool = tools.get("worker")!;
   assert.equal(workerTool.label, "worker");
   assert.equal(workerTool.executionMode, "parallel");
-  assert.equal(workerTool.description, "Delegate one of several disjoint tasks for parallel execution.");
-});
-
-test("setupSubagents flags failed subagent runs as tool errors", () => {
-  const handlers = new Map<string, Array<(event: unknown) => unknown>>();
-  const mockPi = {
-    registerTool: () => {},
-    registerCommand: () => {},
-    on: (event: string, handler: (event: unknown) => unknown) => {
-      handlers.set(event, [...(handlers.get(event) ?? []), handler]);
-    },
-  } as unknown as ExtensionAPI;
-
-  setupSubagents(mockPi);
-
-  const onToolResult = handlers.get("tool_result")?.[0];
-  assert.ok(onToolResult);
-  const rows = [
-    { toolName: "worker", run: { status: "error" }, expected: { isError: true } },
-    { toolName: "researcher", run: { status: "aborted" }, expected: { isError: true } },
-    { toolName: "worker", run: { status: "success", result: "done" }, expected: undefined },
-    { toolName: "read", run: { status: "error" }, expected: undefined },
-  ] as const;
-  for (const { toolName, run, expected } of rows) {
-    const result = onToolResult({ type: "tool_result", toolCallId: "t1", input: {}, content: [], isError: false, toolName, details: run });
-    assert.deepEqual(result, expected, `${toolName}/${run.status}`);
-  }
+  assert.match(workerTool.description, /Starts asynchronously and immediately returns a runId/);
+  assert.match(workerTool.description, /Provide targetFiles when the task may write files/);
+  assert.match(tools.get("subagent_observe")?.description ?? "", /revision, terminal state, or bounded timeout/);
+  assert.match(tools.get("subagent_observe")?.description ?? "", /does not cancel the run/);
+  assert.match(tools.get("subagent_cancel")?.description ?? "", /Other runs and the main agent are unaffected/);
+  assert.match(tools.get("subagent_cancel")?.description ?? "", /repeated cancellation is safe/);
 });
 
 test("formatWorkerInput serializes structured fields into the child user input", () => {
