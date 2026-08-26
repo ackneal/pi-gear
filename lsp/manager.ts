@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, readdir } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import { constants, watch, type FSWatcher } from "node:fs";
 import { delimiter, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +29,9 @@ interface ActiveClient {
 const MAX_CHANGED_DIAGNOSTIC_FILES = 100;
 const MAX_WORKSPACE_CONCURRENCY = 8;
 
+const excludedWorkspaceDirectories = readFile(new URL(".ignore", import.meta.url), "utf8")
+  .then((content) => new Set(content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)));
+
 const gitStatus = (cwd: string): Promise<string[] | undefined> => new Promise((resolveResult) => {
   execFile("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], { cwd, encoding: "utf8" }, (error, stdout) => {
     if (error) return resolveResult(undefined);
@@ -43,14 +46,31 @@ const gitStatus = (cwd: string): Promise<string[] | undefined> => new Promise((r
   });
 });
 
+const gitWorkspaceFiles = (
+  cwd: string,
+  extensions: ReadonlySet<string>,
+): Promise<string[] | undefined> => new Promise((resolveResult) => {
+  execFile("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], { cwd, encoding: "utf8" }, (error, stdout) => {
+    if (error) return resolveResult(undefined);
+    resolveResult(stdout.split("\0")
+      .filter(Boolean)
+      .map((path) => resolve(cwd, path))
+      .filter((path) => extensions.has(extname(path))));
+  });
+});
+
 const workspaceFiles = async (cwd: string, extensions: ReadonlySet<string>): Promise<string[]> => {
+  const gitFiles = await gitWorkspaceFiles(cwd, extensions);
+  if (gitFiles) return gitFiles;
+
+  const excluded = await excludedWorkspaceDirectories;
   const files: string[] = [];
 
   const visit = async (directory: string): Promise<void> => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
-        if (entry.name === ".git" || entry.name === "node_modules") continue;
+        if (excluded.has(entry.name)) continue;
         await visit(join(directory, entry.name));
       } else if (entry.isFile() && extensions.has(extname(entry.name))) {
         files.push(join(directory, entry.name));

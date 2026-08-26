@@ -236,6 +236,54 @@ test("workspace diagnostics scan beyond the former 100-file cap with bounded con
   }
 });
 
+test("Git workspace diagnostics include tracked and untracked files while honoring standard ignore rules", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-workspace-gitignore-"));
+  await writeFile(join(cwd, ".gitignore"), "generated/\n");
+  await writeFile(join(cwd, "tracked.py"), "tracked = True\n");
+  await writeFile(join(cwd, "untracked.py"), "untracked = True\n");
+  await mkdir(join(cwd, "generated"));
+  await writeFile(join(cwd, "generated", "ignored.py"), "ignored = True\n");
+  await exec("git", ["init", "-q"], { cwd });
+  await exec("git", ["add", ".gitignore", "tracked.py"], { cwd });
+  const fake = new FakeClient(join(cwd, "tracked.py"));
+  const manager = new LspManager(
+    [{ extensions: [".py"], languageIds: { ".py": "python" }, command: ["server"] }],
+    cwd,
+    () => fake as unknown as LspClient,
+  );
+
+  try {
+    assert.equal((await manager.diagnostics("workspace")).length, 6);
+    assert.equal(fake.syncCount, 2);
+  } finally {
+    await manager.shutdown();
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("non-Git workspace diagnostics skip dependency and Python virtual-environment directories", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-workspace-excludes-"));
+  await writeFile(join(cwd, "source.py"), "value: str = 1\n");
+  for (const directory of [".venv", "venv", "node_modules", "target", "vendor", ".git"]) {
+    await mkdir(join(cwd, directory));
+    await writeFile(join(cwd, directory, "ignored.py"), "value: str = 1\n");
+  }
+  const fake = new FakeClient(join(cwd, "source.py"));
+  const manager = new LspManager(
+    [{ extensions: [".py"], languageIds: { ".py": "python" }, command: ["server"] }],
+    cwd,
+    () => fake as unknown as LspClient,
+  );
+
+  try {
+    assert.equal((await manager.diagnostics("workspace")).length, 3);
+    assert.equal(fake.syncCount, 1);
+  } finally {
+    await manager.shutdown();
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
 test("workspace traversal continues beyond the former 5,000-entry cap", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-workspace-entries-"));
   for (let directory = 0; directory < 50; directory++) {
