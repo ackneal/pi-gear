@@ -116,7 +116,7 @@ test("cancelling one run is independent and preserves its latest partial state",
   const subject = registry();
   const a = subject.start({ profile, task: "a", run: (signal, update) => { firstSignal = signal; firstUpdate = update; return first.promise; } });
   const b = subject.start({ profile, task: "b", run: () => second.promise });
-  assert.deepEqual(subject.listActive().map(({ runId, status }) => ({ runId, status })), [
+  assert.deepEqual(subject.listUnresolved().map(({ runId, status }) => ({ runId, status })), [
     { runId: a.runId, status: "running" },
     { runId: b.runId, status: "running" },
   ]);
@@ -130,7 +130,7 @@ test("cancelling one run is independent and preserves its latest partial state",
   first.reject(new Error("stopped"));
   const cancelled = await cancelling;
   assert.equal(cancelled.status, "aborted");
-  assert.deepEqual(subject.listActive().map(({ runId }) => runId), [b.runId]);
+  assert.deepEqual(subject.listUnresolved().map(({ runId }) => runId), [b.runId]);
   assert.equal(cancelled.partialResult, "useful partial");
   assert.equal(cancelled.run.items[0]?.kind, "thinking");
   assert.deepEqual(cancelled.activeTools, ["bash"]);
@@ -226,6 +226,50 @@ test("runtime expiry requests cancellation", async () => {
   assert.equal(cancelling.status, "cancelling");
   done.resolve(run("aborted"));
   assert.equal((await subject.wait(started.runId, cancelling.revision)).snapshot.status, "aborted");
+});
+
+test("unresolved terminal run stays listed until observed and survives retention eviction", async () => {
+  const done = deferred<SubagentRun>();
+  const subject = registry({ maxRetained: 1 });
+  const quick = subject.start({ profile, task: "quick", run: () => done.promise });
+  done.resolve(run("success", "done"));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(subject.listUnresolved(), [{ runId: quick.runId, status: "success", revision: 2, profile: "test" }]);
+
+  const observed = await subject.wait(quick.runId, quick.revision);
+  assert.equal(observed.reason, "terminal");
+  assert.deepEqual(subject.listUnresolved(), []);
+  assert.equal(observed.snapshot.partialResult, "done");
+});
+
+test("retention eviction skips unresolved terminal runs", async () => {
+  const subject = registry({ maxRetained: 1 });
+  const a = subject.start({ profile, task: "a", run: async () => run("success") });
+  await subject.wait(a.runId, a.revision);
+  const b = subject.start({ profile, task: "b", run: async () => run("success") });
+  await new Promise((resolve) => setImmediate(resolve));
+  const c = subject.start({ profile, task: "c", run: async () => run("success") });
+  await subject.wait(c.runId, c.revision);
+
+  assert.throws(() => subject.get(a.runId), /Unknown/);
+  assert.equal(subject.get(b.runId).status, "success");
+  assert.deepEqual(subject.listUnresolved().map(({ runId }) => runId), [b.runId]);
+});
+
+test("cancel returns a resolved terminal snapshot but other runs stay unresolved", async () => {
+  const used = deferred<SubagentRun>();
+  const other = deferred<SubagentRun>();
+  const subject = registry();
+  const toCancel = subject.start({ profile, task: "cancel", run: () => used.promise });
+  const kept = subject.start({ profile, task: "keep", run: () => other.promise });
+
+  const cancelled = subject.cancel(toCancel.runId);
+  used.resolve(run("aborted"));
+  await cancelled;
+  assert.equal(subject.get(kept.runId).status, "running");
+  assert.deepEqual(subject.listUnresolved().map(({ runId }) => runId), [kept.runId]);
+  other.resolve(run("success"));
 });
 
 test("shutdown cancels and awaits every active runner", async () => {

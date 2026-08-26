@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { BackgroundSnapshot } from "./background.ts";
-import { compactSubagentOutput } from "./output.ts";
+import { compactSubagentOutput, subagentControlResult } from "./output.ts";
 
 function snapshot(status: BackgroundSnapshot["status"]): BackgroundSnapshot {
   return {
@@ -65,4 +65,14 @@ test("terminal observe output includes only the useful terminal payload", () => 
     assert.equal(failed.partialResult, "useful partial", status);
     assert.equal(failed.error, "child failed", status);
   }
+});
+
+test("control-tool results keep compact details without full runtime state", () => {
+  const base = snapshot("success");
+  const result = subagentControlResult(base, "terminal");
+  assert.deepEqual(result.details, compactSubagentOutput(base, "terminal"));
+
+  const text = JSON.stringify(result);
+  assert.doesNotMatch(text, /"items"|"task"|"dispatch"|large retained output/);
+  assert.equal(result.content[0]?.type, "text");
 });

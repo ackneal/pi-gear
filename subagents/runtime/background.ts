@@ -10,9 +10,9 @@ export const MAX_RETAINED_BACKGROUND_RUNS = 20;
 export type BackgroundStatus = SubagentRun["status"] | "cancelling";
 export type WaitReason = "changed" | "terminal" | "timeout";
 
-export interface ActiveBackgroundRun {
+export interface UnresolvedBackgroundRun {
   runId: string;
-  status: "running" | "cancelling";
+  status: "running" | "cancelling" | "success" | "error" | "aborted";
   revision: number;
   profile: string;
 }
@@ -51,6 +51,7 @@ interface Entry {
   runner: Promise<SubagentRun>;
   run: SubagentRun;
   status: BackgroundStatus;
+  resolved: boolean;
   revision: number;
   startedAt: number;
   updatedAt: number;
@@ -140,7 +141,7 @@ export class BackgroundRunRegistry {
     const entry: Entry = {
       runId, sessionId: this.sessionId, profile: options.profile, task: options.task,
       ...(options.dispatch ? { dispatch: { ...options.dispatch } } : {}),
-      ...(writerScopes?.length ? { writerScopes } : {}), controller, run: initial, status: "running",
+      ...(writerScopes?.length ? { writerScopes } : {}), controller, run: initial, status: "running", resolved: false,
       revision: 1, startedAt: now, updatedAt: now, lastProgressAt: now, expiry: now + this.maxRuntimeMs,
       runner: Promise.resolve(initial), waiters: new Set(),
     };
@@ -163,15 +164,18 @@ export class BackgroundRunRegistry {
     return this.snapshot(this.require(runId));
   }
 
-  listActive(): ActiveBackgroundRun[] {
+  listUnresolved(): UnresolvedBackgroundRun[] {
     return [...this.entries.values()]
-      .filter((entry): entry is Entry & { status: "running" | "cancelling" } => !terminal(entry.status))
+      .filter((entry) => !terminal(entry.status) || !entry.resolved)
       .map((entry) => ({ runId: entry.runId, status: entry.status, revision: entry.revision, profile: entry.profile.id }));
   }
 
   async wait(runId: string, afterRevision = 0, timeoutSeconds = 30): Promise<{ reason: WaitReason; snapshot: BackgroundSnapshot }> {
     const entry = this.require(runId);
-    if (terminal(entry.status)) return { reason: "terminal", snapshot: this.snapshot(entry) };
+    if (terminal(entry.status)) {
+      this.resolve(entry);
+      return { reason: "terminal", snapshot: this.snapshot(entry) };
+    }
     if (entry.revision > afterRevision) return { reason: "changed", snapshot: this.snapshot(entry) };
 
     const milliseconds = Math.max(0, Math.min(timeoutSeconds, this.maxWaitSeconds)) * 1000;
@@ -183,15 +187,20 @@ export class BackgroundRunRegistry {
       if (terminal(entry.status) || entry.revision > afterRevision) wake();
     });
 
+    if (terminal(entry.status)) this.resolve(entry);
     return { reason: timedOut ? "timeout" : terminal(entry.status) ? "terminal" : "changed", snapshot: this.snapshot(entry) };
   }
 
   async cancel(runId: string): Promise<BackgroundSnapshot> {
     const entry = this.require(runId);
-    if (terminal(entry.status)) return this.snapshot(entry);
+    if (terminal(entry.status)) {
+      this.resolve(entry);
+      return this.snapshot(entry);
+    }
 
     this.requestCancel(entry);
     await entry.runner;
+    this.resolve(entry);
     return this.snapshot(entry);
   }
 
@@ -210,6 +219,11 @@ export class BackgroundRunRegistry {
     entry.revision++;
     this.wake(entry);
     entry.controller.abort();
+  }
+
+  private resolve(entry: Entry): void {
+    entry.resolved = true;
+    this.evict();
   }
 
   private update(entry: Entry, run: SubagentRun): boolean {
@@ -238,7 +252,6 @@ export class BackgroundRunRegistry {
     entry.revision++;
     if (entry.expiryTimer) this.clearTimer(entry.expiryTimer);
     this.wake(entry);
-    this.evict();
     return entry.run;
   }
 
@@ -273,7 +286,7 @@ export class BackgroundRunRegistry {
   }
 
   private evict(): void {
-    const completed = [...this.entries.values()].filter((entry) => terminal(entry.status)).sort((a, b) => a.updatedAt - b.updatedAt);
+    const completed = [...this.entries.values()].filter((entry) => terminal(entry.status) && entry.resolved).sort((a, b) => a.updatedAt - b.updatedAt);
     for (const entry of completed.slice(0, Math.max(0, completed.length - this.maxRetained))) this.entries.delete(entry.runId);
   }
 }

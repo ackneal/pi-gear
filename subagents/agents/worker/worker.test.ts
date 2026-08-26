@@ -89,6 +89,9 @@ test("setupSubagents registers asynchronous subagent and control tools", async (
     label: string;
     description: string;
     executionMode: string;
+    renderShell?: string;
+    renderCall?: (args: unknown, theme: unknown, context: unknown) => { render: (width: number) => unknown[] };
+    renderResult?: (result: unknown, options: unknown, theme: unknown, context: unknown) => { render: (width: number) => unknown[] };
     execute: (id: string, args: { task: string }, signal: AbortSignal | undefined, onUpdate: (update: unknown) => void, ctx: { cwd: string }) => Promise<unknown>;
   }>();
   const handlers = new Map<string, Array<(event: unknown) => unknown>>();
@@ -99,6 +102,9 @@ test("setupSubagents registers asynchronous subagent and control tools", async (
       label: string;
       description: string;
       executionMode: string;
+      renderShell?: string;
+      renderCall?: (args: unknown, theme: unknown, context: unknown) => { render: (width: number) => unknown[] };
+      renderResult?: (result: unknown, options: unknown, theme: unknown, context: unknown) => { render: (width: number) => unknown[] };
       execute: (id: string, args: { task: string }, signal: AbortSignal | undefined, onUpdate: (update: unknown) => void, ctx: { cwd: string }) => Promise<unknown>;
     }) => {
       tools.set(tool.name, tool);
@@ -123,6 +129,13 @@ test("setupSubagents registers asynchronous subagent and control tools", async (
   assert.match(tools.get("subagent_observe")?.description ?? "", /subagent keeps running/);
   assert.match(tools.get("subagent_cancel")?.description ?? "", /Other runs and the main agent continue/);
   assert.match(tools.get("subagent_cancel")?.description ?? "", /repeated cancellation returns the same terminal state/);
+
+  for (const name of ["subagent_observe", "subagent_cancel"]) {
+    const control = tools.get(name)!;
+    assert.equal(control.renderShell, "self");
+    assert.deepEqual(control.renderCall?.({}, {}, {})?.render(80), []);
+    assert.deepEqual(control.renderResult?.({}, {}, {}, {})?.render(80), []);
+  }
 });
 
 test("formatWorkerInput serializes structured fields into the child user input", () => {

@@ -22,9 +22,9 @@ import {
   workerProfile,
   runWorker,
 } from "./agents/worker/index.ts";
-import { BackgroundRunRegistry, type BackgroundSnapshot, type WaitReason } from "./runtime/background.ts";
+import { BackgroundRunRegistry, type BackgroundSnapshot } from "./runtime/background.ts";
 import { setupSubagentRuntimeLifecycle } from "./runtime/lifecycle.ts";
-import { compactSubagentOutput } from "./runtime/output.ts";
+import { subagentControlResult, type CompactSubagentOutput } from "./runtime/output.ts";
 import { setupSubagentSettleGuard } from "./runtime/settle-guard.ts";
 import type { SubagentRun } from "./runtime/types.ts";
 import { setupSubagentSettings, type SubagentSettings } from "./settings.ts";
@@ -42,14 +42,6 @@ function backgroundResult(snapshot: BackgroundSnapshot): AgentToolResult<Subagen
   };
 }
 
-function snapshotResult(snapshot: BackgroundSnapshot, reason?: WaitReason): AgentToolResult<BackgroundSnapshot> {
-  return {
-    content: [{ type: "text", text: JSON.stringify(compactSubagentOutput(snapshot, reason)) }],
-    details: snapshot,
-    ...(snapshot.usage ? { usage: snapshot.usage as any } : {}),
-  };
-}
-
 function recordUpdate(toolCallId: string | undefined, run: SubagentRun): void {
   if (toolCallId) recordSubagentLiveUpdate(toolCallId, run);
 }
@@ -62,7 +54,7 @@ export function setupSubagents(pi: ExtensionAPI): SubagentServices {
   const background = new BackgroundRunRegistry();
 
   setupSubagentRuntimeLifecycle(pi, background);
-  setupSubagentSettleGuard(pi, () => background.listActive());
+  setupSubagentSettleGuard(pi, () => background.listUnresolved());
 
   pi.registerTool({
     name: RESEARCHER_TOOL_NAME,
@@ -117,12 +109,13 @@ export function setupSubagents(pi: ExtensionAPI): SubagentServices {
       afterRevision: Type.Integer({ minimum: 0, description: "Last observed revision. Returns when a newer revision is available." }),
       timeoutSeconds: Type.Optional(Type.Number({ minimum: 0, description: "Maximum seconds to wait. Defaults to 30; values above 60 are clamped." })),
     }),
-    async execute(_toolCallId, { runId, afterRevision, timeoutSeconds }): Promise<AgentToolResult<BackgroundSnapshot>> {
+    async execute(_toolCallId, { runId, afterRevision, timeoutSeconds }): Promise<AgentToolResult<CompactSubagentOutput>> {
       const waited = await background.wait(runId, afterRevision, timeoutSeconds);
-      return snapshotResult(waited.snapshot, waited.reason);
+      return subagentControlResult(waited.snapshot, waited.reason);
     },
     renderCall: hidden,
     renderResult: hidden,
+    renderShell: "self",
   });
 
   pi.registerTool({
@@ -130,11 +123,12 @@ export function setupSubagents(pi: ExtensionAPI): SubagentServices {
     label: "Cancel subagent",
     description: "Cancel one subagent and wait for its process to terminate. Other runs and the main agent continue; repeated cancellation returns the same terminal state.",
     parameters: Type.Object({ runId: Type.String({ description: "Run identifier returned by researcher or worker." }) }),
-    async execute(_toolCallId, { runId }): Promise<AgentToolResult<BackgroundSnapshot>> {
-      return snapshotResult(await background.cancel(runId));
+    async execute(_toolCallId, { runId }): Promise<AgentToolResult<CompactSubagentOutput>> {
+      return subagentControlResult(await background.cancel(runId));
     },
     renderCall: hidden,
     renderResult: hidden,
+    renderShell: "self",
   });
 
   return { settings, inspect: (ctx, toolCallId) => openSubagentDetailOverlay(ctx, toolCallId) };

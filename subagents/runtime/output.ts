@@ -1,3 +1,4 @@
+import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import type { BackgroundSnapshot, WaitReason } from "./background.ts";
 
 export interface CompactSubagentOutput {
@@ -15,6 +16,15 @@ export interface CompactSubagentOutput {
   result?: string;
   partialResult?: string;
   error?: string;
+}
+
+export function subagentControlResult(snapshot: BackgroundSnapshot, reason?: WaitReason): AgentToolResult<CompactSubagentOutput> {
+  const compact = compactSubagentOutput(snapshot, reason);
+  return {
+    content: [{ type: "text", text: JSON.stringify(compact) }],
+    details: compact,
+    ...(snapshot.usage ? { usage: snapshot.usage as any } : {}),
+  };
 }
 
 export function compactSubagentOutput(snapshot: BackgroundSnapshot, reason?: WaitReason): CompactSubagentOutput {
