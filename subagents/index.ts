@@ -1,4 +1,5 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { Component } from "@earendil-works/pi-tui";
 import { resolve } from "node:path";
 import { Type } from "typebox";
 import {
@@ -52,6 +53,9 @@ function snapshotResult(snapshot: BackgroundSnapshot, reason?: WaitReason): Agen
 function recordUpdate(toolCallId: string | undefined, run: SubagentRun): void {
   if (toolCallId) recordSubagentLiveUpdate(toolCallId, run);
 }
+
+// Control tools (subagent_observe/subagent_cancel) carry no transcript UI.
+const hidden = (): Component => ({ render: () => [], invalidate: () => {} });
 
 export function setupSubagents(pi: ExtensionAPI): SubagentServices {
   const settings = setupSubagentSettings(pi);
@@ -117,6 +121,8 @@ export function setupSubagents(pi: ExtensionAPI): SubagentServices {
       const waited = await background.wait(runId, afterRevision, timeoutSeconds);
       return snapshotResult(waited.snapshot, waited.reason);
     },
+    renderCall: hidden,
+    renderResult: hidden,
   });
 
   pi.registerTool({
@@ -127,6 +133,8 @@ export function setupSubagents(pi: ExtensionAPI): SubagentServices {
     async execute(_toolCallId, { runId }): Promise<AgentToolResult<BackgroundSnapshot>> {
       return snapshotResult(await background.cancel(runId));
     },
+    renderCall: hidden,
+    renderResult: hidden,
   });
 
   return { settings, inspect: (ctx, toolCallId) => openSubagentDetailOverlay(ctx, toolCallId) };
