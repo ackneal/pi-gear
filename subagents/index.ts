@@ -61,7 +61,7 @@ export function setupSubagents(pi: ExtensionAPI): SubagentServices {
   pi.registerTool({
     name: RESEARCHER_TOOL_NAME,
     label: researcherProfile.label,
-    description: `${researcherProfile.description} Starts asynchronously and immediately returns a runId for subagent_observe or subagent_cancel.`,
+    description: "Start focused read-only research. Returns immediately with a runId; use subagent_observe for progress or completion.",
     parameters: researcherParameters,
     executionMode: "parallel",
     async execute(toolCallId, { question, scope }, signal, _onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
@@ -83,7 +83,7 @@ export function setupSubagents(pi: ExtensionAPI): SubagentServices {
   pi.registerTool({
     name: WORKER_TOOL_NAME,
     label: workerProfile.label,
-    description: `${workerProfile.description} Starts asynchronously and immediately returns a runId for subagent_observe or subagent_cancel. Provide targetFiles when the task may write files so active scope conflicts can be rejected.`,
+    description: "Start one bounded task. Returns immediately with a runId; use subagent_observe for progress or completion. Set targetFiles when files may be modified so active scope conflicts can be rejected.",
     parameters: workerParameters,
     executionMode: "parallel",
     async execute(toolCallId, { task: requestedTask, targetFiles, findings, verification }, signal, _onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
@@ -105,11 +105,11 @@ export function setupSubagents(pi: ExtensionAPI): SubagentServices {
   pi.registerTool({
     name: "subagent_observe",
     label: "Observe subagent",
-    description: "Wait for a subagent revision, terminal state, or bounded timeout. A timeout ends only this observation; it does not cancel the run.",
+    description: "Wait for meaningful subagent progress, completion, or a bounded timeout. A timeout ends only this observation; the subagent keeps running.",
     parameters: Type.Object({
       runId: Type.String({ description: "Run identifier returned by researcher or worker." }),
-      afterRevision: Type.Integer({ minimum: 0, description: "Last observed revision; wait until a newer revision is available." }),
-      timeoutSeconds: Type.Optional(Type.Number({ minimum: 0, description: "Bounded observation timeout in seconds. Defaults to 30 and is clamped to 60." })),
+      afterRevision: Type.Integer({ minimum: 0, description: "Last observed revision. Returns when a newer revision is available." }),
+      timeoutSeconds: Type.Optional(Type.Number({ minimum: 0, description: "Maximum seconds to wait. Defaults to 30; values above 60 are clamped." })),
     }),
     async execute(_toolCallId, { runId, afterRevision, timeoutSeconds }): Promise<AgentToolResult<BackgroundSnapshot>> {
       const waited = await background.wait(runId, afterRevision, timeoutSeconds);
@@ -120,7 +120,7 @@ export function setupSubagents(pi: ExtensionAPI): SubagentServices {
   pi.registerTool({
     name: "subagent_cancel",
     label: "Cancel subagent",
-    description: "Cancel one subagent and wait for its child process to terminate. Other runs and the main agent are unaffected; repeated cancellation is safe.",
+    description: "Cancel one subagent and wait for its process to terminate. Other runs and the main agent continue; repeated cancellation returns the same terminal state.",
     parameters: Type.Object({ runId: Type.String({ description: "Run identifier returned by researcher or worker." }) }),
     async execute(_toolCallId, { runId }): Promise<AgentToolResult<BackgroundSnapshot>> {
       return snapshotResult(await background.cancel(runId));

@@ -111,15 +111,18 @@ test("setupSubagents registers asynchronous subagent and control tools", async (
 
   assert.deepEqual([...tools.keys()], ["researcher", "worker", "subagent_observe", "subagent_cancel"]);
 
+  assert.match(tools.get("researcher")?.description ?? "", /Start focused read-only research/);
+  assert.match(tools.get("researcher")?.description ?? "", /Returns immediately with a runId/);
+
   const workerTool = tools.get("worker")!;
   assert.equal(workerTool.label, "worker");
   assert.equal(workerTool.executionMode, "parallel");
-  assert.match(workerTool.description, /Starts asynchronously and immediately returns a runId/);
-  assert.match(workerTool.description, /Provide targetFiles when the task may write files/);
-  assert.match(tools.get("subagent_observe")?.description ?? "", /revision, terminal state, or bounded timeout/);
-  assert.match(tools.get("subagent_observe")?.description ?? "", /does not cancel the run/);
-  assert.match(tools.get("subagent_cancel")?.description ?? "", /Other runs and the main agent are unaffected/);
-  assert.match(tools.get("subagent_cancel")?.description ?? "", /repeated cancellation is safe/);
+  assert.match(workerTool.description, /Returns immediately with a runId/);
+  assert.match(workerTool.description, /Set targetFiles when files may be modified/);
+  assert.match(tools.get("subagent_observe")?.description ?? "", /meaningful subagent progress, completion, or a bounded timeout/);
+  assert.match(tools.get("subagent_observe")?.description ?? "", /subagent keeps running/);
+  assert.match(tools.get("subagent_cancel")?.description ?? "", /Other runs and the main agent continue/);
+  assert.match(tools.get("subagent_cancel")?.description ?? "", /repeated cancellation returns the same terminal state/);
 });
 
 test("formatWorkerInput serializes structured fields into the child user input", () => {
