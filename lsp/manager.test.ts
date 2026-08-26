@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 import type { LspClient } from "./client.ts";
@@ -230,6 +230,132 @@ test("workspace diagnostics scan beyond the former 100-file cap with bounded con
     assert.equal(diagnostics.length, 303);
     assert.equal(fake.syncCount, 101);
     assert.ok(fake.maxActiveWaits <= 8);
+  } finally {
+    await manager.shutdown();
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("Git workspace diagnostics include tracked and untracked files while honoring standard ignore rules", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-workspace-gitignore-"));
+  await writeFile(join(cwd, ".gitignore"), "generated/\n");
+  await writeFile(join(cwd, "tracked.py"), "tracked = True\n");
+  await writeFile(join(cwd, "untracked.py"), "untracked = True\n");
+  await mkdir(join(cwd, "generated"));
+  await writeFile(join(cwd, "generated", "ignored.py"), "ignored = True\n");
+  await exec("git", ["init", "-q"], { cwd });
+  await exec("git", ["add", ".gitignore", "tracked.py"], { cwd });
+  const fake = new FakeClient(join(cwd, "tracked.py"));
+  const manager = new LspManager(
+    [{ extensions: [".py"], languageIds: { ".py": "python" }, command: ["server"] }],
+    cwd,
+    () => fake as unknown as LspClient,
+  );
+
+  try {
+    assert.equal((await manager.diagnostics("workspace")).length, 6);
+    assert.equal(fake.syncCount, 2);
+  } finally {
+    await manager.shutdown();
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("non-Git workspace diagnostics skip dependency and Python virtual-environment directories", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-workspace-excludes-"));
+  await writeFile(join(cwd, "source.py"), "value: str = 1\n");
+  for (const directory of [".venv", "venv", "node_modules", "target", "vendor", ".git"]) {
+    await mkdir(join(cwd, directory));
+    await writeFile(join(cwd, directory, "ignored.py"), "value: str = 1\n");
+  }
+  const fake = new FakeClient(join(cwd, "source.py"));
+  const manager = new LspManager(
+    [{ extensions: [".py"], languageIds: { ".py": "python" }, command: ["server"] }],
+    cwd,
+    () => fake as unknown as LspClient,
+  );
+
+  try {
+    assert.equal((await manager.diagnostics("workspace")).length, 3);
+    assert.equal(fake.syncCount, 1);
+  } finally {
+    await manager.shutdown();
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("Git watcher syncs tracked and untracked sources but ignores Git-ignored and unsupported files", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-watcher-git-"));
+  await writeFile(join(cwd, ".gitignore"), "ignored/\ntracked.py\n");
+  await writeFile(join(cwd, "tracked.py"), "tracked = True\n");
+  await writeFile(join(cwd, "untracked.py"), "untracked = True\n");
+  await writeFile(join(cwd, "unsupported.txt"), "ignored by extension\n");
+  await mkdir(join(cwd, "ignored"));
+  await writeFile(join(cwd, "ignored", "source.py"), "ignored = True\n");
+  await exec("git", ["init", "-q"], { cwd });
+  await exec("git", ["add", ".gitignore"], { cwd });
+  await exec("git", ["add", "--force", "tracked.py"], { cwd });
+  const manager = new LspManager(
+    [{ extensions: [".py"], languageIds: { ".py": "python" }, command: ["server"] }],
+    cwd,
+  );
+  const synced: string[] = [];
+  manager.sync = async (path) => { synced.push(path); return []; };
+  const schedule = (manager as unknown as { scheduleWatcherSync(path: string): void }).scheduleWatcherSync.bind(manager);
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+  process.on("unhandledRejection", onUnhandled);
+
+  try {
+    for (const path of ["tracked.py", "untracked.py", "ignored/source.py", "unsupported.txt"]) schedule(path);
+    await new Promise((resolveResult) => setTimeout(resolveResult, 250));
+
+    assert.deepEqual(synced.sort(), [resolve(cwd, "tracked.py"), resolve(cwd, "untracked.py")].sort());
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.removeListener("unhandledRejection", onUnhandled);
+    await manager.shutdown();
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("non-Git watcher applies bundled directory exclusions", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-watcher-fallback-"));
+  const manager = new LspManager(
+    [{ extensions: [".py"], languageIds: { ".py": "python" }, command: ["server"] }],
+    cwd,
+  );
+  const synced: string[] = [];
+  manager.sync = async (path) => { synced.push(path); return []; };
+  const schedule = (manager as unknown as { scheduleWatcherSync(path: string): void }).scheduleWatcherSync.bind(manager);
+
+  try {
+    for (const path of ["source.py", ".venv/source.py", "node_modules/source.py", "target/source.py", "vendor/source.py"]) schedule(path);
+    await new Promise((resolveResult) => setTimeout(resolveResult, 200));
+
+    assert.deepEqual(synced, [resolve(cwd, "source.py")]);
+  } finally {
+    await manager.shutdown();
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("shutdown clears pending watcher debounce before it can sync", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-watcher-shutdown-"));
+  const manager = new LspManager(
+    [{ extensions: [".py"], languageIds: { ".py": "python" }, command: ["server"] }],
+    cwd,
+  );
+  let syncs = 0;
+  manager.sync = async () => { syncs++; return []; };
+  const schedule = (manager as unknown as { scheduleWatcherSync(path: string): void }).scheduleWatcherSync.bind(manager);
+
+  try {
+    schedule("source.py");
+    await manager.shutdown();
+    await new Promise((resolveResult) => setTimeout(resolveResult, 150));
+
+    assert.equal(syncs, 0);
   } finally {
     await manager.shutdown();
     await rm(cwd, { recursive: true, force: true });
