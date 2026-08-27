@@ -84,11 +84,14 @@ test("worker extension configures filesystem guard and sandbox", async () => {
   assert.ok(registeredTools.includes("bash")); // sandbox bash
 });
 
-test("setupSubagents registers researcher and worker tools", async () => {
+test("setupSubagents registers asynchronous subagent and control tools", async () => {
   const tools = new Map<string, {
     label: string;
     description: string;
     executionMode: string;
+    renderShell?: string;
+    renderCall?: (args: unknown, theme: unknown, context: unknown) => { render: (width: number) => unknown[] };
+    renderResult?: (result: unknown, options: unknown, theme: unknown, context: unknown) => { render: (width: number) => unknown[] };
     execute: (id: string, args: { task: string }, signal: AbortSignal | undefined, onUpdate: (update: unknown) => void, ctx: { cwd: string }) => Promise<unknown>;
   }>();
   const handlers = new Map<string, Array<(event: unknown) => unknown>>();
@@ -99,6 +102,9 @@ test("setupSubagents registers researcher and worker tools", async () => {
       label: string;
       description: string;
       executionMode: string;
+      renderShell?: string;
+      renderCall?: (args: unknown, theme: unknown, context: unknown) => { render: (width: number) => unknown[] };
+      renderResult?: (result: unknown, options: unknown, theme: unknown, context: unknown) => { render: (width: number) => unknown[] };
       execute: (id: string, args: { task: string }, signal: AbortSignal | undefined, onUpdate: (update: unknown) => void, ctx: { cwd: string }) => Promise<unknown>;
     }) => {
       tools.set(tool.name, tool);
@@ -109,38 +115,26 @@ test("setupSubagents registers researcher and worker tools", async () => {
 
   setupSubagents(mockPi);
 
-  assert.ok(tools.has("researcher"));
-  assert.ok(tools.has("worker"));
+  assert.deepEqual([...tools.keys()], ["researcher", "worker", "subagent_observe", "subagent_cancel"]);
+
+  assert.match(tools.get("researcher")?.description ?? "", /Start focused read-only research/);
+  assert.match(tools.get("researcher")?.description ?? "", /Returns immediately with a runId/);
 
   const workerTool = tools.get("worker")!;
   assert.equal(workerTool.label, "worker");
   assert.equal(workerTool.executionMode, "parallel");
-  assert.equal(workerTool.description, "Delegate one of several disjoint tasks for parallel execution.");
-});
+  assert.match(workerTool.description, /Returns immediately with a runId/);
+  assert.match(workerTool.description, /Set targetFiles when files may be modified/);
+  assert.match(tools.get("subagent_observe")?.description ?? "", /meaningful subagent progress, completion, or a bounded timeout/);
+  assert.match(tools.get("subagent_observe")?.description ?? "", /subagent keeps running/);
+  assert.match(tools.get("subagent_cancel")?.description ?? "", /Other runs and the main agent continue/);
+  assert.match(tools.get("subagent_cancel")?.description ?? "", /repeated cancellation returns the same terminal state/);
 
-test("setupSubagents flags failed subagent runs as tool errors", () => {
-  const handlers = new Map<string, Array<(event: unknown) => unknown>>();
-  const mockPi = {
-    registerTool: () => {},
-    registerCommand: () => {},
-    on: (event: string, handler: (event: unknown) => unknown) => {
-      handlers.set(event, [...(handlers.get(event) ?? []), handler]);
-    },
-  } as unknown as ExtensionAPI;
-
-  setupSubagents(mockPi);
-
-  const onToolResult = handlers.get("tool_result")?.[0];
-  assert.ok(onToolResult);
-  const rows = [
-    { toolName: "worker", run: { status: "error" }, expected: { isError: true } },
-    { toolName: "researcher", run: { status: "aborted" }, expected: { isError: true } },
-    { toolName: "worker", run: { status: "success", result: "done" }, expected: undefined },
-    { toolName: "read", run: { status: "error" }, expected: undefined },
-  ] as const;
-  for (const { toolName, run, expected } of rows) {
-    const result = onToolResult({ type: "tool_result", toolCallId: "t1", input: {}, content: [], isError: false, toolName, details: run });
-    assert.deepEqual(result, expected, `${toolName}/${run.status}`);
+  for (const name of ["subagent_observe", "subagent_cancel"]) {
+    const control = tools.get(name)!;
+    assert.equal(control.renderShell, "self");
+    assert.deepEqual(control.renderCall?.({}, {}, {})?.render(80), []);
+    assert.deepEqual(control.renderResult?.({}, {}, {}, {})?.render(80), []);
   }
 });
 
