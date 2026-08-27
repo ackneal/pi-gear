@@ -987,6 +987,15 @@ test("Test 17: handleInput navigates with vim, arrows, half-page, full-page, hom
   comp.handleInput("G");
   assert.equal(comp.scrollTop, initialScrollTop);
   assert.equal(comp.autoScroll, true);
+
+  // SGR mouse wheel scrolls the focused overlay's contained ScrollView
+  comp.handleInput("\x1b[<64;40;10M");
+  assert.equal(comp.scrollTop, initialScrollTop - 3);
+  assert.equal(comp.autoScroll, false);
+
+  comp.handleInput("\x1b[<65;40;10M");
+  assert.equal(comp.scrollTop, initialScrollTop);
+  assert.equal(comp.autoScroll, true);
 });
 
 

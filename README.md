@@ -143,6 +143,8 @@ Each extension may belong to only one server. `languageIds` must map every confi
 - **`researcher`** — delegates focused read-only research to an isolated Pi child process.
 - **`worker`** — delegates bounded implementation work to a child process.
 
+Mouse-wheel scrolling in subagent detail overlays requires `pi --tui-mode fullscreen`; regular mode scrolls the terminal's main transcript instead.
+
 Successful Pi `edit` and `write` calls synchronize matching LSP files and report new or changed diagnostics automatically.
 
 ## Security behavior and limitations

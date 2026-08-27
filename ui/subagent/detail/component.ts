@@ -1,4 +1,4 @@
-import { Key, matchesKey, type Component, type KeyId } from "@earendil-works/pi-tui";
+import { Key, matchesKey, ScrollView, type Component, type KeyId } from "@earendil-works/pi-tui";
 import type { SubagentRun } from "../../../subagents/runtime/types.ts";
 import {
   BOTTOM_SECTION_HEIGHT,
@@ -11,6 +11,18 @@ import type { SubagentViewEntry } from "./registry.ts";
 
 function keyHit(data: string, ...keys: (KeyId | string)[]): boolean {
   return keys.some((key) => data === key || matchesKey(data, key as KeyId));
+}
+
+function wheelDirection(data: string): -1 | 1 | undefined {
+  const match = /^\x1b\[<(\d+);\d+;\d+[Mm]$/.exec(data);
+  if (!match) return undefined;
+
+  const button = Number(match[1]);
+  if ((button & 64) === 0) return undefined;
+  const direction = button & 3;
+  if (direction === 0) return -1;
+  if (direction === 1) return 1;
+  return undefined;
 }
 
 export interface SubagentDetailComponentOptions {
@@ -39,13 +51,16 @@ export class SubagentDetailComponent implements Component {
   private readonly entries: SubagentViewEntry[];
   private index: number;
   private unsubscribe: (() => void) | undefined;
+  private readonly scrollView = new ScrollView(
+    { render: () => [], invalidate: () => {} },
+    { follow: "end", overscroll: "contain" },
+  );
 
-  public scrollTop: number = 0;
-  public autoScroll: boolean = true;
+  public get scrollTop(): number { return this.scrollView.scrollTop; }
+  public get autoScroll(): boolean { return this.scrollView.isFollowingEnd; }
   public toolsExpanded: boolean = false;
   public thinkingExpanded: boolean = false;
   public statusText: string = "";
-  private lastContentLinesCount: number = 0;
   private lastInnerHeight: number = 10;
 
   constructor(options: SubagentDetailComponentOptions) {
@@ -79,8 +94,7 @@ export class SubagentDetailComponent implements Component {
     this.index = i;
     this.entry = this.entries[i]!;
     // Keep toolsExpanded / thinkingExpanded / statusText across windows.
-    this.scrollTop = 0;
-    this.autoScroll = true;
+    this.scrollView.scrollToEnd();
     if (this.subscribeFn) {
       this.unsubscribe = this.subscribeFn(this.entry.toolCallId, (run) =>
         this.update(run),
@@ -107,19 +121,15 @@ export class SubagentDetailComponent implements Component {
       this.statusText,
     );
 
-    this.lastContentLinesCount = contentLines.length;
     this.lastInnerHeight = innerHeight;
-    const maxScroll = Math.max(0, contentLines.length - innerHeight);
-    this.scrollTop = this.autoScroll
-      ? maxScroll
-      : Math.max(0, Math.min(this.scrollTop, maxScroll));
+    this.scrollView.updateLayout(contentLines.length, innerHeight, this.requestRedraw);
 
     return frameDetailBox(
       contentLines,
       this.entry,
       width,
       Math.max(10, termRows),
-      this.scrollTop,
+      this.scrollView.scrollTop,
       this.theme,
       this.now(),
       this.prevLabel(),
@@ -136,6 +146,12 @@ export class SubagentDetailComponent implements Component {
   }
 
   handleInput(data: string): void {
+    const wheel = wheelDirection(data);
+    if (wheel !== undefined) {
+      this.scrollView.scrollBy(wheel * 3);
+      return;
+    }
+
     if (keyHit(data, "\x1b[D", "left", "h", Key.left)) {
       this.select(-1);
       return;
@@ -168,10 +184,6 @@ export class SubagentDetailComponent implements Component {
       return;
     }
 
-    const maxScroll = Math.max(
-      0,
-      this.lastContentLinesCount - this.lastInnerHeight,
-    );
     const halfPage = Math.max(1, Math.floor(Math.max(1, this.lastInnerHeight - 2) / 2));
 
     if (keyHit(data, "up", "k", Key.up)) {
@@ -194,46 +206,22 @@ export class SubagentDetailComponent implements Component {
 
     // Vim top/bottom (Home/End omitted: macOS has no such keys)
     if (data === "g") {
-      this.autoScroll = false;
-      this.scrollTop = 0;
-      this.requestRedraw();
+      this.scrollView.scrollToStart();
       return;
     }
     if (data === "G") {
-      this.scrollTop = maxScroll;
-      this.autoScroll = true;
-      this.requestRedraw();
+      this.scrollView.scrollToEnd();
       return;
     }
   }
 
   public scrollByLines(lines: number): void {
-    const maxScroll = Math.max(
-      0,
-      this.lastContentLinesCount - this.lastInnerHeight,
-    );
-    if (lines < 0) {
-      this.autoScroll = false;
-      this.scrollTop = Math.max(0, this.scrollTop + lines);
-    } else if (lines > 0) {
-      this.scrollTop = Math.min(maxScroll, this.scrollTop + lines);
-      if (this.scrollTop >= maxScroll) {
-        this.autoScroll = true;
-      }
-    }
-    this.requestRedraw();
+    this.scrollView.scrollBy(lines);
   }
 
   update(run: SubagentRun): void {
     this.entry.run = run;
     this.entry.updatedAt = this.now();
-    if (this.autoScroll) {
-      const maxScroll = Math.max(
-        0,
-        this.lastContentLinesCount - this.lastInnerHeight,
-      );
-      this.scrollTop = maxScroll;
-    }
     this.requestRedraw();
   }
 
