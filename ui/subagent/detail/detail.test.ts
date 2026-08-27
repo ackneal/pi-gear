@@ -988,7 +988,7 @@ test("Test 17: handleInput navigates with vim, arrows, half-page, full-page, hom
   assert.equal(comp.scrollTop, initialScrollTop);
   assert.equal(comp.autoScroll, true);
 
-  // SGR mouse wheel scrolls the focused overlay's contained ScrollView
+  // SGR mouse wheel up/down
   comp.handleInput("\x1b[<64;40;10M");
   assert.equal(comp.scrollTop, initialScrollTop - 3);
   assert.equal(comp.autoScroll, false);
@@ -996,6 +996,18 @@ test("Test 17: handleInput navigates with vim, arrows, half-page, full-page, hom
   comp.handleInput("\x1b[<65;40;10M");
   assert.equal(comp.scrollTop, initialScrollTop);
   assert.equal(comp.autoScroll, true);
+
+  // Legacy X10 mouse wheel up/down
+  comp.handleInput(`\x1b[M${String.fromCharCode(96, 73, 42)}`);
+  assert.equal(comp.scrollTop, initialScrollTop - 3);
+
+  comp.handleInput(`\x1b[M${String.fromCharCode(97, 73, 42)}`);
+  assert.equal(comp.scrollTop, initialScrollTop);
+
+  // Non-wheel mouse input is ignored
+  comp.handleInput("\x1b[<0;40;10M");
+  comp.handleInput(`\x1b[M${String.fromCharCode(32, 73, 42)}`);
+  assert.equal(comp.scrollTop, initialScrollTop);
 });
 
 

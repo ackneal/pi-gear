@@ -14,11 +14,14 @@ function keyHit(data: string, ...keys: (KeyId | string)[]): boolean {
 }
 
 function wheelDirection(data: string): -1 | 1 | undefined {
-  const match = /^\x1b\[<(\d+);\d+;\d+[Mm]$/.exec(data);
-  if (!match) return undefined;
+  const sgr = /^\x1b\[<(\d+);\d+;\d+[Mm]$/.exec(data);
+  const button = sgr
+    ? Number.parseInt(sgr[1]!, 10)
+    : data.length === 6 && data.startsWith("\x1b[M")
+      ? data.charCodeAt(3) - 32
+      : undefined;
+  if (button === undefined || (button & 64) === 0) return undefined;
 
-  const button = Number(match[1]);
-  if ((button & 64) === 0) return undefined;
   const direction = button & 3;
   if (direction === 0) return -1;
   if (direction === 1) return 1;
@@ -53,7 +56,7 @@ export class SubagentDetailComponent implements Component {
   private unsubscribe: (() => void) | undefined;
   private readonly scrollView = new ScrollView(
     { render: () => [], invalidate: () => {} },
-    { follow: "end", overscroll: "contain" },
+    { follow: "end" },
   );
 
   public get scrollTop(): number { return this.scrollView.scrollTop; }
