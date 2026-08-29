@@ -4,6 +4,8 @@ import { WORKER_SYSTEM_PROMPT } from "./prompt.ts";
 
 export const WORKER_CAPABILITIES = [
   { kind: "builtin", name: "read" },
+  { kind: "builtin", name: "find" },
+  { kind: "builtin", name: "grep" },
   { kind: "builtin", name: "edit" },
   { kind: "builtin", name: "write" },
   { kind: "builtin", name: "bash" },

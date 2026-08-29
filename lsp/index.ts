@@ -6,6 +6,8 @@ import { formatDiagnostics } from "./normalize.ts";
 import { LspManager } from "./manager.ts";
 import type { NormalizedDiagnostic } from "./types.ts";
 import { lspToolRenderers } from "../ui/tools/index.ts";
+import type { FilesystemAccessService } from "../execution/filesystem/guard.ts";
+import type { WorkspaceServices } from "../workspace/setup.ts";
 
 export interface LspServices {
   statuses(cwd: string): Promise<readonly LspServerSummary[]>;
@@ -85,15 +87,27 @@ const navigationParameters = Type.Object({
 
 export function setupLsp(
   pi: ExtensionAPI,
+  workspace?: WorkspaceServices | typeof loadExtensionConfig,
+  filesystem?: FilesystemAccessService,
   loadConfig: typeof loadExtensionConfig = loadExtensionConfig,
 ): LspServices {
   let manager: LspManager | undefined;
+  const workspaceServices = typeof workspace === "function" ? undefined : workspace;
+  const configLoader = typeof workspace === "function" ? workspace : loadConfig;
 
   pi.on("session_start", async (_event, ctx) => {
-    const config = await loadConfig();
+    const config = await configLoader();
     if (!config.lsp || config.lsp.servers.length === 0) return;
 
-    manager = new LspManager(config.lsp.servers, ctx.cwd, undefined, config, config.lsp.idleTimeoutMinutes);
+    manager = new LspManager(
+      config.lsp.servers,
+      ctx.cwd,
+      undefined,
+      config,
+      config.lsp.idleTimeoutMinutes,
+      filesystem?.forWorkspace(ctx.cwd),
+      workspaceServices?.current(ctx.cwd),
+    );
     await manager.initializeWorkspace();
     manager.startWatching();
 
@@ -146,7 +160,7 @@ export function setupLsp(
   return {
     async statuses(cwd) {
       if (manager && manager.cwd === cwd) return manager.statuses();
-      const config = await loadConfig();
+      const config = await configLoader();
       if (!config.lsp || config.lsp.servers.length === 0) return [];
       return new LspManager(
         config.lsp.servers,

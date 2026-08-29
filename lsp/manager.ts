@@ -1,11 +1,10 @@
-import { execFile } from "node:child_process";
-import { access, readFile, readdir } from "node:fs/promises";
-import { constants, watch, type FSWatcher } from "node:fs";
+import { access } from "node:fs/promises";
+import { constants } from "node:fs";
 import { delimiter, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AccessPolicy, LspServerConfig } from "../config/types.ts";
-import { canonicalizeWorkspace, normalizeToolPath, resolveAccessTarget, type CanonicalWorkspace } from "../execution/filesystem/paths.ts";
-import { evaluateFilesystem, followFallbackAccess, mostRestrictiveFilesystemDecision } from "../execution/policy/filesystem.ts";
+import { FilesystemAccess } from "../execution/filesystem/access.ts";
+import type { WorkspaceSearch } from "../workspace/service.ts";
 import { LspClient } from "./client.ts";
 import { deduplicateAndOrderDiagnostics, diagnosticKey, normalizeDiagnostics } from "./normalize.ts";
 import { parseNavigationResponse } from "./schema.ts";
@@ -29,79 +28,6 @@ interface ActiveClient {
 const MAX_CHANGED_DIAGNOSTIC_FILES = 100;
 const MAX_WORKSPACE_CONCURRENCY = 8;
 
-const excludedWorkspaceDirectories = readFile(new URL(".ignore", import.meta.url), "utf8")
-  .then((content) => new Set(content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)));
-
-const gitStatus = (cwd: string): Promise<string[] | undefined> => new Promise((resolveResult) => {
-  execFile("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], { cwd, encoding: "utf8" }, (error, stdout) => {
-    if (error) return resolveResult(undefined);
-    const records = stdout.split("\0").filter(Boolean);
-    const paths: string[] = [];
-    for (let i = 0; i < records.length; i++) {
-      const record = records[i] ?? "";
-      paths.push(record.slice(3));
-      if (/^[RC]|^[ MARC][RC]/.test(record.slice(0, 2))) i++;
-    }
-    resolveResult(paths);
-  });
-});
-
-const isGitWorkspace = (cwd: string): Promise<boolean> => new Promise((resolveResult) => {
-  execFile("git", ["rev-parse", "--is-inside-work-tree"], { cwd, encoding: "utf8" }, (error, stdout) => {
-    resolveResult(!error && stdout.trim() === "true");
-  });
-});
-
-const gitWorkspaceFiles = (
-  cwd: string,
-  extensions: ReadonlySet<string>,
-): Promise<string[]> => new Promise((resolveResult, reject) => {
-  execFile("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], { cwd, encoding: "utf8" }, (error, stdout) => {
-    if (error) return reject(error);
-    resolveResult(stdout.split("\0")
-      .filter(Boolean)
-      .map((path) => resolve(cwd, path))
-      .filter((path) => extensions.has(extname(path))));
-  });
-});
-
-const gitSourceEligible = (cwd: string, path: string): Promise<boolean> => new Promise((resolveResult, reject) => {
-  execFile("git", ["check-ignore", "--quiet", "--", relative(cwd, path)], { cwd }, (error) => {
-    if (!error) return resolveResult(false);
-    if (error.code === 1) return resolveResult(true);
-    reject(error);
-  });
-});
-
-const fallbackSourceEligible = (cwd: string, path: string, excluded: ReadonlySet<string>): boolean =>
-  !relative(cwd, path).split(sep).slice(0, -1).some((directory) => excluded.has(directory));
-
-const workspaceFiles = async (
-  cwd: string,
-  extensions: ReadonlySet<string>,
-  gitWorkspace: boolean,
-): Promise<string[]> => {
-  if (gitWorkspace) return gitWorkspaceFiles(cwd, extensions);
-
-  const excluded = await excludedWorkspaceDirectories;
-  const files: string[] = [];
-
-  const visit = async (directory: string): Promise<void> => {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      if (entry.isSymbolicLink()) continue;
-      if (entry.isDirectory()) {
-        if (excluded.has(entry.name)) continue;
-        await visit(join(directory, entry.name));
-      } else if (entry.isFile() && extensions.has(extname(entry.name))) {
-        files.push(join(directory, entry.name));
-      }
-    }
-  };
-
-  await visit(cwd);
-  return files;
-};
-
 const executableAvailable = async (executable: string, cwd: string, envPath = process.env.PATH ?? ""): Promise<boolean> => {
   const candidates = executable.includes(sep) || isAbsolute(executable)
     ? [resolve(cwd, executable)]
@@ -119,18 +45,16 @@ export class LspManager {
   private readonly byExtension = new Map<string, LspServerConfig>();
   private readonly clients = new Map<LspServerConfig, ActiveClient>();
   private readonly retiring = new Map<LspServerConfig, Promise<void>>();
-  private workspace: CanonicalWorkspace | undefined;
-  private watcher: FSWatcher | undefined;
-  private debounce = new Map<string, ReturnType<typeof setTimeout>>();
+  private unsubscribeWorkspace: (() => void) | undefined;
   private readonly watcherOperations = new Set<Promise<void>>();
   private readonly diagnosticsBeforeEdit = new Map<string, Set<string>>();
-  private readonly gitWorkspace: Promise<boolean>;
   private closing = false;
   readonly servers: readonly LspServerConfig[];
   readonly cwd: string;
   private readonly createClient: LspClientFactory;
-  private readonly policy: AccessPolicy;
   private readonly idleTimeoutMs: number;
+  private readonly filesystem: FilesystemAccess;
+  private readonly workspaceSearch: WorkspaceSearch | undefined;
 
   constructor(
     servers: readonly LspServerConfig[],
@@ -138,21 +62,21 @@ export class LspManager {
     createClient: LspClientFactory = (config, root) => new LspClient(config, root),
     policy: AccessPolicy = { filesystem: { rules: [] }, sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } } },
     idleTimeoutMinutes = 15,
+    filesystem?: FilesystemAccess,
+    workspaceSearch?: WorkspaceSearch,
   ) {
     this.servers = servers;
     this.cwd = cwd;
     this.createClient = createClient;
-    this.policy = policy;
     this.idleTimeoutMs = idleTimeoutMinutes * 60_000;
-    this.gitWorkspace = isGitWorkspace(cwd);
+    this.filesystem = filesystem ?? new FilesystemAccess(cwd, { loadConfig: async () => policy });
+    this.workspaceSearch = workspaceSearch;
     for (const server of servers) {
       for (const extension of server.extensions) this.byExtension.set(extension, server);
     }
   }
 
-  async initializeWorkspace(): Promise<void> {
-    this.workspace = await canonicalizeWorkspace(this.cwd);
-  }
+  async initializeWorkspace(): Promise<void> {}
 
   match(path: string): LspServerConfig | undefined {
     return this.byExtension.get(extname(path));
@@ -194,21 +118,9 @@ export class LspManager {
 
   private async sourcePath(path: string): Promise<string> {
     if (this.closing) throw new Error("LSP manager is shutting down");
-    const workspace = this.workspace ?? await canonicalizeWorkspace(this.cwd);
-    this.workspace = workspace;
-    const target = await resolveAccessTarget(normalizeToolPath(path, workspace.cwd), workspace);
+    const target = await this.filesystem.authorize(path, "read");
     if (!target.withinWorkspace) throw new Error(`Path is outside workspace: ${path}`);
-    const decision = mostRestrictiveFilesystemDecision([
-      evaluateFilesystem(this.policy, workspace.cwd, target.path, "read"),
-      evaluateFilesystem(
-        this.policy,
-        workspace.canonicalRoot,
-        target.canonicalPath,
-        "read",
-        followFallbackAccess(this.policy, workspace.cwd, target.path),
-      ),
-    ]);
-    if (decision !== "allow") throw new Error(`LSP read access is not permitted: ${path}`);
+    if (target.decision !== "allow") throw new Error(`LSP read access is not permitted: ${path}`);
     return target.path;
   }
 
@@ -272,14 +184,18 @@ export class LspManager {
   }
 
   async diagnostics(scope: "changed" | "workspace"): Promise<NormalizedDiagnostic[]> {
+    if (!this.workspaceSearch) throw new Error("Workspace search is unavailable");
     const extensions = new Set(this.byExtension.keys());
     let results: NormalizedDiagnostic[][];
     if (scope === "workspace") {
-      const paths = await workspaceFiles(this.cwd, extensions, await this.gitWorkspace);
+      const paths = (await this.workspaceSearch.files())
+        .map(({ relativePath }) => resolve(this.cwd, relativePath))
+        .filter((path) => extensions.has(extname(path)));
       results = await this.syncWorkspaceDiagnostics(paths);
     } else {
-      const changed = await gitStatus(this.cwd);
-      const paths = changed?.map((path) => resolve(this.cwd, path)).filter((path) => extensions.has(extname(path))) ?? [];
+      const paths = (await this.workspaceSearch.dirtyFiles())
+        .map(({ relativePath }) => resolve(this.cwd, relativePath))
+        .filter((path) => extensions.has(extname(path)));
       if (paths.length > MAX_CHANGED_DIAGNOSTIC_FILES) {
         throw new Error(`Diagnostics exceeded the ${MAX_CHANGED_DIAGNOSTIC_FILES}-file limit; narrow the changed set`);
       }
@@ -324,36 +240,29 @@ export class LspManager {
     return locations;
   }
 
-  private async watcherSourceEligible(path: string): Promise<boolean> {
-    if (!this.match(path)) return false;
-    if (await this.gitWorkspace) return gitSourceEligible(this.cwd, path);
-    return fallbackSourceEligible(this.cwd, path, await excludedWorkspaceDirectories);
-  }
-
   private scheduleWatcherSync(filename: string): void {
-    if (!this.match(filename)) return;
-    const path = resolve(this.cwd, filename);
-    const previous = this.debounce.get(path);
-    if (previous) clearTimeout(previous);
-    this.debounce.set(path, setTimeout(() => {
-      this.debounce.delete(path);
-      if (this.closing) return;
-
-      const operation = this.syncWatcherPath(path).catch(() => {});
-      this.watcherOperations.add(operation);
-      void operation.finally(() => this.watcherOperations.delete(operation));
-    }, 100));
+    if (!this.match(filename) || this.closing) return;
+    const operation = this.syncWatcherPath(resolve(this.cwd, filename)).catch(() => {});
+    this.watcherOperations.add(operation);
+    void operation.finally(() => this.watcherOperations.delete(operation));
   }
 
   private async syncWatcherPath(path: string): Promise<void> {
-    if (!await this.watcherSourceEligible(path) || this.closing) return;
+    if (this.closing) return;
     await this.sync(path);
   }
 
   startWatching(): void {
-    if (this.watcher || this.closing || this.servers.length === 0) return;
-    this.watcher = watch(this.cwd, { recursive: true }, (_event, filename) => {
-      if (filename) this.scheduleWatcherSync(filename);
+    if (this.unsubscribeWorkspace || this.closing || this.servers.length === 0 || !this.workspaceSearch) return;
+    this.unsubscribeWorkspace = this.workspaceSearch.onChange((events) => {
+      for (const event of events) {
+        if (event.kind === "removed") continue;
+        if (event.kind === "rescan") {
+          continue;
+          continue;
+        }
+        this.scheduleWatcherSync(event.path);
+      }
     });
   }
 
@@ -372,10 +281,8 @@ export class LspManager {
 
   async shutdown(): Promise<void> {
     this.closing = true;
-    this.watcher?.close();
-    this.watcher = undefined;
-    for (const timeout of this.debounce.values()) clearTimeout(timeout);
-    this.debounce.clear();
+    this.unsubscribeWorkspace?.();
+    this.unsubscribeWorkspace = undefined;
     await Promise.all(this.watcherOperations);
     for (const entry of this.clients.values()) {
       if (entry.idleTimer) clearTimeout(entry.idleTimer);

@@ -12,6 +12,7 @@ export interface RunChildSubagentOptions extends RunSubagentOptions {
   cwd?: string;
   spawnProcess?: SpawnProcess;
   spawnChild?: () => ChildProcess;
+  env?: NodeJS.ProcessEnv;
   setKillTimer?: (callback: () => void, milliseconds: number) => KillTimer;
   clearKillTimer?: (timer: KillTimer) => void;
 }
@@ -55,7 +56,7 @@ export async function runChildSubagent(options: RunChildSubagentOptions): Promis
   try {
     child = options.spawnChild
       ? options.spawnChild()
-      : spawnPiChild(options.profile, options.task, options.childExtension, options.spawnProcess, options.cwd, options.dispatch);
+      : spawnPiChild(options.profile, options.task, options.childExtension, options.spawnProcess, options.cwd, options.dispatch, options.env);
   } catch (error) {
     const now = Date.now();
     return {

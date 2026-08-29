@@ -27,6 +27,7 @@ import { setupSubagentRuntimeLifecycle } from "./runtime/lifecycle.ts";
 import { subagentControlResult, type CompactSubagentOutput } from "./runtime/output.ts";
 import { setupSubagentSettleGuard } from "./runtime/settle-guard.ts";
 import type { SubagentRun } from "./runtime/types.ts";
+import type { WorkspaceServices } from "../workspace/setup.ts";
 import { setupSubagentSettings, type SubagentSettings } from "./settings.ts";
 
 export interface SubagentServices {
@@ -49,7 +50,7 @@ function recordUpdate(toolCallId: string | undefined, run: SubagentRun): void {
 // Control tools (subagent_observe/subagent_cancel) carry no transcript UI.
 const hidden = (): Component => ({ render: () => [], invalidate: () => {} });
 
-export function setupSubagents(pi: ExtensionAPI): SubagentServices {
+export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices): SubagentServices {
   const settings = setupSubagentSettings(pi);
   const background = new BackgroundRunRegistry();
 
@@ -69,7 +70,10 @@ export function setupSubagents(pi: ExtensionAPI): SubagentServices {
 
       return backgroundResult(background.start({
         profile: researcherProfile, task, dispatch, ...(signal ? { parentSignal: signal } : {}),
-        run: (childSignal, update) => runResearcher(task, { cwd: ctx.cwd, dispatch, signal: childSignal, onUpdate: (next) => { if (update(next)) recordUpdate(toolCallId, next); } }),
+        run: (childSignal, update) => {
+          const endpoint = workspace?.endpoint(ctx.cwd);
+          return runResearcher(task, { cwd: ctx.cwd, dispatch, ...(endpoint ? { env: { PI_GEAR_FFF_SOCKET: endpoint } } : {}), signal: childSignal, onUpdate: (next) => { if (update(next)) recordUpdate(toolCallId, next); } });
+        },
       }));
     },
     renderCall: renderSubagentCall,
@@ -91,7 +95,10 @@ export function setupSubagents(pi: ExtensionAPI): SubagentServices {
 
       return backgroundResult(background.start({
         profile: workerProfile, task, dispatch, ...(targetFiles?.length ? { writerScopes: targetFiles.map((file) => resolve(ctx.cwd, file)) } : {}), ...(signal ? { parentSignal: signal } : {}),
-        run: (childSignal, update) => runWorker(task, { cwd: ctx.cwd, dispatch, signal: childSignal, onUpdate: (next) => { if (update(next)) recordUpdate(toolCallId, next); } }),
+        run: (childSignal, update) => {
+          const endpoint = workspace?.endpoint(ctx.cwd);
+          return runWorker(task, { cwd: ctx.cwd, dispatch, ...(endpoint ? { env: { PI_GEAR_FFF_SOCKET: endpoint } } : {}), signal: childSignal, onUpdate: (next) => { if (update(next)) recordUpdate(toolCallId, next); } });
+        },
       }));
     },
     renderCall: renderSubagentCall,

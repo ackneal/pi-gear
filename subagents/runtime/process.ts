@@ -56,10 +56,12 @@ export function spawnPiChild(
   spawnProcess: SpawnProcess = spawn,
   cwd: string = process.cwd(),
   dispatch?: SubagentDispatch,
+  env?: NodeJS.ProcessEnv,
 ): ChildProcess {
   const invocation = resolvePiInvocation();
   return spawnProcess(invocation.command, [...invocation.prefixArgs, ...childArgs(profile, task, childExtension, dispatch)], {
     cwd,
     stdio: ["ignore", "pipe", "pipe"],
+    ...(env ? { env: { ...process.env, ...env } } : {}),
   });
 }

@@ -35,7 +35,15 @@ test("LSP tool contracts describe optional diagnostics scope and unchanged navig
   LspManager.prototype.startWatching = () => {};
 
   try {
-    setupLsp(pi, loadConfig as never);
+    setupLsp(pi, {
+      current: () => ({
+        initialize: async () => undefined,
+        files: async () => [],
+        dirtyFiles: async () => [],
+        onChange: () => () => undefined,
+      }) as never,
+      status: () => undefined,
+    }, undefined, loadConfig as never);
     await handlers.get("session_start")?.({}, { cwd });
     const diagnostics = tools.get("diagnostics");
     const navigation = tools.get("navigation");
