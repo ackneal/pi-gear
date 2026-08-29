@@ -1,0 +1,7 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { FilesystemAccess } from "../execution/filesystem/access.ts";
+import type { FffClient } from "../lifecycle/fff-client.ts";
+import { WorkspaceSearch } from "./service.ts";
+const policy = { version: 1 as const, filesystem: { rules: [] }, sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } } };
+test("workspace search shares the FFF client and tracks only a subsequently used result", async () => { const calls: Array<[string, unknown]> = []; const client = { request: async (method: string, params?: unknown) => { calls.push([method, params]); if (method === "fileSearch") return { items: [{ relativePath: "source.ts" }], scores: [], totalMatched: 1, totalFiles: 1 }; if (method === "status") return { progress: { scannedFilesCount: 1, isScanning: false, isWatcherReady: true, isWarmupComplete: true }, health: { version: "0.10.3" } }; return true; } } as unknown as FffClient; const search = new WorkspaceSearch("/workspace", new FilesystemAccess("/workspace", { loadConfig: async () => policy }), client); await search.fileSearch("src"); search.recordFocus("other.ts"); search.recordFocus("source.ts"); await new Promise((resolve) => setImmediate(resolve)); assert.deepEqual(calls.find(([method]) => method === "trackQuery")?.[1], { query: "src", selectedFilePath: "/workspace/source.ts" }); assert.equal((await search.status()).state, "ready"); });

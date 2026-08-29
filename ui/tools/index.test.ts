@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createEditToolDefinition, createReadToolDefinition, createWriteToolDefinition, initTheme } from "@earendil-works/pi-coding-agent";
-import { createSandboxBashTool, lspToolRenderers, registerFileToolUi } from "./index.ts";
+import { createSandboxBashTool, lspToolRenderers, registerFileToolUi, workspaceToolRenderers } from "./index.ts";
 import * as PiTui from "@earendil-works/pi-tui";
 
 initTheme();
@@ -93,6 +93,20 @@ test("headers remain a single ellipsized line", () => {
   assertFits(header, 92);
   assert.equal(output.length, 1);
   assert.match(output[0] ?? "", /…/);
+});
+
+test("workspace find and grep use the project tool UI", () => {
+  for (const kind of ["find", "grep"] as const) {
+    const renderers = workspaceToolRenderers(kind);
+    const args = { path: "src", pattern: "needle" };
+    const call = renderedText(renderers.renderCall!(args as never, theme, context(args)));
+    const collapsed = renderedText(renderers.renderResult!({ content: [{ type: "text", text: "src/file.ts" }] } as never, { expanded: false, isPartial: false }, theme, context(args)));
+    const expanded = renderedText(renderers.renderResult!({ content: [{ type: "text", text: "src/file.ts" }] } as never, { expanded: true, isPartial: false }, theme, context(args, true)));
+
+    assert.match(call, new RegExp(`^\\+ ${kind.toUpperCase()}\\s+src`));
+    assert.equal(collapsed, "");
+    assert.match(expanded, /src\/file\.ts/);
+  }
 });
 
 test("LSP diagnostics use terminal empty state and collapsible complete results", () => {
