@@ -45,6 +45,53 @@ test("headless outside-workspace file access is denied when policy asks", async 
   }
 });
 
+test("concurrent filesystem asks are shown sequentially and all tool calls resolve", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-gear-file-prompts-"));
+  const workspace = join(root, "workspace");
+  const outside = [join(root, "outside-a.txt"), join(root, "outside-b.txt")];
+  let handler: ((event: ToolCall, ctx: ExtensionContext) => Promise<unknown>) | undefined;
+  const confirmationResolvers: Array<(allowed: boolean) => void> = [];
+  const promptMessages: string[] = [];
+  const pi = {
+    on: (event: string, listener: unknown) => { if (event === "tool_call") handler = listener as typeof handler; },
+    sendMessage: () => undefined,
+  } as unknown as ExtensionAPI;
+  const ctx = {
+    cwd: workspace,
+    hasUI: true,
+    ui: {
+      confirm: (_title: string, message: string) => {
+        promptMessages.push(message);
+        return new Promise<boolean>((resolve) => { confirmationResolvers.push(resolve); });
+      },
+      notify: () => undefined,
+    },
+  } as unknown as ExtensionContext;
+  const waitForPrompts = async (count: number): Promise<void> => {
+    while (confirmationResolvers.length < count) await new Promise<void>((resolve) => setImmediate(resolve));
+  };
+
+  try {
+    await mkdir(workspace);
+    await Promise.all(outside.map((path) => writeFile(path, "test")));
+    setupFilesystemGuard(pi);
+    assert.ok(handler);
+
+    const requests = outside.map((path, index) => handler!({ type: "tool_call", toolName: "read", toolCallId: `read-${index}`, input: { path } }, ctx));
+    await waitForPrompts(1);
+    assert.equal(confirmationResolvers.length, 1);
+
+    confirmationResolvers[0]!(true);
+    await waitForPrompts(2);
+    confirmationResolvers[1]!(true);
+
+    assert.deepEqual(await Promise.all(requests), [undefined, undefined]);
+    assert.equal(promptMessages.every((message) => message.startsWith("Allow read access to ")), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("dangling symlink writes are blocked as outside-workspace access", async () => {
   // A temp root outside follow-covered paths (such as /tmp/** when TMPDIR
   // points into it) keeps the dangling target outside the workspace boundary.

@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AccessPolicy } from "../../config/index.ts";
+import { ConfirmationQueue } from "../confirmation-queue.ts";
 import { loadExtensionConfig } from "../../config/index.ts";
 import { resolveRuntimeTempDir, type TempDirSource } from "../sandbox/config.ts";
 import {
@@ -27,6 +28,7 @@ export interface FilesystemAuthorization {
 export interface FilesystemAccessOptions {
   readonly tempSource?: TempDirSource;
   readonly loadConfig?: () => Promise<AccessPolicy>;
+  readonly confirmationQueue?: ConfirmationQueue;
 }
 
 export class FilesystemAccess {
@@ -35,12 +37,14 @@ export class FilesystemAccess {
   private readonly workspace: Promise<CanonicalWorkspace>;
   private readonly config: Promise<AccessPolicy>;
   private tempPrefixes: Promise<readonly string[]> | undefined;
+  private readonly confirmationQueue: ConfirmationQueue;
 
   constructor(cwd: string, options: FilesystemAccessOptions = {}) {
     this.cwd = cwd;
     this.options = options;
     this.workspace = canonicalizeWorkspace(cwd);
     this.config = (options.loadConfig ?? loadExtensionConfig)();
+    this.confirmationQueue = options.confirmationQueue ?? new ConfirmationQueue();
   }
 
   async authorize(path: string, operation: FilesystemOperation): Promise<FilesystemAuthorization> {
@@ -89,10 +93,11 @@ export class FilesystemAccess {
     if (await this.withinRuntimeTemp(authorization)) return { ...authorization, decision: "allow" };
     if (!ctx.hasUI) return authorization;
 
-    const allowed = await ctx.ui.confirm(
+    const allowed = await this.confirmationQueue.run(() => ctx.ui.confirm(
       "Outside workspace access",
-      `Allow ${label} on ${authorization.path}?`,
-    );
+      `Allow ${label} access to ${authorization.path}?`,
+    ));
+
     pi.sendMessage({
       customType: "filesystem",
       content: `User ${allowed ? "approved" : "denied"} outside-workspace access: ${label} ${authorization.path}`,
