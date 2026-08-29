@@ -236,7 +236,7 @@ function workspaceResult(kind: WorkspaceToolKind) {
     if (context.isError) return text ? new CompactText(theme.fg("error", text), "detail") : empty();
 
     if (!options.expanded || !text) return empty();
-    return new CompactText(theme.fg("toolOutput", text), "detail");
+    return new CompactText(theme.fg("toolOutput", `\n${text}`), "detail");
   };
 }
 

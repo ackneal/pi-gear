@@ -105,7 +105,7 @@ test("workspace find and grep use the project tool UI", () => {
 
     assert.match(call, new RegExp(`^\\+ ${kind.toUpperCase()}\\s+src`));
     assert.equal(collapsed, "");
-    assert.match(expanded, /src\/file\.ts/);
+    assert.match(expanded, /^\nsrc\/file\.ts/);
   }
 });
 
