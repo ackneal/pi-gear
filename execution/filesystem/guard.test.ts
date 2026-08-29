@@ -15,7 +15,7 @@ const testConfig = {
 const setupFilesystemGuard = (
   pi: ExtensionAPI,
   options: Parameters<typeof setupFilesystemGuardImpl>[1] = {},
-): void => setupFilesystemGuardImpl(pi, { ...options, loadConfig: async () => testConfig });
+): void => { setupFilesystemGuardImpl(pi, { ...options, loadConfig: async () => testConfig }); };
 
 type ToolCall = { type: "tool_call"; toolName: string; toolCallId: string; input: Record<string, unknown> };
 
@@ -159,14 +159,12 @@ test("task_state, researcher, and Bash pass without warnings", async () => {
   assert.deepEqual(warnings, []);
 });
 
-test("recursive filesystem tools warn once per session when Pi enables them", async () => {
+test("recursive filesystem tools use the same read policy without warnings", async () => {
   let handler: ((event: ToolCall, ctx: ExtensionContext) => Promise<unknown>) | undefined;
-  let sessionStart: (() => void) | undefined;
   const warnings: string[] = [];
   const pi = {
     on: (event: string, listener: unknown) => {
       if (event === "tool_call") handler = listener as typeof handler;
-      if (event === "session_start") sessionStart = listener as typeof sessionStart;
     },
     sendMessage: () => undefined,
   } as unknown as ExtensionAPI;
@@ -177,20 +175,12 @@ test("recursive filesystem tools warn once per session when Pi enables them", as
   } as unknown as ExtensionContext;
   setupFilesystemGuard(pi);
   assert.ok(handler);
-  assert.ok(sessionStart);
 
-  for (const toolName of ["grep", "grep", "ls", "find"] as const) {
+  for (const toolName of ["grep", "ls", "find"] as const) {
     assert.equal(await handler({ type: "tool_call", toolName, toolCallId: `test-${toolName}`, input: {} }, ctx), undefined);
   }
-  sessionStart();
-  assert.equal(await handler({ type: "tool_call", toolName: "grep", toolCallId: "after-reset", input: {} }, ctx), undefined);
 
-  assert.deepEqual(warnings, [
-    "grep is not covered by the filesystem policy.",
-    "ls is not covered by the filesystem policy.",
-    "find is not covered by the filesystem policy.",
-    "grep is not covered by the filesystem policy.",
-  ]);
+  assert.deepEqual(warnings, []);
 });
 
 test("current process temp dir access skips the outside-workspace prompt", async () => {
