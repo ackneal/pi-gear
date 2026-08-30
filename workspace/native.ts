@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { basename, relative, resolve, sep } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import type { FilesystemAccess } from "../execution/filesystem/access.ts";
+
+type SearchAccess = Pick<FilesystemAccess, "permits">;
 
 export const isPathWithin = (root: string, path: string): boolean => {
   const candidate = relative(resolve(root), resolve(path));
@@ -26,9 +28,54 @@ function waitForClose(child: ReturnType<typeof spawn>): Promise<number | null> {
   });
 }
 
-export async function nativeFind(root: string, pattern: string, access: FilesystemAccess, limit: number): Promise<string[]> {
-  const args = ["--glob", pattern, "--type", "f", "--color", "never", "--print0", ".", root];
+async function hasGitAncestor(root: string): Promise<boolean> {
+  let directory = resolve(root);
+  while (true) {
+    try {
+      await stat(join(directory, ".git"));
+      return true;
+    } catch {
+      const parent = dirname(directory);
+      if (parent === directory) return false;
+      directory = parent;
+    }
+  }
+}
+
+function fdPattern(pattern: string): { pattern: string; fullPath: boolean } {
+  if (!pattern.includes("/")) return { pattern, fullPath: false };
+
+  const recursive = isAbsolute(pattern) || pattern.startsWith("**/") || pattern === "**"
+    ? pattern
+    : `**/${pattern}`;
+  return {
+    pattern: process.platform === "win32" ? recursive.replaceAll("/", "[/\\\\]") : recursive,
+    fullPath: true,
+  };
+}
+
+export async function nativeFind(
+  root: string,
+  pattern: string,
+  access: SearchAccess,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  signal?.throwIfAborted();
+  const effective = fdPattern(pattern);
+  const args = [
+    "--glob",
+    "--color=never",
+    "--hidden",
+    ...(await hasGitAncestor(root) ? [] : ["--no-require-git"]),
+    ...(effective.fullPath ? ["--full-path"] : []),
+    "--type", "f",
+    "--print0",
+    "--", effective.pattern, root,
+  ];
   const child = spawn("fd", args, { stdio: ["ignore", "pipe", "pipe"] });
+  const abort = () => { child.kill(); };
+  signal?.addEventListener("abort", abort, { once: true });
   const closed = waitForClose(child);
   const paths: string[] = [];
   let pending = "";
@@ -57,9 +104,14 @@ export async function nativeFind(root: string, pattern: string, access: Filesyst
     if (stoppedAtLimit) break;
   }
 
-  const code = await closed;
-  if (!stoppedAtLimit && code !== 0) throw commandFailure("fd", stderr, code);
-  return paths;
+  try {
+    const code = await closed;
+    signal?.throwIfAborted();
+    if (!stoppedAtLimit && code !== 0) throw commandFailure("fd", stderr, code);
+    return paths;
+  } finally {
+    signal?.removeEventListener("abort", abort);
+  }
 }
 
 export interface NativeGrepMatch {
@@ -117,10 +169,12 @@ function toNativeMatch(root: string, event: RgMatchEvent, fileLines: string[] | 
 
 export async function nativeGrep(
   root: string,
-  access: FilesystemAccess,
+  access: SearchAccess,
   pattern: string,
   options: { regex: boolean; ignoreCase: boolean; glob?: string; context: number; limit: number },
+  signal?: AbortSignal,
 ): Promise<NativeGrepMatch[]> {
+  signal?.throwIfAborted();
   const args = [
     "--json",
     "--color", "never",
@@ -130,6 +184,8 @@ export async function nativeGrep(
     "--", pattern, root,
   ];
   const child = spawn("rg", args, { stdio: ["ignore", "pipe", "pipe"] });
+  const abort = () => { child.kill(); };
+  signal?.addEventListener("abort", abort, { once: true });
   const closed = waitForClose(child);
   const output = createInterface({ input: child.stdout });
   const matches: NativeGrepMatch[] = [];
@@ -166,7 +222,12 @@ export async function nativeGrep(
     break;
   }
 
-  const code = await closed;
-  if (!stoppedAtLimit && code !== 0 && code !== 1) throw commandFailure("rg", stderr, code);
-  return matches;
+  try {
+    const code = await closed;
+    signal?.throwIfAborted();
+    if (!stoppedAtLimit && code !== 0 && code !== 1) throw commandFailure("rg", stderr, code);
+    return matches;
+  } finally {
+    signal?.removeEventListener("abort", abort);
+  }
 }
