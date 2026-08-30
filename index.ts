@@ -21,7 +21,7 @@ export default async function gear(pi: ExtensionAPI): Promise<void> {
 
   setupThinkingDisplay(pi);
   const subagents = setupSubagents(pi, workspace);
-  const lsp = setupLsp(pi, workspace, execution.filesystem);
+  const lsp = setupLsp(pi, { workspace, filesystem: execution.filesystem });
 
   setupCommands(pi, { execution, subagents, lsp, workspace });
 }

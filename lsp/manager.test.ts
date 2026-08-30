@@ -75,7 +75,6 @@ test("manager matches configured extensions, reuses clients, normalizes diagnost
   );
 
   try {
-    await manager.initializeWorkspace();
     assert.ok(manager.match(source));
     assert.equal(manager.match(join(cwd, "source.go")), undefined);
 
@@ -453,7 +452,6 @@ test("workspace search supplies diagnostics inventory and the shared LSP change 
   );
 
   try {
-    await manager.initializeWorkspace();
     assert.equal((await manager.diagnostics("workspace")).length, 3);
     assert.equal((await manager.diagnostics("changed")).length, 3);
     manager.startWatching();
@@ -463,6 +461,47 @@ test("workspace search supplies diagnostics inventory and the shared LSP change 
   } finally {
     await manager.shutdown();
     assert.equal(unsubscribed, true);
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("workspace rescan coalesces overlapping requests with bounded concurrency", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-rescan-"));
+  const supported = Array.from({ length: 10 }, (_, index) => `source-${index}.ts`);
+  await Promise.all([
+    ...supported.map((path) => writeFile(join(cwd, path), "const value = 1;\n")),
+    writeFile(join(cwd, "notes.txt"), "ignored\n"),
+  ]);
+  let listener: ((events: readonly { path: string; kind: "rescan" }[]) => void) | undefined;
+  const workspaceIndex = {
+    files: async () => [...supported, "notes.txt"].map((relativePath) => ({ relativePath })),
+    dirtyFiles: async () => [],
+    onChange: (next: typeof listener) => { listener = next; return () => undefined; },
+  } as never;
+  const fake = new FakeClient(join(cwd, supported[0]!));
+  const manager = new LspManager(
+    [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
+    cwd,
+    () => fake as unknown as LspClient,
+    undefined,
+    15,
+    undefined,
+    workspaceIndex,
+  );
+
+  try {
+    manager.startWatching();
+    listener?.([{ path: cwd, kind: "rescan" }]);
+    listener?.([{ path: cwd, kind: "rescan" }]);
+    listener?.([{ path: cwd, kind: "rescan" }]);
+    const expectedSyncs = supported.length * 2;
+    for (let attempt = 0; attempt < 50 && fake.syncCount < expectedSyncs; attempt++) {
+      await new Promise((resolveResult) => setTimeout(resolveResult, 5));
+    }
+    assert.equal(fake.syncCount, expectedSyncs);
+    assert.ok(fake.maxActiveWaits <= 8);
+  } finally {
+    await manager.shutdown();
     await rm(cwd, { recursive: true, force: true });
   }
 });

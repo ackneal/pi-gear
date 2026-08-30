@@ -36,14 +36,17 @@ test("LSP tool contracts describe optional diagnostics scope and unchanged navig
 
   try {
     setupLsp(pi, {
-      current: () => ({
-        initialize: async () => undefined,
-        files: async () => [],
-        dirtyFiles: async () => [],
-        onChange: () => () => undefined,
-      }) as never,
-      status: () => undefined,
-    }, undefined, loadConfig as never);
+      workspace: {
+        current: () => ({
+          initialize: async () => undefined,
+          files: async () => [],
+          dirtyFiles: async () => [],
+          onChange: () => () => undefined,
+        }) as never,
+        status: () => undefined,
+      },
+      loadConfig: loadConfig as never,
+    });
     await handlers.get("session_start")?.({}, { cwd });
     const diagnostics = tools.get("diagnostics");
     const navigation = tools.get("navigation");
@@ -171,7 +174,7 @@ test("empty LSP server configuration does not set up a manager, tools, or watche
     lsp: { servers: [] },
   }) as const;
 
-  const services = setupLsp(pi, loadConfig as never);
+  const services = setupLsp(pi, { loadConfig: loadConfig as never });
   await handlers.get("session_start")?.({}, { cwd: "/definitely-not-a-workspace" });
 
   assert.deepEqual(tools, []);

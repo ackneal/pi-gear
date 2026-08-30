@@ -85,15 +85,15 @@ const navigationParameters = Type.Object({
   column: Type.Integer({ minimum: 1, description: "1-based source column." }),
 }, { additionalProperties: false });
 
-export function setupLsp(
-  pi: ExtensionAPI,
-  workspace?: WorkspaceServices | typeof loadExtensionConfig,
-  filesystem?: FilesystemAccessService,
-  loadConfig: typeof loadExtensionConfig = loadExtensionConfig,
-): LspServices {
+export interface SetupLspOptions {
+  readonly workspace?: WorkspaceServices;
+  readonly filesystem?: FilesystemAccessService;
+  readonly loadConfig?: typeof loadExtensionConfig;
+}
+
+export function setupLsp(pi: ExtensionAPI, options: SetupLspOptions = {}): LspServices {
   let manager: LspManager | undefined;
-  const workspaceServices = typeof workspace === "function" ? undefined : workspace;
-  const configLoader = typeof workspace === "function" ? workspace : loadConfig;
+  const { workspace, filesystem, loadConfig: configLoader = loadExtensionConfig } = options;
 
   pi.on("session_start", async (_event, ctx) => {
     const config = await configLoader();
@@ -106,9 +106,8 @@ export function setupLsp(
       config,
       config.lsp.idleTimeoutMinutes,
       filesystem?.forWorkspace(ctx.cwd),
-      workspaceServices?.current(ctx.cwd),
+      workspace?.current(ctx.cwd),
     );
-    await manager.initializeWorkspace();
     manager.startWatching();
 
     pi.registerTool({

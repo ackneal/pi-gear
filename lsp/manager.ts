@@ -48,6 +48,8 @@ export class LspManager {
   private unsubscribeWorkspace: (() => void) | undefined;
   private readonly watcherOperations = new Set<Promise<void>>();
   private readonly diagnosticsBeforeEdit = new Map<string, Set<string>>();
+  private rescanOperation: Promise<void> | undefined;
+  private rescanRequested = false;
   private closing = false;
   readonly servers: readonly LspServerConfig[];
   readonly cwd: string;
@@ -75,8 +77,6 @@ export class LspManager {
       for (const extension of server.extensions) this.byExtension.set(extension, server);
     }
   }
-
-  async initializeWorkspace(): Promise<void> {}
 
   match(path: string): LspServerConfig | undefined {
     return this.byExtension.get(extname(path));
@@ -240,16 +240,46 @@ export class LspManager {
     return locations;
   }
 
+  private trackWatcherOperation(operation: Promise<void>): void {
+    const guarded = operation.catch(() => {});
+    this.watcherOperations.add(guarded);
+    void guarded.finally(() => this.watcherOperations.delete(guarded));
+  }
+
   private scheduleWatcherSync(filename: string): void {
     if (!this.match(filename) || this.closing) return;
-    const operation = this.syncWatcherPath(resolve(this.cwd, filename)).catch(() => {});
-    this.watcherOperations.add(operation);
-    void operation.finally(() => this.watcherOperations.delete(operation));
+    this.trackWatcherOperation(this.syncWatcherPath(resolve(this.cwd, filename)));
   }
 
   private async syncWatcherPath(path: string): Promise<void> {
     if (this.closing) return;
     await this.sync(path);
+  }
+
+  private async syncRescanInventory(): Promise<void> {
+    if (this.closing || !this.workspaceSearch) return;
+    const paths = (await this.workspaceSearch.files())
+      .map(({ relativePath }) => resolve(this.cwd, relativePath))
+      .filter((path) => this.match(path) !== undefined);
+    await this.syncWorkspaceDiagnostics(paths);
+  }
+
+  private scheduleRescan(): void {
+    this.rescanRequested = true;
+    if (this.rescanOperation || this.closing) return;
+
+    const operation = (async () => {
+      do {
+        this.rescanRequested = false;
+        await this.syncRescanInventory();
+      } while (this.rescanRequested && !this.closing);
+    })().catch(() => {}).finally(() => {
+      if (this.rescanOperation === operation) this.rescanOperation = undefined;
+      if (this.rescanRequested && !this.closing) this.scheduleRescan();
+    });
+    this.rescanOperation = operation;
+    this.watcherOperations.add(operation);
+    void operation.finally(() => this.watcherOperations.delete(operation));
   }
 
   startWatching(): void {
@@ -258,7 +288,7 @@ export class LspManager {
       for (const event of events) {
         if (event.kind === "removed") continue;
         if (event.kind === "rescan") {
-          continue;
+          this.scheduleRescan();
           continue;
         }
         this.scheduleWatcherSync(event.path);
