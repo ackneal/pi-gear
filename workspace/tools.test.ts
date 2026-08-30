@@ -87,12 +87,12 @@ const text = async (result: ReturnType<typeof run>) =>
     .map((part) => part.type === "text" ? part.text : "")
     .join("\n");
 
-test("workspace find filters denied paths before applying the visible limit", async () => {
+test("workspace find discovers paths without applying read policy", async () => {
   const { tools } = await setup();
-  const output = await text(run(tools.get("find")!, { pattern: "*", limit: 1 }));
+  const output = await text(run(tools.get("find")!, { pattern: "*", limit: 2 }));
 
+  assert.match(output, /\.env/);
   assert.match(output, /src\/allowed\.ts/);
-  assert.doesNotMatch(output, /\.env/);
 });
 
 test("workspace grep filters denied pages and continues to allowed content", async () => {
@@ -144,7 +144,7 @@ test("external search roots are rejected by policy before either backend runs", 
   assert.deepEqual(requests, []);
 });
 
-test("approved external roots expose ordinary children but retain nested denies", async () => {
+test("approved external find returns discovered children without per-file read checks", async () => {
   const directory = await mkdtemp(join(tmpdir(), "pi-gear-approved-search-"));
   const workspace = join(directory, "workspace");
   const external = join(directory, "external");
@@ -156,17 +156,17 @@ test("approved external roots expose ordinary children but retain nested denies"
       writeFile(join(external, "denied", "secret.ts"), "foo\n"),
     ]);
 
-    const authorization = (path: string, decision: "allow" | "ask" | "deny") => ({
+    const authorization = (path: string, decision: "allow" | "ask") => ({
       path,
       canonicalPath: path,
       withinWorkspace: false,
       decision,
     });
+    const authorizedPaths: string[] = [];
     const access = {
       filter: async (paths: readonly string[]) => [...paths],
       authorize: async (path: string) => {
-        if (path.includes(`${join(external, "denied")}/`)) return authorization(path, "deny");
-        if (path.endsWith("escape.ts")) return { ...authorization(path, "ask"), canonicalPath: join(directory, "escaped", "escape.ts") };
+        authorizedPaths.push(path);
         return authorization(path, "ask");
       },
       request: async (path: string) => authorization(path, "allow"),
@@ -190,7 +190,9 @@ test("approved external roots expose ordinary children but retain nested denies"
     ));
 
     assert.match(output, /visible\.ts/);
-    assert.doesNotMatch(output, /secret\.ts|denied|escape\.ts/);
+    assert.match(output, /denied\/secret\.ts/);
+    assert.match(output, /escape\.ts/);
+    assert.deepEqual(authorizedPaths, [external]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

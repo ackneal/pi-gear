@@ -66,12 +66,12 @@ async function rejectsPromptly(promise: Promise<unknown>, reason: Error): Promis
   }
 }
 
-test("native fd and rg continue past denied candidates until the visible limit", async () => {
+test("native find discovers paths while grep filters content before the visible limit", async () => {
   await withFakeSearchCommands(async (root) => {
-    const found = await nativeFind(root, "*.ts", access, 2);
+    const found = await nativeFind(root, "*.ts", 2);
     const matches = await nativeGrep(root, access, "needle", { regex: false, ignoreCase: false, context: 0, limit: 2 });
 
-    assert.deepEqual(found, ["allowed-a.ts", "allowed-b.ts"]);
+    assert.deepEqual(found, ["denied-a.ts", "denied-b.ts"]);
     assert.deepEqual(matches.map(({ relativePath, lineContent }) => [relativePath, lineContent]), [
       ["allowed-a.ts", "visible-a"],
       ["allowed-b.ts", "visible-b"],
@@ -96,15 +96,13 @@ test("native find preserves recursive basename and full-path glob semantics", as
       await mkdir(join(root, file, ".."), { recursive: true });
       await writeFile(join(root, file), "test");
     }
-    const allowAll = { permits: async () => true };
-
     const cases = [
       { pattern: "*.spec.ts", expected: [".hidden.spec.ts", "other/src/deep/other.spec.ts", "src/deep/nested.spec.ts", "src/direct.spec.ts", "top.spec.ts"] },
       { pattern: "src/**/*.spec.ts", expected: ["other/src/deep/other.spec.ts", "src/deep/nested.spec.ts", "src/direct.spec.ts"] },
       { pattern: "**/parent/child/*", expected: ["one/parent/child/file.txt"] },
     ];
     for (const { pattern, expected } of cases) {
-      const found = await nativeFind(root, pattern, allowAll, 100);
+      const found = await nativeFind(root, pattern, 100);
       assert.deepEqual(found.sort(), expected);
     }
   } finally {
@@ -120,7 +118,7 @@ test("native fd and rg are terminated when their signal is aborted", async () =>
     try {
       const findController = new AbortController();
       const findReason = new Error("stop fd");
-      const finding = nativeFind(root, "*.ts", access, 2, findController.signal);
+      const finding = nativeFind(root, "*.ts", 2, findController.signal);
       await waitForFile(join(directory, "fd-ready"));
       findController.abort(findReason);
       await rejectsPromptly(finding, findReason);

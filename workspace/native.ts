@@ -57,7 +57,6 @@ function fdPattern(pattern: string): { pattern: string; fullPath: boolean } {
 export async function nativeFind(
   root: string,
   pattern: string,
-  access: SearchAccess,
   limit: number,
   signal?: AbortSignal,
 ): Promise<string[]> {
@@ -76,6 +75,7 @@ export async function nativeFind(
   const child = spawn("fd", args, { stdio: ["ignore", "pipe", "pipe"] });
   const abort = () => { child.kill(); };
   signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
   const closed = waitForClose(child);
   const paths: string[] = [];
   let pending = "";
@@ -86,30 +86,30 @@ export async function nativeFind(
   child.stderr.on("data", (chunk) => { stderr += chunk; });
   child.stdout.setEncoding("utf8");
 
-  for await (const chunk of child.stdout) {
-    pending += chunk;
-    let boundary: number;
-    while ((boundary = pending.indexOf("\0")) >= 0) {
-      const candidate = resolve(pending.slice(0, boundary));
-      pending = pending.slice(boundary + 1);
-
-      if (!await access.permits(candidate)) continue;
-      paths.push(displayPath(root, candidate));
-      if (paths.length < limit) continue;
-
-      stoppedAtLimit = true;
-      child.kill();
-      break;
-    }
-    if (stoppedAtLimit) break;
-  }
-
   try {
+    for await (const chunk of child.stdout) {
+      pending += chunk;
+      let boundary: number;
+      while ((boundary = pending.indexOf("\0")) >= 0) {
+        const candidate = resolve(pending.slice(0, boundary));
+        pending = pending.slice(boundary + 1);
+
+        paths.push(displayPath(root, candidate));
+        if (paths.length < limit) continue;
+
+        stoppedAtLimit = true;
+        child.kill();
+        break;
+      }
+      if (stoppedAtLimit) break;
+    }
+
     const code = await closed;
     signal?.throwIfAborted();
     if (!stoppedAtLimit && code !== 0) throw commandFailure("fd", stderr, code);
     return paths;
   } finally {
+    child.kill();
     signal?.removeEventListener("abort", abort);
   }
 }
@@ -186,6 +186,7 @@ export async function nativeGrep(
   const child = spawn("rg", args, { stdio: ["ignore", "pipe", "pipe"] });
   const abort = () => { child.kill(); };
   signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
   const closed = waitForClose(child);
   const output = createInterface({ input: child.stdout });
   const matches: NativeGrepMatch[] = [];
@@ -197,37 +198,39 @@ export async function nativeGrep(
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk) => { stderr += chunk; });
 
-  for await (const line of output) {
-    const event = parseMatchEvent(line);
-    if (!event) continue;
-
-    const absolutePath = resolve(event.data.path.text);
-    let permitted = permissionByPath.get(absolutePath);
-    if (permitted === undefined) {
-      permitted = await access.permits(absolutePath);
-      permissionByPath.set(absolutePath, permitted);
-    }
-    if (!permitted) continue;
-
-    let fileLines: string[] | undefined;
-    if (options.context > 0) {
-      if (!linesByPath.has(absolutePath)) linesByPath.set(absolutePath, await readLines(absolutePath));
-      fileLines = linesByPath.get(absolutePath);
-    }
-    matches.push(toNativeMatch(root, event, fileLines, options.context));
-
-    if (matches.length < options.limit) continue;
-    stoppedAtLimit = true;
-    child.kill();
-    break;
-  }
-
   try {
+    for await (const line of output) {
+      const event = parseMatchEvent(line);
+      if (!event) continue;
+
+      const absolutePath = resolve(event.data.path.text);
+      let permitted = permissionByPath.get(absolutePath);
+      if (permitted === undefined) {
+        permitted = await access.permits(absolutePath);
+        permissionByPath.set(absolutePath, permitted);
+      }
+      if (!permitted) continue;
+
+      let fileLines: string[] | undefined;
+      if (options.context > 0) {
+        if (!linesByPath.has(absolutePath)) linesByPath.set(absolutePath, await readLines(absolutePath));
+        fileLines = linesByPath.get(absolutePath);
+      }
+      matches.push(toNativeMatch(root, event, fileLines, options.context));
+
+      if (matches.length < options.limit) continue;
+      stoppedAtLimit = true;
+      child.kill();
+      break;
+    }
+
     const code = await closed;
     signal?.throwIfAborted();
     if (!stoppedAtLimit && code !== 0 && code !== 1) throw commandFailure("rg", stderr, code);
     return matches;
   } finally {
+    output.close();
+    child.kill();
     signal?.removeEventListener("abort", abort);
   }
 }

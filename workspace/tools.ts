@@ -103,7 +103,7 @@ function approvedRootAccess(access: FilesystemAccess, root: RootAuthorization): 
   };
 }
 
-async function workspaceFind(search: WorkspaceSearch, access: FilesystemAccess, root: string, pattern: string, limit: number) {
+async function workspaceFind(search: WorkspaceSearch, root: string, pattern: string, limit: number) {
   const prefix = root === search.root ? "" : `${posix(relative(search.root, root)).replace(/\/$/, "")}/`;
   const target = limit + 1;
   const paths: string[] = [];
@@ -112,9 +112,8 @@ async function workspaceFind(search: WorkspaceSearch, access: FilesystemAccess, 
   while (paths.length < target && !exhausted) {
     const pageSize = Math.max(INTERNAL_PAGE_SIZE, target);
     const page = await search.glob(`${prefix}${pattern}`, { pageIndex, pageSize });
-    const allowed = new Set(await access.filter(page.items.map(({ relativePath }) => resolve(search.root, relativePath))));
     for (const item of page.items) {
-      if (!allowed.has(resolve(search.root, item.relativePath)) || (prefix && !item.relativePath.startsWith(prefix))) continue;
+      if (prefix && !item.relativePath.startsWith(prefix)) continue;
       paths.push(prefix ? item.relativePath.slice(prefix.length) : item.relativePath);
       if (paths.length === target) break;
     }
@@ -128,12 +127,12 @@ async function executeFind(search: WorkspaceSearch, access: FilesystemAccess, pi
   const requestedRoot = resolve(search.root, rawPath ?? ".");
   if (isPathWithin(search.root, requestedRoot)) {
     await pathInfo(requestedRoot);
-    return workspaceFind(search, access, requestedRoot, pattern, limit);
+    return workspaceFind(search, requestedRoot, pattern, limit);
   }
 
   const root = await authorizeRoot(access, requestedRoot, "find", ctx, pi);
   await pathInfo(root.authorization.path);
-  const paths = await nativeFind(root.authorization.path, pattern, approvedRootAccess(access, root), limit + 1, signal);
+  const paths = await nativeFind(root.authorization.path, pattern, limit + 1, signal);
   return findOutput(paths.slice(0, limit), limit, paths.length <= limit);
 }
 
