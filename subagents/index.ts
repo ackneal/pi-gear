@@ -69,10 +69,21 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
       if (toolCallId) recordSubagentLiveStart(toolCallId, researcherProfile, task);
 
       return backgroundResult(background.start({
-        profile: researcherProfile, task, dispatch, ...(signal ? { parentSignal: signal } : {}),
+        profile: researcherProfile,
+        task,
+        dispatch,
+        ...(signal ? { parentSignal: signal } : {}),
         run: (childSignal, update) => {
           const endpoint = workspace?.endpoint(ctx.cwd);
-          return runResearcher(task, { cwd: ctx.cwd, dispatch, ...(endpoint ? { env: { PI_GEAR_FFF_SOCKET: endpoint } } : {}), signal: childSignal, onUpdate: (next) => { if (update(next)) recordUpdate(toolCallId, next); } });
+          return runResearcher(task, {
+            cwd: ctx.cwd,
+            dispatch,
+            ...(endpoint ? { env: { PI_GEAR_FFF_SOCKET: endpoint } } : {}),
+            signal: childSignal,
+            onUpdate: (next) => {
+              if (update(next)) recordUpdate(toolCallId, next);
+            },
+          });
         },
       }));
     },
@@ -94,10 +105,24 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
       if (toolCallId) recordSubagentLiveStart(toolCallId, workerProfile, task);
 
       return backgroundResult(background.start({
-        profile: workerProfile, task, dispatch, ...(targetFiles?.length ? { writerScopes: targetFiles.map((file) => resolve(ctx.cwd, file)) } : {}), ...(signal ? { parentSignal: signal } : {}),
+        profile: workerProfile,
+        task,
+        dispatch,
+        ...(targetFiles?.length
+          ? { writerScopes: targetFiles.map((file) => resolve(ctx.cwd, file)) }
+          : {}),
+        ...(signal ? { parentSignal: signal } : {}),
         run: (childSignal, update) => {
           const endpoint = workspace?.endpoint(ctx.cwd);
-          return runWorker(task, { cwd: ctx.cwd, dispatch, ...(endpoint ? { env: { PI_GEAR_FFF_SOCKET: endpoint } } : {}), signal: childSignal, onUpdate: (next) => { if (update(next)) recordUpdate(toolCallId, next); } });
+          return runWorker(task, {
+            cwd: ctx.cwd,
+            dispatch,
+            ...(endpoint ? { env: { PI_GEAR_FFF_SOCKET: endpoint } } : {}),
+            signal: childSignal,
+            onUpdate: (next) => {
+              if (update(next)) recordUpdate(toolCallId, next);
+            },
+          });
         },
       }));
     },
