@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AccessPolicy } from "../../config/index.ts";
-import { ConfirmationQueue } from "../confirmation-queue.ts";
+import { CONFIRMATION_TIMEOUT_MS, ConfirmationQueue } from "../confirmation-queue.ts";
 import { loadExtensionConfig } from "../../config/index.ts";
 import { resolveRuntimeTempDir, type TempDirSource } from "../sandbox/config.ts";
 import {
@@ -35,7 +35,6 @@ export class FilesystemAccess {
   readonly cwd: string;
   private readonly options: FilesystemAccessOptions;
   private readonly workspace: Promise<CanonicalWorkspace>;
-  private readonly config: Promise<AccessPolicy>;
   private tempPrefixes: Promise<readonly string[]> | undefined;
   private readonly confirmationQueue: ConfirmationQueue;
 
@@ -43,12 +42,14 @@ export class FilesystemAccess {
     this.cwd = cwd;
     this.options = options;
     this.workspace = canonicalizeWorkspace(cwd);
-    this.config = (options.loadConfig ?? loadExtensionConfig)();
     this.confirmationQueue = options.confirmationQueue ?? new ConfirmationQueue();
   }
 
   async authorize(path: string, operation: FilesystemOperation): Promise<FilesystemAuthorization> {
-    const [config, workspace] = await Promise.all([this.config, this.workspace]);
+    const [config, workspace] = await Promise.all([
+      (this.options.loadConfig ?? loadExtensionConfig)(),
+      this.workspace,
+    ]);
     const normalized = normalizeToolPath(path, workspace.cwd);
     const selected = operation === "read" ? await selectReadPath(normalized) : normalized;
     const target = await resolveAccessTarget(selected, workspace);
@@ -93,9 +94,10 @@ export class FilesystemAccess {
     if (await this.withinRuntimeTemp(authorization)) return { ...authorization, decision: "allow" };
     if (!ctx.hasUI) return authorization;
 
-    const allowed = await this.confirmationQueue.run(() => ctx.ui.confirm(
+    const allowed = await this.confirmationQueue.confirm(() => ctx.ui.confirm(
       "Outside workspace access",
       `Allow ${label} access to ${authorization.path}?`,
+      { timeout: CONFIRMATION_TIMEOUT_MS },
     ));
 
     pi.sendMessage({

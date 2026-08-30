@@ -6,7 +6,7 @@ import { loadExtensionConfig } from "../../config/index.ts";
 import { SessionApprovals } from "./approvals.ts";
 import { createEffectiveSandboxConfig, resolveRuntimeTempDir } from "./config.ts";
 import { createSandboxedBashOperations } from "./spawn.ts";
-import { ConfirmationQueue } from "../confirmation-queue.ts";
+import { CONFIRMATION_TIMEOUT_MS, ConfirmationQueue } from "../confirmation-queue.ts";
 
 export interface SandboxManagerLike {
   isSandboxingEnabled(): boolean;
@@ -38,8 +38,6 @@ export interface SandboxStatus {
 }
 
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
-
-const NETWORK_PROMPT_TIMEOUT_MS = 30_000;
 
 export class SandboxController {
   private readonly sendApprovalMessage: (content: string) => void | Promise<void>;
@@ -88,7 +86,11 @@ export class SandboxController {
     let approvals: SessionApprovals;
     approvals = new SessionApprovals({
       hasUI: ctx.hasUI,
-      confirm: (title, message) => this.confirmationQueue.run(() => ctx.ui.confirm(title, message, { timeout: NETWORK_PROMPT_TIMEOUT_MS })),
+      confirm: (title, message) => this.confirmationQueue.confirm(() => ctx.ui.confirm(
+        title,
+        message,
+        { timeout: CONFIRMATION_TIMEOUT_MS },
+      )),
       notify: (message, level) => ctx.ui.notify(message, level),
       sendMessage: this.sendApprovalMessage,
     }, () => this.generation === generation && this.approvals === approvals);

@@ -5,6 +5,7 @@ import {
   type ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
 import type { FilesystemOperation } from "../policy/filesystem.ts";
+import { ConfirmationQueue } from "../confirmation-queue.ts";
 import { FilesystemAccess, type FilesystemAccessOptions } from "./access.ts";
 
 type GuardedTool = "read" | "edit" | "write";
@@ -34,10 +35,12 @@ export function setupFilesystemGuard(
   options: FilesystemAccessOptions = {},
 ): FilesystemAccessService {
   const workspaces = new Map<string, FilesystemAccess>();
+  const confirmationQueue = options.confirmationQueue ?? new ConfirmationQueue();
+  const accessOptions = { ...options, confirmationQueue };
   const forWorkspace = (cwd: string): FilesystemAccess => {
     let access = workspaces.get(cwd);
     if (access === undefined) {
-      access = new FilesystemAccess(cwd, options);
+      access = new FilesystemAccess(cwd, accessOptions);
       workspaces.set(cwd, access);
     }
     return access;
@@ -67,6 +70,12 @@ export function setupFilesystemGuard(
     }
   });
 
-  pi.on("session_shutdown", () => workspaces.clear());
+  const clear = (): void => {
+    confirmationQueue.reset();
+    workspaces.clear();
+  };
+  pi.on("session_before_switch", clear);
+  pi.on("session_shutdown", clear);
+
   return { forWorkspace };
 }

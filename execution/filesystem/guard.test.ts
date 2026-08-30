@@ -48,6 +48,7 @@ test("headless outside-workspace file access is denied when policy asks", async 
 test("concurrent filesystem asks are shown sequentially and all tool calls resolve", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-gear-file-prompts-"));
   const workspace = join(root, "workspace");
+  const trustedTemp = join(root, "trusted-temp");
   const outside = [join(root, "outside-a.txt"), join(root, "outside-b.txt")];
   let handler: ((event: ToolCall, ctx: ExtensionContext) => Promise<unknown>) | undefined;
   const confirmationResolvers: Array<(allowed: boolean) => void> = [];
@@ -68,13 +69,19 @@ test("concurrent filesystem asks are shown sequentially and all tool calls resol
     },
   } as unknown as ExtensionContext;
   const waitForPrompts = async (count: number): Promise<void> => {
-    while (confirmationResolvers.length < count) await new Promise<void>((resolve) => setImmediate(resolve));
+    const deadline = Date.now() + 1_000;
+    while (confirmationResolvers.length < count) {
+      if (Date.now() >= deadline) {
+        assert.fail(`Timed out waiting for ${count} filesystem confirmation prompts`);
+      }
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
   };
 
   try {
-    await mkdir(workspace);
+    await Promise.all([mkdir(workspace), mkdir(trustedTemp)]);
     await Promise.all(outside.map((path) => writeFile(path, "test")));
-    setupFilesystemGuard(pi);
+    setupFilesystemGuard(pi, { tempSource: async () => trustedTemp });
     assert.ok(handler);
 
     const requests = outside.map((path, index) => handler!({ type: "tool_call", toolName: "read", toolCallId: `read-${index}`, input: { path } }, ctx));
