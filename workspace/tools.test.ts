@@ -6,17 +6,50 @@ import type { FffClient } from "../lifecycle/fff-client.ts";
 import { WorkspaceSearch } from "./service.ts";
 import { registerWorkspaceTools } from "./tools.ts";
 
-const item = (relativePath: string) => ({ relativePath, fileName: relativePath, size: 1, modified: 1, accessFrecencyScore: 0, modificationFrecencyScore: 0, totalFrecencyScore: 0, gitStatus: "clean" });
-const match = (relativePath: string, lineContent: string) => ({ ...item(relativePath), isBinary: false, lineNumber: 1, col: 0, byteOffset: 0, lineContent, matchRanges: [] });
+const item = (relativePath: string) => ({
+  relativePath,
+  fileName: relativePath,
+  size: 1,
+  modified: 1,
+  accessFrecencyScore: 0,
+  modificationFrecencyScore: 0,
+  totalFrecencyScore: 0,
+  gitStatus: "clean",
+});
+
+const match = (relativePath: string, lineContent: string) => ({
+  ...item(relativePath),
+  isBinary: false,
+  lineNumber: 1,
+  col: 0,
+  byteOffset: 0,
+  lineContent,
+  matchRanges: [],
+});
 
 async function setup(accessOverride?: Partial<FilesystemAccess>) {
   let grepPage = 0;
+  const grepRequests: unknown[] = [];
   const client = {
-    request: async (method: string) => {
-      if (method === "glob") return { items: [item(".env"), item("src/allowed.ts")], scores: [], totalMatched: 2, totalFiles: 2 };
-      if (method === "grep") return ++grepPage === 1
-        ? { items: [match(".env", "secret")], nextCursor: { __brand: "GrepCursor", _offset: 1 } }
-        : { items: [match("src/allowed.ts", "visible")], nextCursor: null };
+    request: async (method: string, params: unknown) => {
+      if (method === "glob") {
+        return {
+          items: [item(".env"), item("src/allowed.ts")],
+          scores: [],
+          totalMatched: 2,
+          totalFiles: 2,
+        };
+      }
+      if (method === "grep") {
+        grepRequests.push(params);
+        grepPage++;
+        return grepPage === 1
+          ? {
+              items: [match(".env", "secret")],
+              nextCursor: { __brand: "GrepCursor", _offset: 1 },
+            }
+          : { items: [match("src/allowed.ts", "visible")], nextCursor: null };
+      }
       throw new Error(method);
     },
   } as unknown as FffClient;
@@ -34,11 +67,21 @@ async function setup(accessOverride?: Partial<FilesystemAccess>) {
   } as unknown as ExtensionAPI;
 
   registerWorkspaceTools(pi, search, access);
-  return { tools, activeTools, grepPages: () => grepPage };
+  return { tools, activeTools, grepRequests, grepPages: () => grepPage };
 }
 
-const run = (tool: ToolDefinition, input: Record<string, unknown>) => tool.execute("id", input, undefined, undefined, { cwd: process.cwd(), hasUI: false } as never);
-const text = async (result: ReturnType<typeof run>) => (await result).content.map((part) => part.type === "text" ? part.text : "").join("\n");
+const run = (tool: ToolDefinition, input: Record<string, unknown>) => tool.execute(
+  "id",
+  input,
+  undefined,
+  undefined,
+  { cwd: process.cwd(), hasUI: false } as never,
+);
+
+const text = async (result: ReturnType<typeof run>) =>
+  (await result).content
+    .map((part) => part.type === "text" ? part.text : "")
+    .join("\n");
 
 test("workspace find filters denied paths before applying the visible limit", async () => {
   const { tools } = await setup();
@@ -55,6 +98,29 @@ test("workspace grep filters denied pages and continues to allowed content", asy
   assert.equal(grepPages(), 2);
   assert.match(output, /visible/);
   assert.doesNotMatch(output, /secret|\.env/);
+});
+
+test("workspace grep maps case-insensitive literal search without exposing FFF options", async () => {
+  const { tools, grepRequests } = await setup();
+
+  await run(tools.get("grep")!, {
+    pattern: "Exact.Value",
+    literal: true,
+    ignoreCase: true,
+    limit: 1,
+  });
+
+  assert.deepEqual(grepRequests[0], {
+    query: "(?i:Exact\\.Value)",
+    options: {
+      mode: "regex",
+      smartCase: false,
+      cursor: null,
+      beforeContext: 0,
+      afterContext: 0,
+      pageSize: 100,
+    },
+  });
 });
 
 test("external search roots are rejected by policy before either backend runs", async () => {

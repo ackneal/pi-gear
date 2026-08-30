@@ -12,15 +12,66 @@ const DEFAULT_FIND_LIMIT = 1000;
 const DEFAULT_GREP_LIMIT = 100;
 const INTERNAL_PAGE_SIZE = 100;
 const posix = (path: string): string => path.split(sep).join("/");
-const findParameters = Type.Object({ pattern: Type.String(), path: Type.Optional(Type.String()), limit: Type.Optional(Type.Number({ minimum: 1 })) }, { additionalProperties: false });
-const grepParameters = Type.Object({ pattern: Type.String(), path: Type.Optional(Type.String()), glob: Type.Optional(Type.String()), ignoreCase: Type.Optional(Type.Boolean()), literal: Type.Optional(Type.Boolean()), context: Type.Optional(Type.Number({ minimum: 0 })), limit: Type.Optional(Type.Number({ minimum: 1 })) }, { additionalProperties: false });
+const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+async function pathInfo(path: string) {
+  try {
+    return await stat(path);
+  } catch {
+    throw new Error(`Path not found: ${path}`);
+  }
+}
+
+interface GrepInput {
+  pattern: string;
+  path?: string;
+  glob?: string;
+  ignoreCase?: boolean;
+  literal?: boolean;
+  context?: number;
+  limit?: number;
+}
+
+const findParameters = Type.Object({
+  pattern: Type.String(),
+  path: Type.Optional(Type.String()),
+  limit: Type.Optional(Type.Number({ minimum: 1 })),
+}, { additionalProperties: false });
+
+const grepParameters = Type.Object({
+  pattern: Type.String(),
+  path: Type.Optional(Type.String()),
+  glob: Type.Optional(Type.String()),
+  ignoreCase: Type.Optional(Type.Boolean()),
+  literal: Type.Optional(Type.Boolean()),
+  context: Type.Optional(Type.Number({ minimum: 0 })),
+  limit: Type.Optional(Type.Number({ minimum: 1 })),
+}, { additionalProperties: false });
+
+function appendNotices(content: string, notices: readonly (string | undefined)[]): string {
+  const visible = notices.filter((notice): notice is string => notice !== undefined);
+  return visible.length === 0 ? content : `${content}\n\n[${visible.join(". ")}]`;
+}
 
 function findOutput(paths: readonly string[], limit: number, exhausted: boolean) {
-  if (!paths.length) return { content: [{ type: "text" as const, text: "No files found matching pattern" }], details: undefined };
+  if (paths.length === 0) {
+    return { content: [{ type: "text" as const, text: "No files found matching pattern" }], details: undefined };
+  }
+
   const truncation = truncateHead(paths.join("\n"), { maxLines: Number.MAX_SAFE_INTEGER });
-  const reached = paths.length >= limit && !exhausted;
-  const notices = [reached ? `${limit} results limit reached` : undefined, truncation.truncated ? `${formatSize(truncation.maxBytes)} limit reached` : undefined].filter(Boolean);
-  return { content: [{ type: "text" as const, text: `${truncation.content}${notices.length ? `\n\n[${notices.join(". ")}]` : ""}` }], details: reached || truncation.truncated ? { ...(reached ? { resultLimitReached: limit } : {}), ...(truncation.truncated ? { truncation } : {}) } : undefined };
+  const resultLimitReached = paths.length >= limit && !exhausted;
+  const text = appendNotices(truncation.content, [
+    resultLimitReached ? `${limit} results limit reached` : undefined,
+    truncation.truncated ? `${formatSize(truncation.maxBytes)} limit reached` : undefined,
+  ]);
+  const details = resultLimitReached || truncation.truncated
+    ? {
+        ...(resultLimitReached ? { resultLimitReached: limit } : {}),
+        ...(truncation.truncated ? { truncation } : {}),
+      }
+    : undefined;
+
+  return { content: [{ type: "text" as const, text }], details };
 }
 
 async function authorizeRoot(access: FilesystemAccess, root: string, label: string, ctx: ExtensionContext, pi: ExtensionAPI): Promise<string> {
@@ -54,83 +105,185 @@ async function workspaceFind(search: WorkspaceSearch, access: FilesystemAccess, 
 async function executeFind(search: WorkspaceSearch, access: FilesystemAccess, pi: ExtensionAPI, ctx: ExtensionContext, pattern: string, rawPath: string | undefined, limit: number) {
   const requestedRoot = resolve(search.root, rawPath ?? ".");
   if (isPathWithin(search.root, requestedRoot)) {
-    await stat(requestedRoot).catch(() => { throw new Error(`Path not found: ${requestedRoot}`); });
+    await pathInfo(requestedRoot);
     return workspaceFind(search, access, requestedRoot, pattern, limit);
   }
 
   const root = await authorizeRoot(access, requestedRoot, "find", ctx, pi);
-  await stat(root).catch(() => { throw new Error(`Path not found: ${root}`); });
+  await pathInfo(root);
   const paths = await nativeFind(root, pattern, access, limit + 1);
   return findOutput(paths.slice(0, limit), limit, paths.length <= limit);
 }
 
-interface DisplayMatch { relativePath: string; lineNumber: number; lineContent: string; contextBefore?: readonly string[]; contextAfter?: readonly string[]; gitStatus?: string; isDefinition?: boolean; }
-function formatGrep(matches: readonly DisplayMatch[], limit: number, exhausted: boolean) {
-  if (!matches.length) return { content: [{ type: "text" as const, text: "No matches found" }], details: undefined };
+interface DisplayMatch {
+  relativePath: string;
+  lineNumber: number;
+  lineContent: string;
+  contextBefore?: readonly string[];
+  contextAfter?: readonly string[];
+  gitStatus?: string;
+  isDefinition?: boolean;
+}
+
+function groupMatchesByPath(matches: readonly DisplayMatch[]): Map<string, DisplayMatch[]> {
   const groups = new Map<string, DisplayMatch[]>();
-  for (const match of matches) groups.set(match.relativePath, [...(groups.get(match.relativePath) ?? []), match]);
+  for (const match of matches) {
+    const group = groups.get(match.relativePath);
+    if (group) group.push(match);
+    else groups.set(match.relativePath, [match]);
+  }
+  return groups;
+}
+
+function formatGrep(matches: readonly DisplayMatch[], limit: number, exhausted: boolean) {
+  if (matches.length === 0) {
+    return { content: [{ type: "text" as const, text: "No matches found" }], details: undefined };
+  }
+
   const blocks: string[] = [];
   let linesTruncated = false;
-  for (const [path, items] of groups) {
+  for (const [path, pathMatches] of groupMatchesByPath(matches)) {
     blocks.push(path);
-    for (const match of items) {
+    for (const match of pathMatches) {
       const before = match.contextBefore ?? [];
-      before.forEach((line, i) => blocks.push(`  ${match.lineNumber - before.length + i}- ${line}`));
+      for (const [index, content] of before.entries()) {
+        blocks.push(`  ${match.lineNumber - before.length + index}- ${content}`);
+      }
+
       const line = truncateLine(match.lineContent);
       linesTruncated ||= line.wasTruncated;
       blocks.push(`  ${match.lineNumber}:${match.isDefinition ? " [definition]" : ""} ${line.text}`);
-      (match.contextAfter ?? []).forEach((value, i) => blocks.push(`  ${match.lineNumber + i + 1}- ${value}`));
+
+      for (const [index, content] of (match.contextAfter ?? []).entries()) {
+        blocks.push(`  ${match.lineNumber + index + 1}- ${content}`);
+      }
     }
   }
   const truncation = truncateHead(blocks.join("\n"), { maxLines: Number.MAX_SAFE_INTEGER });
   const reached = matches.length >= limit && !exhausted;
-  const notices = [reached ? `${limit} matches limit reached` : undefined, truncation.truncated ? `${formatSize(truncation.maxBytes)} limit reached` : undefined, linesTruncated ? "Some lines truncated; use read to inspect them" : undefined].filter(Boolean);
-  return { content: [{ type: "text" as const, text: `${truncation.content}${notices.length ? `\n\n[${notices.join(". ")}]` : ""}` }], details: reached ? { matchLimitReached: limit } : undefined };
+  const text = appendNotices(truncation.content, [
+    reached ? `${limit} matches limit reached` : undefined,
+    truncation.truncated ? `${formatSize(truncation.maxBytes)} limit reached` : undefined,
+    linesTruncated ? "Some lines truncated; use read to inspect them" : undefined,
+  ]);
+  return {
+    content: [{ type: "text" as const, text }],
+    details: reached ? { matchLimitReached: limit } : undefined,
+  };
 }
 
-async function workspaceGrep(search: WorkspaceSearch, access: FilesystemAccess, root: string, rootIsFile: boolean, input: { pattern: string; glob?: string; ignoreCase?: boolean; literal?: boolean; context?: number; limit?: number }) {
+function fffGrepPattern(input: GrepInput): { mode: "plain" | "regex"; pattern: string } {
+  if (!input.ignoreCase) {
+    return { mode: input.literal ? "plain" : "regex", pattern: input.pattern };
+  }
+
+  const pattern = input.literal ? escapeRegex(input.pattern) : input.pattern;
+  return { mode: "regex", pattern: `(?i:${pattern})` };
+}
+
+async function workspaceGrep(
+  search: WorkspaceSearch,
+  access: FilesystemAccess,
+  root: string,
+  rootIsFile: boolean,
+  input: GrepInput,
+) {
   const limit = input.limit ?? DEFAULT_GREP_LIMIT;
   const context = input.context ?? 0;
   const relativeRoot = posix(relative(search.root, root));
   const prefix = root === search.root || rootIsFile ? "" : `${relativeRoot.replace(/\/$/, "")}/`;
-  const constraints = [rootIsFile ? relativeRoot : prefix ? `${prefix}**/*` : undefined, input.glob].filter(Boolean).join(" ");
+  const constraints = [
+    rootIsFile ? relativeRoot : prefix ? `${prefix}**/*` : undefined,
+    input.glob,
+  ].filter(Boolean).join(" ");
+  const grep = fffGrepPattern(input);
   const target = limit + 1;
   const matches: GrepMatch[] = [];
   let cursor: GrepCursor | null = null;
   let exhausted = false;
+
   do {
-    const options: GrepOptions = { mode: input.literal ? "plain" : "regex", smartCase: input.ignoreCase ?? false, cursor, beforeContext: context, afterContext: context, pageSize: Math.max(INTERNAL_PAGE_SIZE, target - matches.length) };
-    const result = await search.grep(`${constraints ? `${constraints} ` : ""}${input.pattern}`, options);
+    const options: GrepOptions = {
+      mode: grep.mode,
+      smartCase: false,
+      cursor,
+      beforeContext: context,
+      afterContext: context,
+      pageSize: Math.max(INTERNAL_PAGE_SIZE, target - matches.length),
+    };
+    const query = `${constraints ? `${constraints} ` : ""}${grep.pattern}`;
+    const result = await search.grep(query, options);
     cursor = result.nextCursor;
-    const allowed = new Set(await access.filter(result.items.map(({ relativePath }) => resolve(search.root, relativePath))));
-    matches.push(...result.items.filter(({ relativePath }) => allowed.has(resolve(search.root, relativePath)) && (rootIsFile ? relativePath === relativeRoot : !prefix || relativePath.startsWith(prefix))));
+
+    const candidatePaths = result.items.map(({ relativePath }) =>
+      resolve(search.root, relativePath));
+    const allowedPaths = new Set(await access.filter(candidatePaths));
+    for (const match of result.items) {
+      const inRequestedRoot = rootIsFile
+        ? match.relativePath === relativeRoot
+        : !prefix || match.relativePath.startsWith(prefix);
+      const allowed = allowedPaths.has(resolve(search.root, match.relativePath));
+      if (!inRequestedRoot || !allowed) continue;
+
+      matches.push(match);
+      if (matches.length === target) break;
+    }
     exhausted = cursor === null;
   } while (!exhausted && matches.length < target);
-  return formatGrep(matches.slice(0, limit).map((match) => ({ ...match, relativePath: rootIsFile ? relativeRoot.split("/").at(-1)! : prefix ? match.relativePath.slice(prefix.length) : match.relativePath })), limit, exhausted && matches.length <= limit);
+
+  const visibleMatches = matches.slice(0, limit).map((match) => ({
+    ...match,
+    relativePath: rootIsFile
+      ? relativeRoot.split("/").at(-1)!
+      : prefix
+        ? match.relativePath.slice(prefix.length)
+        : match.relativePath,
+  }));
+  return formatGrep(visibleMatches, limit, exhausted && matches.length <= limit);
 }
 
-async function executeGrep(search: WorkspaceSearch, access: FilesystemAccess, pi: ExtensionAPI, ctx: ExtensionContext, input: { pattern: string; path?: string; glob?: string; ignoreCase?: boolean; literal?: boolean; context?: number; limit?: number }) {
+async function executeGrep(search: WorkspaceSearch, access: FilesystemAccess, pi: ExtensionAPI, ctx: ExtensionContext, input: GrepInput) {
   const requestedRoot = resolve(search.root, input.path ?? ".");
   if (isPathWithin(search.root, requestedRoot)) {
-    const info = await stat(requestedRoot).catch(() => { throw new Error(`Path not found: ${requestedRoot}`); });
+    const info = await pathInfo(requestedRoot);
     return workspaceGrep(search, access, requestedRoot, info.isFile(), input);
   }
 
   const root = await authorizeRoot(access, requestedRoot, "grep", ctx, pi);
-  await stat(root).catch(() => { throw new Error(`Path not found: ${root}`); });
+  await pathInfo(root);
   const limit = input.limit ?? DEFAULT_GREP_LIMIT;
-  const matches = await nativeGrep(root, access, input.pattern, { regex: !input.literal, ignoreCase: input.ignoreCase ?? false, ...(input.glob ? { glob: input.glob } : {}), context: input.context ?? 0, limit: limit + 1 });
+  const matches = await nativeGrep(root, access, input.pattern, {
+    regex: !input.literal,
+    ignoreCase: input.ignoreCase ?? false,
+    ...(input.glob ? { glob: input.glob } : {}),
+    context: input.context ?? 0,
+    limit: limit + 1,
+  });
   return formatGrep(matches.slice(0, limit), limit, matches.length <= limit);
 }
 
 export function registerWorkspaceTools(pi: ExtensionAPI, search: WorkspaceSearch, access: FilesystemAccess): void {
   const find = createFindToolDefinition(search.root);
   const findUi = workspaceToolRenderers("find");
-  pi.registerTool({ ...find, ...findUi, parameters: findParameters, execute: async (_id, { pattern, path, limit }, _signal, _onUpdate, ctx) => executeFind(search, access, pi, ctx, pattern, path, limit ?? DEFAULT_FIND_LIMIT) });
+  pi.registerTool({
+    ...find,
+    ...findUi,
+    parameters: findParameters,
+    execute: async (_id, { pattern, path, limit }, _signal, _onUpdate, ctx) =>
+      executeFind(search, access, pi, ctx, pattern, path, limit ?? DEFAULT_FIND_LIMIT),
+  });
 
   const grep = createGrepToolDefinition(search.root);
   const grepUi = workspaceToolRenderers("grep");
-  pi.registerTool({ ...grep, ...grepUi, renderCall: grepUi.renderCall as any, renderResult: grepUi.renderResult as any, parameters: grepParameters, execute: async (_id, input, _signal, _onUpdate, ctx) => executeGrep(search, access, pi, ctx, input) });
+  pi.registerTool({
+    ...grep,
+    ...grepUi,
+    renderCall: grepUi.renderCall as any,
+    renderResult: grepUi.renderResult as any,
+    parameters: grepParameters,
+    execute: async (_id, input, _signal, _onUpdate, ctx) =>
+      executeGrep(search, access, pi, ctx, input),
+  });
 
   pi.setActiveTools([...new Set([...pi.getActiveTools(), "find", "grep"])]);
 }

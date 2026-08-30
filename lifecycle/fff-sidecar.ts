@@ -36,15 +36,21 @@ export interface FffSidecarServerOptions {
 export async function startFffSidecar(options: FffSidecarServerOptions): Promise<{ server: Server; close(): Promise<void> }> {
   const created = (options.createFinder ?? ((value) => FileFinder.create(value)))(fffFinderOptions(options.basePath));
   const finder = unwrap(created);
-  const subscriptions = new Map<number, WatchUnsubscribe>();
+  const subscriptionsBySocket = new Map<Socket, Map<number, WatchUnsubscribe>>();
   const sockets = new Set<Socket>();
   let nextSubscriptionId = 1;
   let closing = false;
 
   await rm(options.socketPath, { force: true });
   const server = createServer((socket) => {
+    const subscriptions = new Map<number, WatchUnsubscribe>();
+    subscriptionsBySocket.set(socket, subscriptions);
     sockets.add(socket);
-    socket.once("close", () => sockets.delete(socket));
+    socket.once("close", () => {
+      for (const unsubscribe of subscriptions.values()) unsubscribe();
+      subscriptionsBySocket.delete(socket);
+      sockets.delete(socket);
+    });
     let buffer = "";
     socket.setEncoding("utf8");
     socket.on("data", (chunk) => {
@@ -55,7 +61,15 @@ export async function startFffSidecar(options: FffSidecarServerOptions): Promise
         const line = buffer.slice(0, newline);
         buffer = buffer.slice(newline + 1);
         if (!line.trim()) continue;
-        void handle(socket, JSON.parse(line) as FffRequest);
+
+        let request: FffRequest;
+        try {
+          request = JSON.parse(line) as FffRequest;
+        } catch {
+          socket.destroy();
+          return;
+        }
+        void handle(socket, request);
       }
     });
     socket.on("error", () => undefined);
@@ -64,8 +78,11 @@ export async function startFffSidecar(options: FffSidecarServerOptions): Promise
   const close = async (): Promise<void> => {
     if (closing) return;
     closing = true;
-    for (const unsubscribe of subscriptions.values()) unsubscribe();
-    subscriptions.clear();
+    for (const subscriptions of subscriptionsBySocket.values()) {
+      for (const unsubscribe of subscriptions.values()) unsubscribe();
+      subscriptions.clear();
+    }
+    subscriptionsBySocket.clear();
     finder.destroy();
     for (const socket of sockets) socket.end();
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -90,30 +107,63 @@ export async function startFffSidecar(options: FffSidecarServerOptions): Promise
       }
       let result: unknown;
       switch (request.method) {
-        case "status": result = { progress: unwrap(finder.getScanProgress()), health: unwrap(finder.healthCheck()) }; break;
-        case "fileSearch": result = unwrap(finder.fileSearch(params.query, params.options)); break;
-        case "glob": result = unwrap(finder.glob(params.pattern, params.options)); break;
-        case "mixedSearch": result = unwrap(finder.mixedSearch(params.query, params.options)); break;
-        case "grep": result = unwrap(finder.grep(params.query, params.options)); break;
-        case "multiGrep": result = unwrap(finder.multiGrep(params as MultiGrepOptions)); break;
-        case "files": result = await inventory(params.pageSize); break;
+        case "status":
+          result = {
+            progress: unwrap(finder.getScanProgress()),
+            health: unwrap(finder.healthCheck()),
+          };
+          break;
+        case "fileSearch":
+          result = unwrap(finder.fileSearch(params.query, params.options));
+          break;
+        case "glob":
+          result = unwrap(finder.glob(params.pattern, params.options));
+          break;
+        case "mixedSearch":
+          result = unwrap(finder.mixedSearch(params.query, params.options));
+          break;
+        case "grep":
+          result = unwrap(finder.grep(params.query, params.options));
+          break;
+        case "multiGrep":
+          result = unwrap(finder.multiGrep(params as MultiGrepOptions));
+          break;
+        case "files":
+          result = await inventory(params.pageSize);
+          break;
         case "dirtyFiles":
           unwrap(finder.refreshGitStatus());
-          result = (await inventory(params.pageSize)).filter((file) => file.gitStatus !== "clean" && file.gitStatus !== "ignored" && file.gitStatus !== "");
+          result = (await inventory(params.pageSize)).filter((file) =>
+            file.gitStatus !== "clean" &&
+            file.gitStatus !== "ignored" &&
+            file.gitStatus !== ""
+          );
           break;
-        case "trackQuery": result = unwrap(finder.trackQuery(params.query, params.selectedFilePath)); break;
+        case "trackQuery":
+          result = unwrap(finder.trackQuery(params.query, params.selectedFilePath));
+          break;
         case "subscribe": {
           const subscriptionId = nextSubscriptionId++;
           const callback = (data: unknown): void => { socket.write(`${JSON.stringify({ event: "watch", subscriptionId, data })}\n`); };
           const watched = params.pattern === undefined
             ? finder.watch(callback, params.options)
             : finder.watch(params.pattern, callback, params.options);
-          subscriptions.set(subscriptionId, unwrap(watched));
+          subscriptionsBySocket.get(socket)?.set(subscriptionId, unwrap(watched));
           result = { subscriptionId };
           break;
         }
-        case "unsubscribe": subscriptions.get(params.subscriptionId)?.(); subscriptions.delete(params.subscriptionId); result = true; break;
-        case "shutdown": result = true; break;
+        case "unsubscribe": {
+          const subscriptions = subscriptionsBySocket.get(socket);
+          subscriptions?.get(params.subscriptionId)?.();
+          subscriptions?.delete(params.subscriptionId);
+          result = true;
+          break;
+        }
+        case "shutdown":
+          result = true;
+          break;
+        default:
+          throw new Error(`Unknown FFF method: ${String(request.method)}`);
       }
       socket.write(`${JSON.stringify({ id: request.id, result })}\n`, () => {
         if (request.method === "shutdown") void close();

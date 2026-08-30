@@ -17,6 +17,8 @@ export class FffClient extends EventEmitter<FffClientEvents> {
 
   constructor(socket: Socket) {
     super();
+    // EventEmitter throws reserved "error" events without a listener.
+    this.on("error", () => undefined);
     this.socket = socket;
     socket.setEncoding("utf8");
     socket.on("data", (chunk) => this.#receive(String(chunk)));
@@ -67,8 +69,15 @@ export class FffClient extends EventEmitter<FffClientEvents> {
       this.#buffer = this.#buffer.slice(newline + 1);
       if (!line.trim()) continue;
       let message: FffMessage;
-      try { message = JSON.parse(line) as FffMessage; }
-      catch { this.emit("error", new Error("Invalid FFF sidecar JSON")); continue; }
+      try {
+        message = JSON.parse(line) as FffMessage;
+      } catch {
+        const error = new Error("Invalid FFF sidecar JSON");
+        this.emit("error", error);
+        this.#fail(error);
+        this.socket.destroy();
+        return;
+      }
       if ("event" in message) {
         const event = message as FffEvent;
         this.emit("watch", event.subscriptionId, event.data);

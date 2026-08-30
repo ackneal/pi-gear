@@ -19,7 +19,7 @@ export class FffSidecar {
   readonly socketPath: string;
   readonly client: FffClient;
   readonly child: ChildProcess;
-  #tempDir: string;
+  readonly #tempDir: string;
   #closed = false;
 
   private constructor(basePath: string, tempDir: string, socketPath: string, child: ChildProcess, client: FffClient) {

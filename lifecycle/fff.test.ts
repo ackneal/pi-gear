@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer } from "node:net";
+import { createServer, Socket } from "node:net";
 import test from "node:test";
 import type { FileFinderApi, InitOptions } from "@ff-labs/fff-node";
 import { FffClient } from "./fff-client.ts";
@@ -41,6 +41,15 @@ test("finder options enable ephemeral session defaults without database paths", 
   assert.equal("historyDbPath" in options, false);
 });
 
+test("client safely handles unobserved transport and malformed JSON errors", () => {
+  const socket = new Socket();
+  const client = new FffClient(socket);
+
+  assert.doesNotThrow(() => socket.emit("data", "not JSON\n"));
+  assert.doesNotThrow(() => socket.emit("error", new Error("socket failed")));
+  client.close();
+});
+
 test("client correlates concurrent out-of-order responses and delivers events", async (t) => {
   const temporary = await temporarySocket("pi-gear-client-");
   const server = createServer((socket) => {
@@ -74,6 +83,51 @@ test("client correlates concurrent out-of-order responses and delivers events", 
   } finally {
     client.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(temporary.dir, { recursive: true, force: true });
+  }
+});
+
+test("sidecar owns subscriptions per socket and cleans them up on disconnect", async (t) => {
+  const temporary = await temporarySocket("pi-gear-subscriptions-");
+  let unsubscribeCount = 0;
+  let resolveUnsubscribed!: () => void;
+  const unsubscribed = new Promise<void>((resolve) => { resolveUnsubscribed = resolve; });
+  const finder = {
+    watch: () => ({
+      ok: true,
+      value: () => {
+        unsubscribeCount++;
+        resolveUnsubscribed();
+      },
+    }),
+    destroy: () => undefined,
+  } as unknown as FileFinderApi;
+  let daemon;
+  try {
+    daemon = await startFffSidecar({
+      socketPath: temporary.path,
+      basePath: "/workspace",
+      createFinder: () => ({ ok: true, value: finder }),
+    });
+  } catch (error) {
+    await rm(temporary.dir, { recursive: true, force: true });
+    if ((error as NodeJS.ErrnoException).code === "EPERM") { t.skip("Unix sockets unavailable in test harness"); return; }
+    throw error;
+  }
+  const owner = await FffClient.connect(temporary.path);
+  const other = await FffClient.connect(temporary.path);
+  try {
+    const subscribed = await owner.request("subscribe") as { subscriptionId: number };
+    await other.request("unsubscribe", { subscriptionId: subscribed.subscriptionId });
+    assert.equal(unsubscribeCount, 0);
+
+    owner.close();
+    await unsubscribed;
+    assert.equal(unsubscribeCount, 1);
+  } finally {
+    owner.close();
+    other.close();
+    await daemon.close();
     await rm(temporary.dir, { recursive: true, force: true });
   }
 });
