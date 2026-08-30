@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { FileFinder } from "@ff-labs/fff-node";
@@ -148,13 +148,20 @@ test("approved external find returns discovered children without per-file read c
   const directory = await mkdtemp(join(tmpdir(), "pi-gear-approved-search-"));
   const workspace = join(directory, "workspace");
   const external = join(directory, "external");
+  const bin = join(directory, "bin");
+  const previousPath = process.env.PATH;
+  const previousRoot = process.env.SEARCH_ROOT;
   try {
-    await Promise.all([mkdir(workspace), mkdir(join(external, "denied"), { recursive: true })]);
+    await Promise.all([mkdir(workspace), mkdir(bin), mkdir(join(external, "denied"), { recursive: true })]);
     await Promise.all([
       writeFile(join(external, "visible.ts"), "foo\n"),
       writeFile(join(external, "escape.ts"), "foo\n"),
       writeFile(join(external, "denied", "secret.ts"), "foo\n"),
+      writeFile(join(bin, "fd"), `#!/bin/sh\nprintf '%s\\0%s\\0%s\\0' "$SEARCH_ROOT/visible.ts" "$SEARCH_ROOT/denied/secret.ts" "$SEARCH_ROOT/escape.ts"\n`),
     ]);
+    await chmod(join(bin, "fd"), 0o755);
+    process.env.PATH = `${bin}:${previousPath ?? ""}`;
+    process.env.SEARCH_ROOT = external;
 
     const authorization = (path: string, decision: "allow" | "ask") => ({
       path,
@@ -194,6 +201,9 @@ test("approved external find returns discovered children without per-file read c
     assert.match(output, /escape\.ts/);
     assert.deepEqual(authorizedPaths, [external]);
   } finally {
+    process.env.PATH = previousPath;
+    if (previousRoot === undefined) delete process.env.SEARCH_ROOT;
+    else process.env.SEARCH_ROOT = previousRoot;
     await rm(directory, { recursive: true, force: true });
   }
 });

@@ -81,37 +81,42 @@ test("native find discovers paths while grep filters content before the visible 
   });
 });
 
-test("native find preserves recursive basename and full-path glob semantics", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-gear-native-find-globs-"));
-  const files = [
-    "top.spec.ts",
-    "src/direct.spec.ts",
-    "src/deep/nested.spec.ts",
-    "other/src/deep/other.spec.ts",
-    "one/parent/child/file.txt",
-    ".hidden.spec.ts",
-  ];
-  try {
-    for (const file of files) {
-      await mkdir(join(root, file, ".."), { recursive: true });
-      await writeFile(join(root, file), "test");
-    }
+test("native find preserves recursive basename and full-path glob arguments", async () => {
+  const fd = `#!/bin/sh
+printf '%s\n' "$@" > "$SEARCH_ROOT/argv"
+pattern=
+for arg in "$@"; do
+  case "$arg" in
+    '*.spec.ts'|'**/src/**/*.spec.ts'|'**/parent/child/*') pattern="$arg" ;;
+  esac
+done
+case "$pattern" in
+  '**/src/**/*.spec.ts') printf '%s\\0%s\\0%s\\0' "$SEARCH_ROOT/src/direct.spec.ts" "$SEARCH_ROOT/src/deep/nested.spec.ts" "$SEARCH_ROOT/other/src/deep/other.spec.ts" ;;
+  '**/parent/child/*') printf '%s\\0' "$SEARCH_ROOT/one/parent/child/file.txt" ;;
+  *) printf '%s\\0%s\\0' "$SEARCH_ROOT/.hidden.spec.ts" "$SEARCH_ROOT/src/deep/nested.spec.ts" ;;
+esac
+`;
+
+  await withFakeSearchCommands(async (root) => {
     const cases = [
-      { pattern: "*.spec.ts", expected: [".hidden.spec.ts", "other/src/deep/other.spec.ts", "src/deep/nested.spec.ts", "src/direct.spec.ts", "top.spec.ts"] },
-      { pattern: "src/**/*.spec.ts", expected: ["other/src/deep/other.spec.ts", "src/deep/nested.spec.ts", "src/direct.spec.ts"] },
-      { pattern: "**/parent/child/*", expected: ["one/parent/child/file.txt"] },
+      { pattern: "*.spec.ts", expected: [".hidden.spec.ts", "src/deep/nested.spec.ts"], fullPath: false },
+      { pattern: "src/**/*.spec.ts", expected: ["src/direct.spec.ts", "src/deep/nested.spec.ts", "other/src/deep/other.spec.ts"], fullPath: true },
+      { pattern: "**/parent/child/*", expected: ["one/parent/child/file.txt"], fullPath: true },
     ];
-    for (const { pattern, expected } of cases) {
+    for (const { pattern, expected, fullPath } of cases) {
       const found = await nativeFind(root, pattern, 100);
-      assert.deepEqual(found.sort(), expected);
+      const argv = (await readFile(join(root, "argv"), "utf8")).split("\n");
+
+      assert.deepEqual(found, expected);
+      assert.equal(argv.includes("--hidden"), true);
+      assert.equal(argv.includes("--full-path"), fullPath);
+      assert.equal(argv.at(-2), root);
     }
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
+  }, { fd });
 });
 
 test("native fd and rg are terminated when their signal is aborted", async () => {
-  const hangingCommand = (name: string) => `#!/bin/sh\necho ready > "$SEARCH_STATE/${name}-ready"\ntrap 'echo terminated > "$SEARCH_STATE/${name}-terminated"; exit 0' TERM\nwhile :; do sleep 1; done\n`;
+  const hangingCommand = (name: string) => `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "${name} 10.0.0"; exit 0; fi\necho ready > "$SEARCH_STATE/${name}-ready"\ntrap 'echo terminated > "$SEARCH_STATE/${name}-terminated"; exit 0' TERM\nwhile :; do sleep 1; done\n`;
 
   await withFakeSearchCommands(async (root, directory) => {
     process.env.SEARCH_STATE = directory;

@@ -5,6 +5,20 @@ import { createInterface } from "node:readline";
 import type { FilesystemAccess } from "../execution/filesystem/access.ts";
 
 type SearchAccess = Pick<FilesystemAccess, "permits">;
+type ManagedTool = "fd" | "rg";
+
+type ToolsManager = {
+  ensureTool(tool: ManagedTool): Promise<string | undefined>;
+};
+
+let toolsManager: Promise<ToolsManager> | undefined;
+
+async function ensureSearchTool(tool: ManagedTool): Promise<string> {
+  toolsManager ??= import(new URL("./utils/tools-manager.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href) as Promise<ToolsManager>;
+  const executable = await (await toolsManager).ensureTool(tool);
+  if (!executable) throw new Error(`${tool} is not available and could not be downloaded`);
+  return executable;
+}
 
 export const isPathWithin = (root: string, path: string): boolean => {
   const candidate = relative(resolve(root), resolve(path));
@@ -72,7 +86,9 @@ export async function nativeFind(
     "--print0",
     "--", effective.pattern, root,
   ];
-  const child = spawn("fd", args, { stdio: ["ignore", "pipe", "pipe"] });
+  const executable = await ensureSearchTool("fd");
+  signal?.throwIfAborted();
+  const child = spawn(executable, args, { stdio: ["ignore", "pipe", "pipe"] });
   const abort = () => { child.kill(); };
   signal?.addEventListener("abort", abort, { once: true });
   if (signal?.aborted) abort();
@@ -183,7 +199,9 @@ export async function nativeGrep(
     ...(options.glob ? ["--glob", options.glob] : []),
     "--", pattern, root,
   ];
-  const child = spawn("rg", args, { stdio: ["ignore", "pipe", "pipe"] });
+  const executable = await ensureSearchTool("rg");
+  signal?.throwIfAborted();
+  const child = spawn(executable, args, { stdio: ["ignore", "pipe", "pipe"] });
   const abort = () => { child.kill(); };
   signal?.addEventListener("abort", abort, { once: true });
   if (signal?.aborted) abort();
