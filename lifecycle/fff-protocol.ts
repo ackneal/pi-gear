@@ -1,8 +1,8 @@
 import type {
   FileFinderApi, GrepOptions, MultiGrepOptions, SearchOptions, WatchEvent, WatchOptions,
-} from "@ff-labs/fff-node";
+} from "@ff-labs/fff-bun";
 
-// GlobOptions exists in the SDK API but is not re-exported by @ff-labs/fff-node@0.10.3.
+// GlobOptions exists in the SDK API but is not re-exported by @ff-labs/fff-bun@0.10.5.
 type GlobOptions = NonNullable<Parameters<FileFinderApi["glob"]>[1]>;
 
 export const FFF_SOCKET_ENV = "PI_GEAR_FFF_SOCKET";

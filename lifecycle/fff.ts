@@ -10,7 +10,7 @@ export const resolveFffRoot = (basePath: string): Promise<string> => realpath(ba
 
 export interface FffSidecarOptions {
   startupTimeoutMs?: number;
-  nodePath?: string;
+  bunPath?: string;
 }
 
 /** Session-owned FFF process and its private Unix socket. */
@@ -53,9 +53,9 @@ export class FffSidecar {
     const socketPath = join(tempDir, "fff.sock");
     await rm(socketPath, { force: true });
     const daemonPath = fileURLToPath(new URL("./fff-sidecar.ts", import.meta.url));
-    const child = spawn(options.nodePath ?? process.execPath, [
-      "--experimental-strip-types", daemonPath, fffRoot, String(process.pid),
-    ], {
+    const bunPath = options.bunPath
+      ?? (process.env.BUN_INSTALL ? join(process.env.BUN_INSTALL, "bin", "bun") : "bun");
+    const child = spawn(bunPath, [daemonPath, fffRoot, String(process.pid)], {
       env: { ...process.env, [FFF_SOCKET_ENV]: socketPath },
       stdio: "ignore",
     });

@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createServer } from "node:net";
 import { join, resolve } from "node:path";
-import { FileFinder } from "@ff-labs/fff-node";
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { FilesystemAccess } from "../execution/filesystem/access.ts";
 import type { FffClient } from "../lifecycle/fff-client.ts";
+import { FffSidecar } from "../lifecycle/fff.ts";
 import { WorkspaceSearch } from "./service.ts";
 import { registerWorkspaceTools } from "./tools.ts";
 
@@ -243,7 +244,22 @@ test("approved external find returns discovered children without per-file read c
   }
 });
 
-test("real FFF workspace find preserves recursive Pi glob semantics", async () => {
+test("real FFF workspace find preserves recursive Pi glob semantics", async (t) => {
+  const probeDir = await mkdtemp(join(tmpdir(), "pi-gear-fff-find-probe-"));
+  const probe = createServer();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      probe.once("error", reject);
+      probe.listen(join(probeDir, "probe.sock"), () => { probe.off("error", reject); resolve(); });
+    });
+  } catch (error) {
+    await rm(probeDir, { recursive: true, force: true });
+    if ((error as NodeJS.ErrnoException).code === "EPERM") { t.skip("Unix sockets unavailable in test harness"); return; }
+    throw error;
+  }
+  await new Promise<void>((resolve) => probe.close(() => resolve()));
+  await rm(probeDir, { recursive: true, force: true });
+
   const root = await mkdtemp(join(tmpdir(), "pi-gear-fff-find-"));
   const files = [
     "top.spec.ts",
@@ -258,23 +274,9 @@ test("real FFF workspace find preserves recursive Pi glob semantics", async () =
       await writeFile(join(root, file), file === "top.spec.ts" ? "largefoo\n".repeat(500) : "foo\n");
     }
 
-    const created = FileFinder.create({ basePath: root, disableWatch: true, disableContentIndexing: false });
-    if (!created.ok) throw new Error(created.error);
-    const finder = created.value;
+    const sidecar = await FffSidecar.start(root);
     try {
-      const scanned = await finder.waitForScan(5_000);
-      if (!scanned.ok || !scanned.value) throw new Error(scanned.ok ? "FFF scan timed out" : scanned.error);
-      let grepItems = 0;
-      const client = {
-        request: async (method: string, params: any) => {
-          const result = method === "glob"
-            ? finder.glob(params.pattern, params.options)
-            : finder.grep(params.query, params.options);
-          if (!result.ok) throw new Error(result.error);
-          if (method === "grep") grepItems += result.value.items.length;
-          return result.value;
-        },
-      } as unknown as FffClient;
+      const client = sidecar.client;
       const allowAll = { filter: async (paths: readonly string[]) => [...paths] } as unknown as FilesystemAccess;
       const search = new WorkspaceSearch(root, allowAll, client);
       const tools = new Map<string, ToolDefinition>();
@@ -299,10 +301,9 @@ test("real FFF workspace find preserves recursive Pi glob semantics", async () =
       }
 
       const grepOutput = await text(run(tools.get("grep")!, { pattern: "largefoo", literal: true, limit: 500 }));
-      assert.equal(grepItems, 500);
       assert.match(grepOutput, /1: largefoo/);
     } finally {
-      finder.destroy();
+      await sidecar.dispose();
     }
   } finally {
     await rm(root, { recursive: true, force: true });

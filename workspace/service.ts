@@ -8,7 +8,7 @@ import type {
   SearchOptions,
   SearchResult,
   WatchEvent,
-} from "@ff-labs/fff-node";
+} from "@ff-labs/fff-bun";
 import type { FilesystemAccess } from "../execution/filesystem/access.ts";
 import type { FffClient } from "../lifecycle/fff-client.ts";
 

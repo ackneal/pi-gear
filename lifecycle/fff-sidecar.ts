@@ -1,7 +1,6 @@
 import { rm } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
-import { FileFinder } from "@ff-labs/fff-node";
-import type { FileFinderApi, FileItem, InitOptions, Result, WatchUnsubscribe } from "@ff-labs/fff-node";
+import type { FileFinderApi, FileItem, InitOptions, Result, WatchUnsubscribe } from "@ff-labs/fff-bun";
 import {
   DEFAULT_INDEX_READY_TIMEOUT_MS, FFF_SOCKET_ENV, isFffRequest,
   type FffRequest,
@@ -34,8 +33,10 @@ export interface FffSidecarServerOptions {
 }
 
 export async function startFffSidecar(options: FffSidecarServerOptions): Promise<{ server: Server; close(): Promise<void> }> {
-  const created = (options.createFinder ?? ((value) => FileFinder.create(value)))(fffFinderOptions(options.basePath));
-  const finder = unwrap(created);
+  const finderOptions = fffFinderOptions(options.basePath);
+  const finder: FileFinderApi = options.createFinder
+    ? unwrap(options.createFinder(finderOptions))
+    : unwrap((await import("@ff-labs/fff-bun")).FileFinder.create(finderOptions));
   const subscriptionsBySocket = new Map<Socket, Map<number, WatchUnsubscribe>>();
   const sockets = new Set<Socket>();
   let nextSubscriptionId = 1;

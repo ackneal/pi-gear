@@ -2,7 +2,7 @@ import { createFindToolDefinition, createGrepToolDefinition, formatSize, truncat
 import { stat } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import { Type } from "typebox";
-import type { GrepCursor, GrepMatch, GrepOptions } from "@ff-labs/fff-node";
+import type { GrepCursor, GrepMatch, GrepOptions } from "@ff-labs/fff-bun";
 import type { FilesystemAccess, FilesystemAuthorization } from "../execution/filesystem/access.ts";
 import { isPathWithin, nativeGrep } from "./native.ts";
 import type { WorkspaceSearch } from "./service.ts";

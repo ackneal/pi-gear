@@ -31,7 +31,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.71",
-    "@ff-labs/fff-node": "0.10.3",
+    "@ff-labs/fff-bun": "0.10.5",
     "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "peerDependencies": {

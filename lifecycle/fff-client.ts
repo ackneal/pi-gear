@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { createConnection, type Socket } from "node:net";
-import type { WatchEvent } from "@ff-labs/fff-node";
+import type { WatchEvent } from "@ff-labs/fff-bun";
 import { isFffMessage, type FffMethod, type FffParams } from "./fff-protocol.ts";
 
 export interface FffClientEvents {

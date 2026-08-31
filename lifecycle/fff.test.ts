@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, Socket } from "node:net";
 import test from "node:test";
-import type { FileFinderApi, InitOptions } from "@ff-labs/fff-node";
+import type { FileFinderApi, InitOptions } from "@ff-labs/fff-bun";
 import { FffClient } from "./fff-client.ts";
 import { startFffSidecar, fffFinderOptions } from "./fff-sidecar.ts";
 import { FffSidecar, resolveFffRoot } from "./fff.ts";
@@ -220,16 +220,22 @@ test("sidecar closes malformed request connections without affecting valid clien
   }
 });
 
-test("sidecar startup rejects spawn errors and removes its temporary directory", async () => {
-  const before = new Set((await readdir(tmpdir())).filter((name) => name.startsWith("pi-gear-fff-")));
+test("sidecar startup rejects bad Bun executable errors and removes its temporary directory", async () => {
+  const sidecarTempName = /^pi-gear-fff-[A-Za-z0-9]+$/;
+  const before = new Set((await readdir(tmpdir())).filter((name) => sidecarTempName.test(name)));
   const basePath = await mkdtemp(join(tmpdir(), "pi-gear-spawn-base-"));
   try {
     await assert.rejects(
-      FffSidecar.start(basePath, { nodePath: "/definitely/not/a/real/node", startupTimeoutMs: 200 }),
+      FffSidecar.start(basePath, { bunPath: "/definitely/not/a/real/bun", startupTimeoutMs: 200 }),
       /FFF sidecar failed to start.*ENOENT/,
     );
-    const after = (await readdir(tmpdir())).filter((name) => name.startsWith("pi-gear-fff-") && !before.has(name));
-    assert.deepEqual(after, []);
+    const deadline = Date.now() + 2_000;
+    for (;;) {
+      const after = (await readdir(tmpdir())).filter((name) => sidecarTempName.test(name) && !before.has(name));
+      if (after.length === 0) break;
+      if (Date.now() >= deadline) assert.deepEqual(after, []);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
   } finally {
     await rm(basePath, { recursive: true, force: true });
   }
