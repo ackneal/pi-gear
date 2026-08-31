@@ -13,6 +13,13 @@ import type { DiagnosticSeverity, NormalizedDiagnostic } from "./types.ts";
 
 const exec = promisify(execFile);
 
+const workspaceInventory = (workspace: readonly string[], dirty: readonly string[] = workspace) => ({
+  initialize: async () => undefined,
+  files: async () => workspace.map((relativePath) => ({ relativePath })),
+  dirtyFiles: async () => dirty.map((relativePath) => ({ relativePath })),
+  onChange: () => () => undefined,
+}) as never;
+
 class FakeClient {
   syncCount = 0;
   shutdownCount = 0;
@@ -68,7 +75,6 @@ test("manager matches configured extensions, reuses clients, normalizes diagnost
   );
 
   try {
-    await manager.initializeWorkspace();
     assert.ok(manager.match(source));
     assert.equal(manager.match(join(cwd, "source.go")), undefined);
 
@@ -194,7 +200,15 @@ test("diagnostics keeps changed scope Git-focused and scans workspace files conc
   await exec("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-qm", "initial"], { cwd });
   await writeFile(changed, "const changed = 2;\n");
   const fake = new FakeClient(changed);
-  const manager = new LspManager([{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }], cwd, () => fake as unknown as LspClient);
+  const manager = new LspManager(
+    [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
+    cwd,
+    () => fake as unknown as LspClient,
+    undefined,
+    15,
+    undefined,
+    workspaceInventory(["changed.ts", "clean.ts"], ["changed.ts"]),
+  );
 
   try {
     assert.deepEqual((await manager.diagnostics("changed")).map(({ path }) => path), ["changed.ts", "changed.ts", "changed.ts"]);
@@ -203,8 +217,6 @@ test("diagnostics keeps changed scope Git-focused and scans workspace files conc
       "changed.ts", "changed.ts", "changed.ts", "clean.ts", "clean.ts", "clean.ts",
     ]);
     assert.equal(fake.maxActiveWaits, 2);
-    await rm(join(cwd, ".git"), { recursive: true, force: true });
-    assert.deepEqual(await manager.diagnostics("changed"), []);
   } finally {
     await manager.shutdown();
     await rm(cwd, { recursive: true, force: true });
@@ -223,6 +235,10 @@ test("workspace diagnostics scan beyond the former 100-file cap with bounded con
     [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
     cwd,
     () => fake as unknown as LspClient,
+    undefined,
+    15,
+    undefined,
+    workspaceInventory(Array.from({ length: 101 }, (_, index) => `source-${index}.ts`)),
   );
 
   try {
@@ -250,6 +266,10 @@ test("Git workspace diagnostics include tracked and untracked files while honori
     [{ extensions: [".py"], languageIds: { ".py": "python" }, command: ["server"] }],
     cwd,
     () => fake as unknown as LspClient,
+    undefined,
+    15,
+    undefined,
+    workspaceInventory(["tracked.py", "untracked.py"]),
   );
 
   try {
@@ -273,6 +293,10 @@ test("non-Git workspace diagnostics skip dependency and Python virtual-environme
     [{ extensions: [".py"], languageIds: { ".py": "python" }, command: ["server"] }],
     cwd,
     () => fake as unknown as LspClient,
+    undefined,
+    15,
+    undefined,
+    workspaceInventory(["source.py"]),
   );
 
   try {
@@ -284,7 +308,7 @@ test("non-Git workspace diagnostics skip dependency and Python virtual-environme
   }
 });
 
-test("Git watcher syncs tracked and untracked sources but ignores Git-ignored and unsupported files", async () => {
+test("shared watcher trusts WorkspaceSearch filtering and only checks supported extensions", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-watcher-git-"));
   await writeFile(join(cwd, ".gitignore"), "ignored/\ntracked.py\n");
   await writeFile(join(cwd, "tracked.py"), "tracked = True\n");
@@ -310,7 +334,11 @@ test("Git watcher syncs tracked and untracked sources but ignores Git-ignored an
     for (const path of ["tracked.py", "untracked.py", "ignored/source.py", "unsupported.txt"]) schedule(path);
     await new Promise((resolveResult) => setTimeout(resolveResult, 250));
 
-    assert.deepEqual(synced.sort(), [resolve(cwd, "tracked.py"), resolve(cwd, "untracked.py")].sort());
+    assert.deepEqual(synced.sort(), [
+      resolve(cwd, "tracked.py"),
+      resolve(cwd, "untracked.py"),
+      resolve(cwd, "ignored/source.py"),
+    ].sort());
     assert.deepEqual(unhandled, []);
   } finally {
     process.removeListener("unhandledRejection", onUnhandled);
@@ -319,7 +347,7 @@ test("Git watcher syncs tracked and untracked sources but ignores Git-ignored an
   }
 });
 
-test("non-Git watcher applies bundled directory exclusions", async () => {
+test("shared watcher does not repeat WorkspaceSearch directory eligibility rules", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-watcher-fallback-"));
   const manager = new LspManager(
     [{ extensions: [".py"], languageIds: { ".py": "python" }, command: ["server"] }],
@@ -333,14 +361,20 @@ test("non-Git watcher applies bundled directory exclusions", async () => {
     for (const path of ["source.py", ".venv/source.py", "node_modules/source.py", "target/source.py", "vendor/source.py"]) schedule(path);
     await new Promise((resolveResult) => setTimeout(resolveResult, 200));
 
-    assert.deepEqual(synced, [resolve(cwd, "source.py")]);
+    assert.deepEqual(synced.sort(), [
+      "source.py",
+      ".venv/source.py",
+      "node_modules/source.py",
+      "target/source.py",
+      "vendor/source.py",
+    ].map((path) => resolve(cwd, path)).sort());
   } finally {
     await manager.shutdown();
     await rm(cwd, { recursive: true, force: true });
   }
 });
 
-test("shutdown clears pending watcher debounce before it can sync", async () => {
+test("shutdown awaits an already-dispatched shared watcher sync", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-watcher-shutdown-"));
   const manager = new LspManager(
     [{ extensions: [".py"], languageIds: { ".py": "python" }, command: ["server"] }],
@@ -355,7 +389,7 @@ test("shutdown clears pending watcher debounce before it can sync", async () => 
     await manager.shutdown();
     await new Promise((resolveResult) => setTimeout(resolveResult, 150));
 
-    assert.equal(syncs, 0);
+    assert.equal(syncs, 1);
   } finally {
     await manager.shutdown();
     await rm(cwd, { recursive: true, force: true });
@@ -379,11 +413,93 @@ test("workspace traversal continues beyond the former 5,000-entry cap", async ()
     [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
     cwd,
     () => fake as unknown as LspClient,
+    undefined,
+    15,
+    undefined,
+    workspaceInventory(["source.ts"]),
   );
 
   try {
     assert.equal((await manager.diagnostics("workspace")).length, 3);
     assert.equal(fake.syncCount, 1);
+  } finally {
+    await manager.shutdown();
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("workspace search supplies diagnostics inventory and the shared LSP change stream", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-shared-index-"));
+  const source = join(cwd, "source.ts");
+  await writeFile(source, "const value = 1;\n");
+  let listener: ((events: readonly { path: string; kind: "created" | "modified" | "removed" | "rescan" }[]) => void) | undefined;
+  let unsubscribed = false;
+  const workspaceIndex = {
+    initialize: async () => undefined,
+    files: async () => [{ relativePath: "source.ts" }],
+    dirtyFiles: async () => [{ relativePath: "source.ts" }],
+    onChange: (next: typeof listener) => { listener = next; return () => { unsubscribed = true; }; },
+  } as never;
+  const fake = new FakeClient(source);
+  const manager = new LspManager(
+    [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
+    cwd,
+    () => fake as unknown as LspClient,
+    undefined,
+    15,
+    undefined,
+    workspaceIndex,
+  );
+
+  try {
+    assert.equal((await manager.diagnostics("workspace")).length, 3);
+    assert.equal((await manager.diagnostics("changed")).length, 3);
+    manager.startWatching();
+    listener?.([{ path: source, kind: "modified" }]);
+    await new Promise((resolveResult) => setTimeout(resolveResult, 20));
+    assert.equal(fake.syncCount, 3);
+  } finally {
+    await manager.shutdown();
+    assert.equal(unsubscribed, true);
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("workspace rescan coalesces overlapping requests with bounded concurrency", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-gear-lsp-rescan-"));
+  const supported = Array.from({ length: 10 }, (_, index) => `source-${index}.ts`);
+  await Promise.all([
+    ...supported.map((path) => writeFile(join(cwd, path), "const value = 1;\n")),
+    writeFile(join(cwd, "notes.txt"), "ignored\n"),
+  ]);
+  let listener: ((events: readonly { path: string; kind: "rescan" }[]) => void) | undefined;
+  const workspaceIndex = {
+    files: async () => [...supported, "notes.txt"].map((relativePath) => ({ relativePath })),
+    dirtyFiles: async () => [],
+    onChange: (next: typeof listener) => { listener = next; return () => undefined; },
+  } as never;
+  const fake = new FakeClient(join(cwd, supported[0]!));
+  const manager = new LspManager(
+    [{ extensions: [".ts"], languageIds: { ".ts": "typescript" }, command: ["server"] }],
+    cwd,
+    () => fake as unknown as LspClient,
+    undefined,
+    15,
+    undefined,
+    workspaceIndex,
+  );
+
+  try {
+    manager.startWatching();
+    listener?.([{ path: cwd, kind: "rescan" }]);
+    listener?.([{ path: cwd, kind: "rescan" }]);
+    listener?.([{ path: cwd, kind: "rescan" }]);
+    const expectedSyncs = supported.length * 2;
+    for (let attempt = 0; attempt < 50 && fake.syncCount < expectedSyncs; attempt++) {
+      await new Promise((resolveResult) => setTimeout(resolveResult, 5));
+    }
+    assert.equal(fake.syncCount, expectedSyncs);
+    assert.ok(fake.maxActiveWaits <= 8);
   } finally {
     await manager.shutdown();
     await rm(cwd, { recursive: true, force: true });

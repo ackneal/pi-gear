@@ -63,6 +63,36 @@ test("doctor formats configured LSP server statuses", () => {
   ].join("\n"));
 });
 
+test("doctor reports workspace search health without normal-session status noise", () => {
+  const output = formatDoctor(sandboxStatus, [], [], "darwin", undefined, [], {
+    version: "0.10.5",
+    state: "ready",
+    indexedFiles: 42,
+    watcherReady: true,
+    contentIndex: true,
+    sharedSidecar: true,
+  });
+
+  assert.match(output, /Workspace search:\n- backend FFF 0\.10\.5\n- ready/);
+  assert.match(output, /42 indexed files · watcher ready/);
+  assert.match(output, /content index enabled · shared sidecar connected/);
+  assert.match(output, /frecency\/history session-only/);
+});
+
+test("doctor reports the preserved FFF startup failure", () => {
+  const output = formatDoctor(sandboxStatus, [], [], "darwin", undefined, [], {
+    version: "0.10.5",
+    state: "error",
+    indexedFiles: 0,
+    watcherReady: false,
+    contentIndex: true,
+    sharedSidecar: false,
+    error: "FFF sidecar unavailable: Bun executable not found",
+  });
+
+  assert.match(output, /error · FFF sidecar unavailable: Bun executable not found/);
+});
+
 test("gear commands are centrally registered and delegate to their services", async () => {
   const commands = new Map<string, { handler: (args: string, ctx: any) => Promise<void> }>();
   const calls: string[] = [];

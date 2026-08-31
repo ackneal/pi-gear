@@ -71,7 +71,7 @@ test("disabled sandbox leaves Bash untouched, does not create a controller, and 
     version: 1,
     sandbox: { enabled: false, network: { rules: [], strictAllowlist: false } },
     filesystem: { rules: [] },
-  }, () => { controllers += 1; throw new Error("must not create controller"); });
+  }, { createController: () => { controllers += 1; throw new Error("must not create controller"); } });
 
   assert.equal(controllers, 0);
   assert.equal(registeredTools, 0);

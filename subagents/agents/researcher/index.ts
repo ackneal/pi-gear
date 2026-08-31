@@ -1,4 +1,5 @@
 import { Type } from "typebox";
+import { withoutWorkspaceSearch } from "../../runtime/process.ts";
 import { runChildSubagent, type RunChildSubagentOptions } from "../../runtime/runner.ts";
 import type { SubagentRun } from "../../runtime/types.ts";
 import { researcherProfile } from "./profile.ts";
@@ -26,11 +27,12 @@ export function formatResearcherInput(input: ResearcherSubagentInput): string {
 
 export function runResearcher(
   task: string,
-  options: Omit<RunChildSubagentOptions, "task" | "profile" | "childExtension">,
+  options: Omit<RunChildSubagentOptions, "task" | "profile" | "childExtension"> & { workspaceSearch?: boolean },
 ): Promise<SubagentRun> {
+  const { workspaceSearch = true, ...runOptions } = options;
   return runChildSubagent({
-    ...options,
-    profile: researcherProfile,
+    ...runOptions,
+    profile: workspaceSearch ? researcherProfile : withoutWorkspaceSearch(researcherProfile),
     childExtension: new URL("./extension.ts", import.meta.url),
     task,
   });

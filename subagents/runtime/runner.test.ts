@@ -53,14 +53,17 @@ test("resolver follows official script, generic, Bun virtual, and packaged paths
   assert.deepEqual(resolvePiInvocation({ argv: ["pi"], execPath: "/Applications/pi", exists: () => false }), { command: "/Applications/pi", prefixArgs: [] });
 });
 
-test("child process inherits the active session cwd", () => {
+test("child process inherits the active session cwd and receives an explicit workspace endpoint", () => {
   let receivedCwd: string | undefined;
+  let receivedEnv: NodeJS.ProcessEnv | undefined;
   const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), kill: () => true });
-  spawnPiChild(profile, "inspect", new URL("./runner.test.ts", import.meta.url), ((_command: string, _args: readonly string[], options: { cwd?: string }) => {
+  spawnPiChild(profile, "inspect", new URL("./runner.test.ts", import.meta.url), ((_command: string, _args: readonly string[], options: { cwd?: string; env?: NodeJS.ProcessEnv }) => {
     receivedCwd = options?.cwd;
+    receivedEnv = options?.env;
     return child;
-  }) as never, "/session/workspace");
+  }) as never, "/session/workspace", undefined, { PI_GEAR_FFF_SOCKET: "/tmp/session.sock" });
   assert.equal(receivedCwd, "/session/workspace");
+  assert.equal(receivedEnv?.PI_GEAR_FFF_SOCKET, "/tmp/session.sock");
 });
 
 test("researcher child arguments isolate the child and use exactly its allowlist", () => {
@@ -76,7 +79,7 @@ test("researcher child arguments isolate the child and use exactly its allowlist
     args.includes("--no-prompt-templates"),
   );
   assert.equal(args[args.indexOf("--extension") + 1]?.endsWith("subagents/agents/researcher/extension.ts"), true);
-  assert.equal(args[args.indexOf("--tools") + 1], "read,exa_web_search_exa,exa_get_code_context_exa,exa_research_paper_exa,exa_crawling_exa,context7_resolve_library_id,context7_query_docs,gh_grep_searchGitHub");
+  assert.equal(args[args.indexOf("--tools") + 1], "read,find,grep,exa_web_search_exa,exa_get_code_context_exa,exa_research_paper_exa,exa_crawling_exa,context7_resolve_library_id,context7_query_docs,gh_grep_searchGitHub");
   assert.equal(args.join(",").match(/\b(?:bash|edit|write)\b/), null);
   assert.equal(args[args.indexOf("--append-system-prompt") + 1], RESEARCHER_SYSTEM_PROMPT);
   assert.equal(args[args.indexOf("--model") + 1], "openai/gpt-test");

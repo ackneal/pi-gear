@@ -217,6 +217,37 @@ function navigationResult(result: AnyResult, options: ToolRenderResultOptions, t
   return CompactText.headerAndDetail(title, `\n${lines}`);
 }
 
+type WorkspaceToolKind = "find" | "grep";
+
+function workspaceCall(kind: WorkspaceToolKind) {
+  return (rawArgs: unknown, theme: Theme, context: AnyContext) => {
+    const args = parseArgsObject(rawArgs ?? context?.args);
+    const label = kind.toUpperCase();
+    const path = displayPath(args.path ?? ".", context.cwd);
+    const query = clean(args.pattern);
+    const target = [path === "." ? undefined : path, query || undefined].filter(Boolean).join(" · ");
+    return header(context.expanded ? "-" : "+", label, target ? ` ${target}` : "", theme);
+  };
+}
+
+function workspaceResult(kind: WorkspaceToolKind) {
+  return (result: AnyResult, options: ToolRenderResultOptions, theme: Theme, context: AnyContext) => {
+    const text = textResult(result);
+    if (context.isError) return text ? new CompactText(theme.fg("error", text), "detail") : empty();
+
+    if (!options.expanded || !text) return empty();
+    return new CompactText(theme.fg("toolOutput", `\n${text}`), "detail");
+  };
+}
+
+export function workspaceToolRenderers(kind: WorkspaceToolKind): Pick<AnyDefinition, "renderShell" | "renderCall" | "renderResult"> {
+  return {
+    renderShell: "default",
+    renderCall: workspaceCall(kind),
+    renderResult: workspaceResult(kind),
+  };
+}
+
 export function lspToolRenderers(kind: "diagnostics" | "navigation"): Pick<AnyDefinition, "renderShell" | "renderCall" | "renderResult"> {
   return {
     renderShell: "default",

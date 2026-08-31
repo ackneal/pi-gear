@@ -37,7 +37,7 @@ export class SessionApprovals {
 
     let prompt = this.pendingHostPrompts.get(key);
     if (prompt === undefined) {
-      prompt = this.ui.confirm("Network access required", `Allow connection to ${key}?`);
+      prompt = this.ui.confirm("Network access required", `Allow bash to connect to ${key}?`);
       this.pendingHostPrompts.set(key, prompt);
     }
 

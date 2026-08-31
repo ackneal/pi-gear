@@ -9,5 +9,5 @@ export interface McpCapabilitySpec {
   readonly tools: readonly McpToolSpec[];
 }
 
-export type BuiltinCapabilitySpec = { readonly kind: "builtin"; readonly name: "read" | "edit" | "write" | "bash" };
+export type BuiltinCapabilitySpec = { readonly kind: "builtin"; readonly name: "read" | "find" | "grep" | "edit" | "write" | "bash" };
 export type CapabilitySpec = BuiltinCapabilitySpec | McpCapabilitySpec;

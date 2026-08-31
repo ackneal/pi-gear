@@ -15,9 +15,28 @@ const testConfig = {
 const setupFilesystemGuard = (
   pi: ExtensionAPI,
   options: Parameters<typeof setupFilesystemGuardImpl>[1] = {},
-): void => setupFilesystemGuardImpl(pi, { ...options, loadConfig: async () => testConfig });
+): void => { setupFilesystemGuardImpl(pi, { ...options, loadConfig: async () => testConfig }); };
 
 type ToolCall = { type: "tool_call"; toolName: string; toolCallId: string; input: Record<string, unknown> };
+
+test("filesystem state survives before-switch and clears at session boundaries", () => {
+  const handlers: Record<string, () => void> = {};
+  const pi = {
+    on: (event: string, listener: () => void) => { handlers[event] = listener; },
+    sendMessage: () => undefined,
+  } as unknown as ExtensionAPI;
+  const service = setupFilesystemGuardImpl(pi, { loadConfig: async () => testConfig });
+
+  const original = service.forWorkspace("/workspace");
+  assert.equal(handlers.session_before_switch, undefined);
+  assert.equal(service.forWorkspace("/workspace"), original);
+
+  handlers.session_start?.();
+  const started = service.forWorkspace("/workspace");
+  assert.notEqual(started, original);
+  handlers.session_shutdown?.();
+  assert.notEqual(service.forWorkspace("/workspace"), started);
+});
 
 test("headless outside-workspace file access is denied when policy asks", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "pi-gear-file-guard-"));
@@ -42,6 +61,60 @@ test("headless outside-workspace file access is denied when policy asks", async 
     });
   } finally {
     await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("concurrent filesystem asks are shown sequentially and all tool calls resolve", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-gear-file-prompts-"));
+  const workspace = join(root, "workspace");
+  const trustedTemp = join(root, "trusted-temp");
+  const outside = [join(root, "outside-a.txt"), join(root, "outside-b.txt")];
+  let handler: ((event: ToolCall, ctx: ExtensionContext) => Promise<unknown>) | undefined;
+  const confirmationResolvers: Array<(allowed: boolean) => void> = [];
+  const promptMessages: string[] = [];
+  const pi = {
+    on: (event: string, listener: unknown) => { if (event === "tool_call") handler = listener as typeof handler; },
+    sendMessage: () => undefined,
+  } as unknown as ExtensionAPI;
+  const ctx = {
+    cwd: workspace,
+    hasUI: true,
+    ui: {
+      confirm: (_title: string, message: string) => {
+        promptMessages.push(message);
+        return new Promise<boolean>((resolve) => { confirmationResolvers.push(resolve); });
+      },
+      notify: () => undefined,
+    },
+  } as unknown as ExtensionContext;
+  const waitForPrompts = async (count: number): Promise<void> => {
+    const deadline = Date.now() + 1_000;
+    while (confirmationResolvers.length < count) {
+      if (Date.now() >= deadline) {
+        assert.fail(`Timed out waiting for ${count} filesystem confirmation prompts`);
+      }
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  };
+
+  try {
+    await Promise.all([mkdir(workspace), mkdir(trustedTemp)]);
+    await Promise.all(outside.map((path) => writeFile(path, "test")));
+    setupFilesystemGuard(pi, { tempSource: async () => trustedTemp });
+    assert.ok(handler);
+
+    const requests = outside.map((path, index) => handler!({ type: "tool_call", toolName: "read", toolCallId: `read-${index}`, input: { path } }, ctx));
+    await waitForPrompts(1);
+    assert.equal(confirmationResolvers.length, 1);
+
+    confirmationResolvers[0]!(true);
+    await waitForPrompts(2);
+    confirmationResolvers[1]!(true);
+
+    assert.deepEqual(await Promise.all(requests), [undefined, undefined]);
+    assert.equal(promptMessages.every((message) => message.startsWith("Allow read access to ")), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 
@@ -159,14 +232,12 @@ test("task_state, researcher, and Bash pass without warnings", async () => {
   assert.deepEqual(warnings, []);
 });
 
-test("recursive filesystem tools warn once per session when Pi enables them", async () => {
+test("recursive filesystem tools use the same read policy without warnings", async () => {
   let handler: ((event: ToolCall, ctx: ExtensionContext) => Promise<unknown>) | undefined;
-  let sessionStart: (() => void) | undefined;
   const warnings: string[] = [];
   const pi = {
     on: (event: string, listener: unknown) => {
       if (event === "tool_call") handler = listener as typeof handler;
-      if (event === "session_start") sessionStart = listener as typeof sessionStart;
     },
     sendMessage: () => undefined,
   } as unknown as ExtensionAPI;
@@ -177,20 +248,12 @@ test("recursive filesystem tools warn once per session when Pi enables them", as
   } as unknown as ExtensionContext;
   setupFilesystemGuard(pi);
   assert.ok(handler);
-  assert.ok(sessionStart);
 
-  for (const toolName of ["grep", "grep", "ls", "find"] as const) {
+  for (const toolName of ["grep", "ls", "find"] as const) {
     assert.equal(await handler({ type: "tool_call", toolName, toolCallId: `test-${toolName}`, input: {} }, ctx), undefined);
   }
-  sessionStart();
-  assert.equal(await handler({ type: "tool_call", toolName: "grep", toolCallId: "after-reset", input: {} }, ctx), undefined);
 
-  assert.deepEqual(warnings, [
-    "grep is not covered by the filesystem policy.",
-    "ls is not covered by the filesystem policy.",
-    "find is not covered by the filesystem policy.",
-    "grep is not covered by the filesystem policy.",
-  ]);
+  assert.deepEqual(warnings, []);
 });
 
 test("current process temp dir access skips the outside-workspace prompt", async () => {
