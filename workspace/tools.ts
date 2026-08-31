@@ -4,7 +4,7 @@ import { relative, resolve, sep } from "node:path";
 import { Type } from "typebox";
 import type { GrepCursor, GrepMatch, GrepOptions } from "@ff-labs/fff-node";
 import type { FilesystemAccess, FilesystemAuthorization } from "../execution/filesystem/access.ts";
-import { isPathWithin, nativeFind, nativeGrep } from "./native.ts";
+import { isPathWithin, nativeGrep } from "./native.ts";
 import type { WorkspaceSearch } from "./service.ts";
 import { workspaceToolRenderers } from "../ui/tools/index.ts";
 
@@ -123,7 +123,16 @@ async function workspaceFind(search: WorkspaceSearch, root: string, pattern: str
   return findOutput(paths.slice(0, limit), limit, exhausted && paths.length <= limit);
 }
 
-async function executeFind(search: WorkspaceSearch, access: FilesystemAccess, pi: ExtensionAPI, ctx: ExtensionContext, pattern: string, rawPath: string | undefined, limit: number, signal?: AbortSignal) {
+async function executeFind(
+  search: WorkspaceSearch,
+  access: FilesystemAccess,
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  pattern: string,
+  rawPath: string | undefined,
+  limit: number,
+  runExternal: (root: string) => ReturnType<ReturnType<typeof createFindToolDefinition>["execute"]>,
+) {
   const requestedRoot = resolve(search.root, rawPath ?? ".");
   if (isPathWithin(search.root, requestedRoot)) {
     await pathInfo(requestedRoot);
@@ -131,9 +140,7 @@ async function executeFind(search: WorkspaceSearch, access: FilesystemAccess, pi
   }
 
   const root = await authorizeRoot(access, requestedRoot, "find", ctx, pi);
-  await pathInfo(root.authorization.path);
-  const paths = await nativeFind(root.authorization.path, pattern, limit + 1, signal);
-  return findOutput(paths.slice(0, limit), limit, paths.length <= limit);
+  return runExternal(root.authorization.path);
 }
 
 interface DisplayMatch {
@@ -191,6 +198,10 @@ function formatGrep(matches: readonly DisplayMatch[], limit: number, exhausted: 
     content: [{ type: "text" as const, text }],
     details: reached ? { matchLimitReached: limit } : undefined,
   };
+}
+
+function canUseFffGrep(pattern: string): boolean {
+  return !/[\s/:]/.test(pattern);
 }
 
 function fffGrepPattern(input: GrepInput): { mode: "plain" | "regex"; pattern: string } {
@@ -264,17 +275,14 @@ async function workspaceGrep(
   return formatGrep(visibleMatches, limit, exhausted && matches.length <= limit);
 }
 
-async function executeGrep(search: WorkspaceSearch, access: FilesystemAccess, pi: ExtensionAPI, ctx: ExtensionContext, input: GrepInput, signal?: AbortSignal) {
-  const requestedRoot = resolve(search.root, input.path ?? ".");
-  if (isPathWithin(search.root, requestedRoot)) {
-    const info = await pathInfo(requestedRoot);
-    return workspaceGrep(search, access, requestedRoot, info.isFile(), input);
-  }
-
-  const root = await authorizeRoot(access, requestedRoot, "grep", ctx, pi);
-  await pathInfo(root.authorization.path);
+async function nativeGrepOutput(
+  root: string,
+  access: Pick<FilesystemAccess, "permits">,
+  input: GrepInput,
+  signal?: AbortSignal,
+) {
   const limit = input.limit ?? DEFAULT_GREP_LIMIT;
-  const matches = await nativeGrep(root.authorization.path, approvedRootAccess(access, root), input.pattern, {
+  const matches = await nativeGrep(root, access, input.pattern, {
     regex: !input.literal,
     ignoreCase: input.ignoreCase ?? false,
     ...(input.glob ? { glob: input.glob } : {}),
@@ -284,15 +292,42 @@ async function executeGrep(search: WorkspaceSearch, access: FilesystemAccess, pi
   return formatGrep(matches.slice(0, limit), limit, matches.length <= limit);
 }
 
+async function executeGrep(search: WorkspaceSearch, access: FilesystemAccess, pi: ExtensionAPI, ctx: ExtensionContext, input: GrepInput, signal?: AbortSignal) {
+  const requestedRoot = resolve(search.root, input.path ?? ".");
+  if (isPathWithin(search.root, requestedRoot)) {
+    const info = await pathInfo(requestedRoot);
+    return canUseFffGrep(input.pattern)
+      ? workspaceGrep(search, access, requestedRoot, info.isFile(), input)
+      : nativeGrepOutput(requestedRoot, access, input, signal);
+  }
+
+  const root = await authorizeRoot(access, requestedRoot, "grep", ctx, pi);
+  await pathInfo(root.authorization.path);
+  return nativeGrepOutput(root.authorization.path, approvedRootAccess(access, root), input, signal);
+}
+
 export function registerWorkspaceTools(pi: ExtensionAPI, search: WorkspaceSearch, access: FilesystemAccess): void {
-  const find = createFindToolDefinition(search.root);
+  const builtinFind = createFindToolDefinition(search.root);
   const findUi = workspaceToolRenderers("find");
   pi.registerTool({
-    ...find,
+    ...builtinFind,
     ...findUi,
     parameters: findParameters,
-    execute: async (_id, { pattern, path, limit }, signal, _onUpdate, ctx) =>
-      executeFind(search, access, pi, ctx, pattern, path, limit ?? DEFAULT_FIND_LIMIT, signal),
+    execute: async (id, { pattern, path, limit }, signal, onUpdate, ctx) =>
+      executeFind(
+        search,
+        access,
+        pi,
+        ctx,
+        pattern,
+        path,
+        limit ?? DEFAULT_FIND_LIMIT,
+        (root) => builtinFind.execute(id, {
+          pattern,
+          path: root,
+          ...(limit === undefined ? {} : { limit }),
+        }, signal, onUpdate, ctx),
+      ),
   });
 
   const grep = createGrepToolDefinition(search.root);
