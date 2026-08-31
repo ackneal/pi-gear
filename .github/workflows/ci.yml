@@ -26,7 +26,7 @@ jobs:
       - name: Test
         run: bun run test
 
-  # A local git daemon makes a clean clone of this exact commit equivalent to
+  # A local HTTP git remote makes a clean clone of this exact commit equivalent to
   # installing the same commit from a hosted git remote, without testing the
   # dependency-populated Actions checkout as a local-path package.
   pi-install-smoke:
@@ -66,12 +66,14 @@ jobs:
           test "$(git -C "$clean_source" rev-parse HEAD)" = "$GITHUB_SHA"
           test ! -e "$clean_source/node_modules"
 
-          git daemon --reuseaddr --export-all --base-path="$export_dir" \
-            --listen=127.0.0.1 --port=9418 "$export_dir" &
-          daemon_pid=$!
-          trap 'kill "$daemon_pid" 2>/dev/null || true' EXIT
+          bare_repo="$export_dir/ackneal/pi-gear.git"
+          git clone --bare "$clean_source" "$bare_repo"
+          git --git-dir="$bare_repo" update-server-info
+          python -m http.server 9418 --bind 127.0.0.1 --directory "$export_dir" &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
 
-          pi install "git://127.0.0.1:9418/ackneal/pi-gear@$GITHUB_SHA"
+          pi install "git:http://127.0.0.1:9418/ackneal/pi-gear.git@$GITHUB_SHA"
           installed_package="$(find "$PI_CODING_AGENT_DIR/git" -name package.json -path '*/pi-gear/package.json' -print -quit)"
           test -n "$installed_package"
           installed_dir="${installed_package%/package.json}"
