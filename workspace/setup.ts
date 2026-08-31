@@ -4,6 +4,7 @@ import type { FilesystemAccessService } from "../execution/filesystem/guard.ts";
 import type { FffClient } from "../lifecycle/fff-client.ts";
 import { FffClient as SocketFffClient } from "../lifecycle/fff-client.ts";
 import { FFF_SOCKET_ENV } from "../lifecycle/fff-protocol.ts";
+import { FFF_VERSION } from "../lifecycle/fff-version.ts";
 import { WorkspaceAutocompleteProvider } from "./autocomplete.ts";
 import {
   WorkspaceSearch,
@@ -91,7 +92,7 @@ export function setupWorkspace(
       if (search && search.root === resolve(cwd)) return search.status();
       if (connectionError) {
         return {
-          version: "0.10.3",
+          version: FFF_VERSION,
           state: "error",
           indexedFiles: 0,
           watcherReady: false,

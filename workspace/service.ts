@@ -11,6 +11,8 @@ import type {
 } from "@ff-labs/fff-bun";
 import type { FilesystemAccess } from "../execution/filesystem/access.ts";
 import type { FffClient } from "../lifecycle/fff-client.ts";
+import type { GlobOptions } from "../lifecycle/fff-protocol.ts";
+import { FFF_VERSION } from "../lifecycle/fff-version.ts";
 
 export interface WorkspaceSearchStatus {
   readonly version: string;
@@ -53,7 +55,7 @@ export class WorkspaceSearch {
     return result;
   }
 
-  glob(pattern: string, options: SearchOptions = {}): Promise<SearchResult> {
+  glob(pattern: string, options: GlobOptions = {}): Promise<SearchResult> {
     return this.client.request("glob", {
       pattern,
       options: this.withFocus(options),
@@ -132,7 +134,7 @@ export class WorkspaceSearch {
       };
       const indexing = value.progress.isScanning || !value.progress.isWarmupComplete;
       return {
-        version: value.health.version ?? "0.10.3",
+        version: value.health.version ?? FFF_VERSION,
         state: indexing ? "indexing" : "ready",
         indexedFiles: value.progress.scannedFilesCount,
         watcherReady: value.progress.isWatcherReady,
@@ -141,7 +143,7 @@ export class WorkspaceSearch {
       };
     } catch (error) {
       return {
-        version: "0.10.3",
+        version: FFF_VERSION,
         state: "error",
         indexedFiles: 0,
         watcherReady: false,

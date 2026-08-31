@@ -65,7 +65,7 @@ test("doctor formats configured LSP server statuses", () => {
 
 test("doctor reports workspace search health without normal-session status noise", () => {
   const output = formatDoctor(sandboxStatus, [], [], "darwin", undefined, [], {
-    version: "0.10.3",
+    version: "0.10.5",
     state: "ready",
     indexedFiles: 42,
     watcherReady: true,
@@ -73,7 +73,7 @@ test("doctor reports workspace search health without normal-session status noise
     sharedSidecar: true,
   });
 
-  assert.match(output, /Workspace search:\n- backend FFF 0\.10\.3\n- ready/);
+  assert.match(output, /Workspace search:\n- backend FFF 0\.10\.5\n- ready/);
   assert.match(output, /42 indexed files · watcher ready/);
   assert.match(output, /content index enabled · shared sidecar connected/);
   assert.match(output, /frecency\/history session-only/);

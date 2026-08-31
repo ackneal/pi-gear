@@ -3,7 +3,7 @@ import type {
 } from "@ff-labs/fff-bun";
 
 // GlobOptions exists in the SDK API but is not re-exported by @ff-labs/fff-bun@0.10.5.
-type GlobOptions = NonNullable<Parameters<FileFinderApi["glob"]>[1]>;
+export type GlobOptions = NonNullable<Parameters<FileFinderApi["glob"]>[1]>;
 
 export const FFF_SOCKET_ENV = "PI_GEAR_FFF_SOCKET";
 export const DEFAULT_INDEX_READY_TIMEOUT_MS = 10_000;

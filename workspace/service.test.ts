@@ -35,7 +35,7 @@ test("workspace search shares the FFF client and tracks only a subsequently used
             isWatcherReady: true,
             isWarmupComplete: true,
           },
-          health: { version: "0.10.3" },
+          health: { version: "0.10.5" },
         };
       }
       return true;
@@ -53,6 +53,35 @@ test("workspace search shares the FFF client and tracks only a subsequently used
     selectedFilePath: "/workspace/source.ts",
   });
   assert.equal((await search.status()).state, "ready");
+});
+
+test("workspace status uses the installed FFF package version when health is unavailable", async () => {
+  const cases = [
+    {
+      name: "health omits its version",
+      request: async () => ({
+        progress: { scannedFilesCount: 1, isScanning: false, isWatcherReady: true, isWarmupComplete: true },
+        health: {},
+      }),
+      state: "ready",
+    },
+    {
+      name: "status request fails",
+      request: async () => { throw new Error("disconnected"); },
+      state: "error",
+    },
+  ] as const;
+
+  for (const fixture of cases) {
+    const search = new WorkspaceSearch("/workspace", access(), {
+      request: fixture.request,
+      subscribe: async () => async () => undefined,
+    } as unknown as FffClient);
+
+    const status = await search.status();
+    assert.equal(status.version, "0.10.5", fixture.name);
+    assert.equal(status.state, fixture.state, fixture.name);
+  }
 });
 
 test("onChange has one pending subscription and releases it when listeners disappear", async () => {
