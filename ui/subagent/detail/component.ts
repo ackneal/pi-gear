@@ -1,12 +1,8 @@
-import { Key, matchesKey, ScrollView, type Component, type KeyId } from "@earendil-works/pi-tui";
+import { Key, matchesKey, type Component, type KeyId } from "@earendil-works/pi-tui";
 import type { SubagentRun } from "../../../subagents/runtime/types.ts";
-import {
-  BOTTOM_SECTION_HEIGHT,
-  formatDetailContent,
-  frameDetailBox,
-  titleCase,
-  type Theme,
-} from "./format.ts";
+import { DetailContentComponent } from "./content.ts";
+import { DetailFrameComponent } from "./frame.ts";
+import { titleCase, type Theme } from "./format.ts";
 import type { SubagentViewEntry } from "./registry.ts";
 
 function keyHit(data: string, ...keys: (KeyId | string)[]): boolean {
@@ -54,17 +50,12 @@ export class SubagentDetailComponent implements Component {
   private readonly entries: SubagentViewEntry[];
   private index: number;
   private unsubscribe: (() => void) | undefined;
-  private readonly scrollView = new ScrollView(
-    { render: () => [], invalidate: () => {} },
-    { follow: "end" },
-  );
+  private readonly detailContent: DetailContentComponent;
+  private readonly frame: DetailFrameComponent;
 
-  public get scrollTop(): number { return this.scrollView.scrollTop; }
-  public get autoScroll(): boolean { return this.scrollView.isFollowingEnd; }
   public toolsExpanded: boolean = false;
   public thinkingExpanded: boolean = false;
   public statusText: string = "";
-  private lastInnerHeight: number = 10;
 
   constructor(options: SubagentDetailComponentOptions) {
     this.theme = options.theme;
@@ -72,86 +63,74 @@ export class SubagentDetailComponent implements Component {
     this.requestRedraw = options.invalidate;
     this.now = options.now ?? Date.now;
     this.subscribeFn = options.subscribe;
-    this.entries =
-      options.entries && options.entries.length > 0
-        ? options.entries
-        : options.entry
-          ? [options.entry]
-          : [];
+    this.entries = options.entries?.length ? options.entries : [options.entry];
     this.index = Math.min(
       Math.max(0, options.index ?? 0),
       Math.max(0, this.entries.length - 1),
     );
     this.entry = this.entries[this.index] ?? options.entry;
-    if (this.subscribeFn) {
-      this.unsubscribe = this.subscribeFn(this.entry.toolCallId, (run) =>
-        this.update(run),
-      );
-    }
+
+    this.detailContent = new DetailContentComponent(() => ({
+      entry: this.entry,
+      theme: this.theme,
+      now: this.now(),
+      toolsExpanded: this.toolsExpanded,
+      thinkingExpanded: this.thinkingExpanded,
+      statusText: this.statusText,
+    }));
+    this.frame = new DetailFrameComponent(
+      this.detailContent,
+      () => ({
+        entry: this.entry,
+        theme: this.theme,
+        now: this.now(),
+        prevLabel: this.prevLabel(),
+        nextLabel: this.nextLabel(),
+      }),
+      this.requestRedraw,
+    );
+
+    this.subscribeToEntry();
+  }
+
+  private subscribeToEntry(): void {
+    if (!this.subscribeFn) return;
+
+    this.unsubscribe = this.subscribeFn(this.entry.toolCallId, (run) =>
+      this.update(run),
+    );
   }
 
   private select(delta: number): void {
-    const i = this.index + delta;
-    if (i < 0 || i >= this.entries.length || !this.entries[i]) return;
+    const nextIndex = this.index + delta;
+    if (nextIndex < 0 || nextIndex >= this.entries.length) return;
+
     this.unsubscribe?.();
-    this.index = i;
-    this.entry = this.entries[i]!;
-    // Keep toolsExpanded / thinkingExpanded / statusText across windows.
-    this.scrollView.scrollToEnd();
-    if (this.subscribeFn) {
-      this.unsubscribe = this.subscribeFn(this.entry.toolCallId, (run) =>
-        this.update(run),
-      );
-    }
+    this.index = nextIndex;
+    this.entry = this.entries[nextIndex]!;
+    this.frame.scrollToEnd();
+    this.subscribeToEntry();
     this.requestRedraw();
   }
 
   render(width: number): string[] {
-    const termRows = process.stdout?.rows || 24;
-    const innerWidth = Math.max(10, width);
-    const innerHeight = Math.max(
-      1,
-      Math.max(10, termRows) - BOTTOM_SECTION_HEIGHT,
-    );
-
-    const contentLines = formatDetailContent(
-      this.entry,
-      this.theme,
-      innerWidth,
-      this.now(),
-      this.toolsExpanded,
-      this.thinkingExpanded,
-      this.statusText,
-    );
-
-    this.lastInnerHeight = innerHeight;
-    this.scrollView.updateLayout(contentLines.length, innerHeight, this.requestRedraw);
-
-    return frameDetailBox(
-      contentLines,
-      this.entry,
-      width,
-      Math.max(10, termRows),
-      this.scrollView.scrollTop,
-      this.theme,
-      this.now(),
-      this.prevLabel(),
-      this.nextLabel(),
-    );
+    return this.frame.render(width);
   }
 
   private prevLabel(): string {
-    return this.entries[this.index - 1]?.profile.label || this.entries[this.index - 1]?.profile.id || "";
+    const profile = this.entries[this.index - 1]?.profile;
+    return profile?.label || profile?.id || "";
   }
 
   private nextLabel(): string {
-    return this.entries[this.index + 1]?.profile.label || this.entries[this.index + 1]?.profile.id || "";
+    const profile = this.entries[this.index + 1]?.profile;
+    return profile?.label || profile?.id || "";
   }
 
   handleInput(data: string): void {
     const wheel = wheelDirection(data);
     if (wheel !== undefined) {
-      this.scrollView.scrollBy(wheel * 3);
+      this.frame.scrollBy(wheel * 3);
       return;
     }
 
@@ -163,12 +142,10 @@ export class SubagentDetailComponent implements Component {
       this.select(1);
       return;
     }
-
     if (keyHit(data, "\x1b", "escape", "q", Key.escape)) {
       this.onClose();
       return;
     }
-
     if (keyHit(data, "\x0f", "ctrl+o")) {
       this.toolsExpanded = !this.toolsExpanded;
       this.statusText = this.toolsExpanded
@@ -177,7 +154,6 @@ export class SubagentDetailComponent implements Component {
       this.requestRedraw();
       return;
     }
-
     if (keyHit(data, "\x14", "ctrl+t")) {
       this.thinkingExpanded = !this.thinkingExpanded;
       this.statusText = this.thinkingExpanded
@@ -186,40 +162,33 @@ export class SubagentDetailComponent implements Component {
       this.requestRedraw();
       return;
     }
-
-    const halfPage = Math.max(1, Math.floor(Math.max(1, this.lastInnerHeight - 2) / 2));
-
     if (keyHit(data, "up", "k", Key.up)) {
-      this.scrollByLines(-1);
+      this.frame.scrollBy(-1);
       return;
     }
     if (keyHit(data, "down", "j", Key.down)) {
-      this.scrollByLines(1);
+      this.frame.scrollBy(1);
       return;
     }
-
     if (keyHit(data, "\x15", "ctrl+u")) {
-      this.scrollByLines(-halfPage);
+      this.frame.scrollHalfPage(-1);
       return;
     }
     if (keyHit(data, "\x04", "ctrl+d")) {
-      this.scrollByLines(halfPage);
+      this.frame.scrollHalfPage(1);
       return;
     }
-
-    // Vim top/bottom (Home/End omitted: macOS has no such keys)
     if (data === "g") {
-      this.scrollView.scrollToStart();
+      this.frame.scrollToStart();
       return;
     }
     if (data === "G") {
-      this.scrollView.scrollToEnd();
-      return;
+      this.frame.scrollToEnd();
     }
   }
 
   public scrollByLines(lines: number): void {
-    this.scrollView.scrollBy(lines);
+    this.frame.scrollBy(lines);
   }
 
   update(run: SubagentRun): void {
