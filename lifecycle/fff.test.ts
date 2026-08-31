@@ -249,7 +249,7 @@ test("running sidecar child errors fail the client without becoming uncaught", a
   try {
     sidecar = await FffSidecar.start(basePath);
     const clientError = once(sidecar.client, "error");
-    const clientClose = once(sidecar.client, "close");
+    const clientClose = new Promise<void>((resolve) => sidecar!.client.once("close", resolve));
     assert.doesNotThrow(() => sidecar!.child.emit("error", new Error("simulated child failure")));
     assert.match((await clientError)[0].message, /simulated child failure/);
     await clientClose;
