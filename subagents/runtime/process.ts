@@ -28,6 +28,14 @@ export function capabilityToolNames(capabilities: readonly CapabilitySpec[]): st
   return capabilities.flatMap((capability) => capability.kind === "builtin" ? [capability.name] : capability.tools.map((tool) => bridgeToolName(capability.id, tool.name)));
 }
 
+export function withoutWorkspaceSearch(profile: SubagentProfile): SubagentProfile {
+  return {
+    ...profile,
+    capabilities: profile.capabilities.filter((capability) =>
+      capability.kind !== "builtin" || (capability.name !== "find" && capability.name !== "grep")),
+  };
+}
+
 export function childArgs(profile: SubagentProfile, task: string, childExtension: URL, dispatch?: SubagentDispatch): string[] {
   return [
     "--mode",

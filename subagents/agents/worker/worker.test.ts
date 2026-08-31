@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { EventEmitter } from "node:events";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { childArgs } from "../../runtime/process.ts";
+import { childArgs, withoutWorkspaceSearch } from "../../runtime/process.ts";
 import type { SubagentRun } from "../../runtime/types.ts";
 import { WORKER_CAPABILITIES, workerProfile } from "./profile.ts";
 import { WORKER_SYSTEM_PROMPT } from "./prompt.ts";
@@ -55,6 +55,14 @@ test("worker child arguments configure isolation, capabilities, and system promp
   assert.equal(args[args.indexOf("--append-system-prompt") + 1], WORKER_SYSTEM_PROMPT);
   assert.equal(args[args.indexOf("--extension") + 1]?.endsWith("subagents/agents/worker/extension.ts"), true);
   assert.equal(args[args.length - 1], "implement feature");
+});
+
+test("unavailable workspace search is omitted from child capabilities", () => {
+  const profile = withoutWorkspaceSearch(workerProfile);
+  const args = childArgs(profile, "implement feature", new URL("./extension.ts", import.meta.url));
+
+  assert.equal(args[args.indexOf("--tools") + 1], "read,edit,write,bash");
+  assert.equal(workerProfile.capabilities, WORKER_CAPABILITIES);
 });
 
 test("worker extension configures filesystem guard and sandbox", async () => {

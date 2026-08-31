@@ -79,6 +79,20 @@ test("doctor reports workspace search health without normal-session status noise
   assert.match(output, /frecency\/history session-only/);
 });
 
+test("doctor reports the preserved FFF startup failure", () => {
+  const output = formatDoctor(sandboxStatus, [], [], "darwin", undefined, [], {
+    version: "0.10.5",
+    state: "error",
+    indexedFiles: 0,
+    watcherReady: false,
+    contentIndex: true,
+    sharedSidecar: false,
+    error: "FFF sidecar unavailable: Bun executable not found",
+  });
+
+  assert.match(output, /error · FFF sidecar unavailable: Bun executable not found/);
+});
+
 test("gear commands are centrally registered and delegate to their services", async () => {
   const commands = new Map<string, { handler: (args: string, ctx: any) => Promise<void> }>();
   const calls: string[] = [];

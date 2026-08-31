@@ -227,7 +227,7 @@ test("sidecar startup rejects bad Bun executable errors and removes its temporar
   try {
     await assert.rejects(
       FffSidecar.start(basePath, { bunPath: "/definitely/not/a/real/bun", startupTimeoutMs: 200 }),
-      /FFF sidecar failed to start.*ENOENT/,
+      /Bun executable not found/,
     );
     const deadline = Date.now() + 2_000;
     for (;;) {

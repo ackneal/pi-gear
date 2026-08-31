@@ -15,6 +15,7 @@ import { registerWorkspaceTools } from "./tools.ts";
 export interface FffClientSource {
   current(cwd?: string): FffClient | undefined;
   endpoint(cwd?: string): string | undefined;
+  failure?(cwd?: string): string | undefined;
 }
 
 export interface WorkspaceServices {
@@ -40,7 +41,7 @@ export function setupWorkspace(
 
   pi.on("session_start", async (_event, ctx) => {
     clear();
-    connectionError = undefined;
+    connectionError = source?.failure?.(ctx.cwd);
 
     let client: WorkspaceSearchClient | undefined = source?.current(ctx.cwd);
     const endpoint = source?.endpoint(ctx.cwd) ?? process.env[FFF_SOCKET_ENV];
@@ -54,11 +55,9 @@ export function setupWorkspace(
     }
 
     if (!client) {
-      connectionError ??= "FFF sidecar is unavailable";
-      client = {
-        request: async () => { throw new Error(connectionError); },
-        subscribe: async () => { throw new Error(connectionError); },
-      };
+      connectionError ??= "FFF sidecar unavailable";
+      pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "find" && name !== "grep"));
+      return;
     }
 
     const access = filesystem.forWorkspace(ctx.cwd);

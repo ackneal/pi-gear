@@ -57,26 +57,40 @@ export class FffSidecar {
       ?? (process.env.BUN_INSTALL ? join(process.env.BUN_INSTALL, "bin", "bun") : "bun");
     const child = spawn(bunPath, [daemonPath, fffRoot, String(process.pid)], {
       env: { ...process.env, [FFF_SOCKET_ENV]: socketPath },
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "pipe"],
     });
     let spawnError: Error | undefined;
+    let startupStderr = "";
     const recordSpawnError = (error: Error): void => { spawnError = error; };
+    const recordStderr = (chunk: Buffer): void => { startupStderr = `${startupStderr}${chunk}`.slice(-4_000); };
     child.once("error", recordSpawnError);
+    child.stderr?.on("data", recordStderr);
 
     const deadline = Date.now() + (options.startupTimeoutMs ?? 5_000);
     try {
       for (;;) {
-        if (spawnError) throw new Error(`FFF sidecar failed to start: ${spawnError.message}`, { cause: spawnError });
+        if (spawnError) {
+          const reason = (spawnError as NodeJS.ErrnoException).code === "ENOENT"
+            ? "Bun executable not found"
+            : spawnError.message;
+          throw new Error(reason, { cause: spawnError });
+        }
         if (child.exitCode !== null || child.signalCode !== null) {
-          throw new Error(`FFF sidecar exited during startup (${child.signalCode ?? `code ${child.exitCode}`})`);
+          const reason = startupStderr.trim() || `exited (${child.signalCode ?? `code ${child.exitCode}`})`;
+          throw new Error(reason);
         }
         try {
           const client = await FffClient.connect(socketPath);
           const sidecar = new FffSidecar(basePath, tempDir, socketPath, child, client);
           child.off("error", recordSpawnError);
+          child.stderr?.off("data", recordStderr);
+          child.stderr?.resume();
           return sidecar;
         } catch (error) {
-          if (Date.now() >= deadline) throw new Error(`FFF sidecar did not open its socket: ${error instanceof Error ? error.message : error}`);
+          if (Date.now() >= deadline) {
+            const reason = startupStderr.trim() || (error instanceof Error ? error.message : String(error));
+            throw new Error(`FFF sidecar did not open its socket: ${reason}`);
+          }
           await new Promise((resolve) => setTimeout(resolve, 20));
         }
       }

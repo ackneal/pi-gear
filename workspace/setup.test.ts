@@ -47,6 +47,7 @@ test("a canceled session switch leaves the original workspace find and grep usab
   await handlers.session_start?.({}, ctx);
   const original = services.current(ctx.cwd);
   assert.ok(original);
+  assert.deepEqual([...tools.keys()].sort(), ["find", "grep"]);
   assert.equal(handlers.session_before_switch, undefined);
 
   // A canceled switch emits no subsequent session_start; existing tool closures must remain valid.
@@ -58,4 +59,30 @@ test("a canceled session switch leaves the original workspace find and grep usab
   assert.equal(services.current(ctx.cwd), original);
   assert.match(JSON.stringify(find), /kept\.ts/);
   assert.match(JSON.stringify(grep), /still usable/);
+});
+
+test("unavailable FFF omits workspace tools and preserves its diagnostic", async () => {
+  const handlers: Record<string, (...args: any[]) => any> = {};
+  const registered: string[] = [];
+  let activeTools = ["read", "find", "grep", "write"];
+  const filesystem = { forWorkspace: () => ({}) } as unknown as FilesystemAccessService;
+  const pi = {
+    on: (event: string, handler: (...args: any[]) => any) => { handlers[event] = handler; },
+    registerTool: (tool: ToolDefinition) => registered.push(tool.name),
+    getActiveTools: () => activeTools,
+    setActiveTools: (tools: string[]) => { activeTools = tools; },
+  } as unknown as ExtensionAPI;
+  const services = setupWorkspace(pi, filesystem, {
+    current: () => undefined,
+    endpoint: () => undefined,
+    failure: () => "FFF sidecar unavailable: Bun executable not found",
+  });
+  const ctx = { cwd: "/workspace", hasUI: false } as ExtensionContext;
+
+  await handlers.session_start?.({}, ctx);
+
+  assert.deepEqual(registered, []);
+  assert.deepEqual(activeTools, ["read", "write"]);
+  assert.equal(services.current(ctx.cwd), undefined);
+  assert.equal((await services.status(ctx.cwd))?.error, "FFF sidecar unavailable: Bun executable not found");
 });

@@ -20,7 +20,16 @@ Install pi-gear through Pi's package manager:
 pi install git:github.com/ackneal/pi-gear
 ```
 
-Requirements: Node.js 22.19 or newer and macOS when sandboxing is enabled. Tested with Pi 0.84.3.
+Requirements: Node.js 22.19 or newer, Bun 1.3.13, and macOS when sandboxing is enabled. Tested with Pi 0.84.3. Both `node` and `bun` must be on `PATH` when Pi starts (including when Pi is launched from an editor or GUI).
+
+Pi's git install flow runs `npm install` in its managed checkout, so pi-gear's package dependencies—including `@ff-labs/fff-bun` and its platform-specific native package—are installed automatically. It does not install the Bun runtime itself. You do not need to run `bun install` in pi-gear's checkout.
+
+If startup reports that Bun or the file finder is unavailable, check the environment seen by Pi:
+
+```sh
+node --version   # v22.19.0 or newer
+bun --version    # 1.3.13
+```
 
 Update installed Pi packages with:
 

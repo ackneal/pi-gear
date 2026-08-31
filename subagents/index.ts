@@ -78,6 +78,7 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
           return runResearcher(task, {
             cwd: ctx.cwd,
             dispatch,
+            workspaceSearch: endpoint !== undefined,
             ...(endpoint ? { env: { PI_GEAR_FFF_SOCKET: endpoint } } : {}),
             signal: childSignal,
             onUpdate: (next) => {
@@ -117,6 +118,7 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
           return runWorker(task, {
             cwd: ctx.cwd,
             dispatch,
+            workspaceSearch: endpoint !== undefined,
             ...(endpoint ? { env: { PI_GEAR_FFF_SOCKET: endpoint } } : {}),
             signal: childSignal,
             onUpdate: (next) => {
