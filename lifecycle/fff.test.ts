@@ -82,7 +82,12 @@ test("FFF request validation accepts every supported method contract", () => {
   const requests = [
     { id: 1, method: "status" },
     { id: 1, method: "fileSearch", params: { query: "src", options: { pageSize: 20 } } },
-    { id: 1, method: "glob", params: { pattern: "**/*.ts", options: { currentFile: "src/a.ts" } } },
+    { id: 1, method: "glob", params: { pattern: "**/*.ts", options: {
+      maxThreads: 2,
+      currentFile: "src/a.ts",
+      pageIndex: 1,
+      pageSize: 20,
+    } } },
     { id: 1, method: "mixedSearch", params: { query: "src", options: { maxThreads: 2 } } },
     { id: 1, method: "grep", params: { query: "TODO", options: { mode: "plain", smartCase: true } } },
     { id: 1, method: "multiGrep", params: { patterns: ["TODO", "FIXME"], constraints: "*.ts" } },
@@ -110,6 +115,8 @@ test("FFF request validation rejects invalid envelopes and method payloads", () 
     ["status params", { id: 1, method: "status", params: {} }],
     ["fileSearch query", { id: 1, method: "fileSearch", params: { query: 42 } }],
     ["glob pattern", { id: 1, method: "glob", params: { pattern: null } }],
+    ["glob combo boost", { id: 1, method: "glob", params: { pattern: "**/*", options: { comboBoostMultiplier: 2 } } }],
+    ["glob combo count", { id: 1, method: "glob", params: { pattern: "**/*", options: { minComboCount: 3 } } }],
     ["mixedSearch options", { id: 1, method: "mixedSearch", params: { query: "src", options: [] } }],
     ["grep option", { id: 1, method: "grep", params: { query: "x", options: { smartCase: "yes" } } }],
     ["multiGrep patterns", { id: 1, method: "multiGrep", params: { patterns: ["x", 2] } }],

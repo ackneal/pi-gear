@@ -1,6 +1,9 @@
 import type {
-  GrepOptions, MultiGrepOptions, SearchOptions, WatchEvent, WatchOptions,
+  FileFinderApi, GrepOptions, MultiGrepOptions, SearchOptions, WatchEvent, WatchOptions,
 } from "@ff-labs/fff-node";
+
+// GlobOptions exists in the SDK API but is not re-exported by @ff-labs/fff-node@0.10.3.
+type GlobOptions = NonNullable<Parameters<FileFinderApi["glob"]>[1]>;
 
 export const FFF_SOCKET_ENV = "PI_GEAR_FFF_SOCKET";
 export const DEFAULT_INDEX_READY_TIMEOUT_MS = 10_000;
@@ -8,7 +11,7 @@ export const DEFAULT_INDEX_READY_TIMEOUT_MS = 10_000;
 export interface FffParams {
   status: undefined;
   fileSearch: { query: string; options?: SearchOptions };
-  glob: { pattern: string; options?: SearchOptions };
+  glob: { pattern: string; options?: GlobOptions };
   mixedSearch: { query: string; options?: SearchOptions };
   grep: { query: string; options?: GrepOptions };
   multiGrep: MultiGrepOptions;
@@ -40,6 +43,7 @@ export type FffMessage = FffResponse | FffEvent;
 
 const watchKinds = new Set(["created", "modified", "removed", "rescan"]);
 const grepModes = new Set(["plain", "regex", "fuzzy"]);
+const globOptionKeys = new Set(["maxThreads", "currentFile", "pageIndex", "pageSize"]);
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 const hasOwn = (value: Record<string, unknown>, key: string): boolean =>
@@ -62,6 +66,15 @@ function isSearchOptions(value: unknown): value is SearchOptions {
     && optional(value, "currentFile", isString)
     && optional(value, "comboBoostMultiplier", isNumber)
     && optional(value, "minComboCount", isId)
+    && optional(value, "pageIndex", isId)
+    && optional(value, "pageSize", isId);
+}
+
+function isGlobOptions(value: unknown): value is GlobOptions {
+  return isRecord(value)
+    && Object.keys(value).every((key) => globOptionKeys.has(key))
+    && optional(value, "maxThreads", isId)
+    && optional(value, "currentFile", isString)
     && optional(value, "pageIndex", isId)
     && optional(value, "pageSize", isId);
 }
@@ -110,7 +123,7 @@ const requestParamsValidators = {
     && optional(value, "options", isSearchOptions),
   glob: (value: unknown) => isRecord(value)
     && isString(value.pattern)
-    && optional(value, "options", isSearchOptions),
+    && optional(value, "options", isGlobOptions),
   mixedSearch: (value: unknown) => isRecord(value)
     && isString(value.query)
     && optional(value, "options", isSearchOptions),
