@@ -19,6 +19,25 @@ const setupFilesystemGuard = (
 
 type ToolCall = { type: "tool_call"; toolName: string; toolCallId: string; input: Record<string, unknown> };
 
+test("filesystem state survives before-switch and clears at session boundaries", () => {
+  const handlers: Record<string, () => void> = {};
+  const pi = {
+    on: (event: string, listener: () => void) => { handlers[event] = listener; },
+    sendMessage: () => undefined,
+  } as unknown as ExtensionAPI;
+  const service = setupFilesystemGuardImpl(pi, { loadConfig: async () => testConfig });
+
+  const original = service.forWorkspace("/workspace");
+  assert.equal(handlers.session_before_switch, undefined);
+  assert.equal(service.forWorkspace("/workspace"), original);
+
+  handlers.session_start?.();
+  const started = service.forWorkspace("/workspace");
+  assert.notEqual(started, original);
+  handlers.session_shutdown?.();
+  assert.notEqual(service.forWorkspace("/workspace"), started);
+});
+
 test("headless outside-workspace file access is denied when policy asks", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "pi-gear-file-guard-"));
   let handler: ((event: ToolCall, ctx: ExtensionContext) => Promise<unknown>) | undefined;

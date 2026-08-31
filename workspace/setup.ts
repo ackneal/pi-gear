@@ -32,9 +32,14 @@ export function setupWorkspace(
   let ownedClient: FffClient | undefined;
   let connectionError: string | undefined;
 
-  pi.on("session_start", async (_event, ctx) => {
+  const clear = (): void => {
+    search = undefined;
     ownedClient?.close();
     ownedClient = undefined;
+  };
+
+  pi.on("session_start", async (_event, ctx) => {
+    clear();
     connectionError = undefined;
 
     let client: WorkspaceSearchClient | undefined = source?.current(ctx.cwd);
@@ -76,12 +81,6 @@ export function setupWorkspace(
     }
   });
 
-  const clear = (): void => {
-    search = undefined;
-    ownedClient?.close();
-    ownedClient = undefined;
-  };
-  pi.on("session_before_switch", clear);
   pi.on("session_shutdown", clear);
 
   return {

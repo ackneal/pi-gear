@@ -31,11 +31,6 @@ export function setupLifecycle(pi: ExtensionAPI): LifecycleServices {
     }
   });
 
-  pi.on("session_before_switch", async () => {
-    clearSubagentRegistry();
-    await stopFff();
-  });
-
   pi.on("session_shutdown", async () => {
     clearSubagentRegistry();
     await stopFff();

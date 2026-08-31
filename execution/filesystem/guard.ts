@@ -74,7 +74,7 @@ export function setupFilesystemGuard(
     confirmationQueue.reset();
     workspaces.clear();
   };
-  pi.on("session_before_switch", clear);
+  pi.on("session_start", clear);
   pi.on("session_shutdown", clear);
 
   return { forWorkspace };
