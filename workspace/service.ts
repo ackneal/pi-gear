@@ -187,7 +187,7 @@ export class WorkspaceSearch {
     return items.filter(({ relativePath }) => allowed.has(resolve(this.root, relativePath)));
   }
 
-  private withFocus(options: SearchOptions): SearchOptions {
+  private withFocus<T extends { currentFile?: string }>(options: T): T {
     return this.focusFile ? { ...options, currentFile: this.focusFile } : options;
   }
 }

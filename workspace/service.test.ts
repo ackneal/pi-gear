@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { FilesystemAccess } from "../execution/filesystem/access.ts";
 import type { FffClient } from "../lifecycle/fff-client.ts";
+import { FFF_VERSION } from "../lifecycle/fff-version.ts";
 import { WorkspaceSearch } from "./service.ts";
 
 const policy = {
@@ -79,7 +80,7 @@ test("workspace status uses the installed FFF package version when health is una
     } as unknown as FffClient);
 
     const status = await search.status();
-    assert.equal(status.version, "0.10.5", fixture.name);
+    assert.equal(status.version, FFF_VERSION, fixture.name);
     assert.equal(status.state, fixture.state, fixture.name);
   }
 });
