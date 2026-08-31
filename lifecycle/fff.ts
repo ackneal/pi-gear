@@ -43,13 +43,18 @@ export class FffSidecar {
       env: { ...process.env, [FFF_SOCKET_ENV]: socketPath },
       stdio: "ignore",
     });
+    let spawnError: Error | undefined;
+    const recordSpawnError = (error: Error): void => { spawnError = error; };
+    child.once("error", recordSpawnError);
 
     const deadline = Date.now() + (options.startupTimeoutMs ?? 5_000);
     try {
       for (;;) {
+        if (spawnError) throw new Error(`FFF sidecar failed to start: ${spawnError.message}`, { cause: spawnError });
         if (child.exitCode !== null) throw new Error(`FFF sidecar exited with code ${child.exitCode}`);
         try {
           const client = await FffClient.connect(socketPath);
+          child.off("error", recordSpawnError);
           return new FffSidecar(basePath, tempDir, socketPath, child, client);
         } catch (error) {
           if (Date.now() >= deadline) throw new Error(`FFF sidecar did not open its socket: ${error instanceof Error ? error.message : error}`);
@@ -57,6 +62,7 @@ export class FffSidecar {
         }
       }
     } catch (error) {
+      child.off("error", recordSpawnError);
       child.kill();
       await rm(tempDir, { recursive: true, force: true });
       throw error;

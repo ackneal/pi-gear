@@ -3,7 +3,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { FileFinder } from "@ff-labs/fff-node";
 import type { FileFinderApi, FileItem, InitOptions, MultiGrepOptions, Result, WatchUnsubscribe } from "@ff-labs/fff-node";
 import {
-  DEFAULT_INDEX_READY_TIMEOUT_MS, FFF_SOCKET_ENV,
+  DEFAULT_INDEX_READY_TIMEOUT_MS, FFF_SOCKET_ENV, isFffRequest,
   type FffRequest,
 } from "./fff-protocol.ts";
 
@@ -62,14 +62,18 @@ export async function startFffSidecar(options: FffSidecarServerOptions): Promise
         buffer = buffer.slice(newline + 1);
         if (!line.trim()) continue;
 
-        let request: FffRequest;
+        let parsed: unknown;
         try {
-          request = JSON.parse(line) as FffRequest;
+          parsed = JSON.parse(line);
         } catch {
           socket.destroy();
           return;
         }
-        void handle(socket, request);
+        if (!isFffRequest(parsed)) {
+          socket.destroy();
+          return;
+        }
+        void handle(socket, parsed);
       }
     });
     socket.on("error", () => undefined);

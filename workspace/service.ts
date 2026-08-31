@@ -32,7 +32,8 @@ export class WorkspaceSearch {
   private readonly listeners = new Set<WorkspaceChangeListener>();
   private unsubscribe: (() => Promise<void>) | undefined;
   private subscriptionPending = false;
-  private listenerRevision = 0;
+  private subscriptionRetry: ReturnType<typeof setTimeout> | undefined;
+  private subscriptionFailures = 0;
   private focusFile: string | undefined;
   private readonly pendingQueries = new Map<string, Set<string>>();
 
@@ -84,15 +85,19 @@ export class WorkspaceSearch {
 
   onChange(listener: WorkspaceChangeListener): () => void {
     this.listeners.add(listener);
-    this.listenerRevision++;
     this.ensureSubscription();
 
     return () => {
       this.listeners.delete(listener);
-      if (this.listeners.size === 0 && this.unsubscribe) {
-        const unsubscribe = this.unsubscribe;
-        this.unsubscribe = undefined;
-        void unsubscribe().catch(() => undefined);
+      if (this.listeners.size === 0) {
+        if (this.subscriptionRetry) clearTimeout(this.subscriptionRetry);
+        this.subscriptionRetry = undefined;
+        this.subscriptionFailures = 0;
+        if (this.unsubscribe) {
+          const unsubscribe = this.unsubscribe;
+          this.unsubscribe = undefined;
+          void unsubscribe().catch(() => undefined);
+        }
       }
     };
   }
@@ -148,14 +153,14 @@ export class WorkspaceSearch {
   }
 
   private ensureSubscription(): void {
-    if (this.unsubscribe || this.subscriptionPending || this.listeners.size === 0) return;
+    if (this.unsubscribe || this.subscriptionPending || this.subscriptionRetry || this.listeners.size === 0) return;
 
     this.subscriptionPending = true;
-    const listenerRevision = this.listenerRevision;
     void this.client.subscribe((events) => {
       for (const current of this.listeners) current(events);
     }).then((unsubscribe) => {
       this.subscriptionPending = false;
+      this.subscriptionFailures = 0;
       if (this.listeners.size === 0) {
         void unsubscribe().catch(() => undefined);
         return;
@@ -163,7 +168,14 @@ export class WorkspaceSearch {
       this.unsubscribe = unsubscribe;
     }).catch(() => {
       this.subscriptionPending = false;
-      if (listenerRevision !== this.listenerRevision) this.ensureSubscription();
+      if (this.listeners.size === 0 || this.subscriptionFailures >= 3) return;
+
+      const delay = Math.min(25 * (2 ** this.subscriptionFailures), 100);
+      this.subscriptionFailures++;
+      this.subscriptionRetry = setTimeout(() => {
+        this.subscriptionRetry = undefined;
+        this.ensureSubscription();
+      }, delay);
     });
   }
 

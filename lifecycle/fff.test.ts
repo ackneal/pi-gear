@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, Socket } from "node:net";
@@ -7,7 +7,8 @@ import test from "node:test";
 import type { FileFinderApi, InitOptions } from "@ff-labs/fff-node";
 import { FffClient } from "./fff-client.ts";
 import { startFffSidecar, fffFinderOptions } from "./fff-sidecar.ts";
-import { resolveFffRoot } from "./fff.ts";
+import { FffSidecar, resolveFffRoot } from "./fff.ts";
+import { isFffMessage, isFffRequest } from "./fff-protocol.ts";
 
 async function temporarySocket(name: string): Promise<{ dir: string; path: string }> {
   const dir = await mkdtemp(join(tmpdir(), name));
@@ -50,6 +51,39 @@ test("client safely handles unobserved transport and malformed JSON errors", () 
   client.close();
 });
 
+test("client rejects valid JSON that is not a protocol response or event", () => {
+  const malformed = [
+    null,
+    [],
+    {},
+    { id: "1", result: true },
+    { id: 1 },
+    { id: 1, result: true, error: "both" },
+    { id: 1, error: 42 },
+    { event: "watch", subscriptionId: 1, data: null },
+    { event: "watch", subscriptionId: 1, data: [{ path: "/x", kind: "unknown" }] },
+  ];
+
+  for (const value of malformed) {
+    assert.equal(isFffMessage(value), false);
+    const socket = new Socket();
+    const client = new FffClient(socket);
+    const errors: Error[] = [];
+    client.on("error", (error) => errors.push(error));
+
+    assert.doesNotThrow(() => socket.emit("data", `${JSON.stringify(value)}\n`));
+    assert.match(errors[0]?.message ?? "", /Invalid FFF sidecar message/);
+    client.close();
+  }
+});
+
+test("request validation rejects malformed protocol objects", () => {
+  for (const value of [null, 42, {}, [], { event: 123 }, { id: null, method: "status" }, { id: 1, method: 123 }]) {
+    assert.equal(isFffRequest(value), false);
+  }
+  assert.equal(isFffRequest({ id: 1, method: "status" }), true);
+});
+
 test("client correlates concurrent out-of-order responses and delivers events", async (t) => {
   const temporary = await temporarySocket("pi-gear-client-");
   const server = createServer((socket) => {
@@ -84,6 +118,62 @@ test("client correlates concurrent out-of-order responses and delivers events", 
     client.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(temporary.dir, { recursive: true, force: true });
+  }
+});
+
+test("sidecar closes malformed request connections without affecting valid clients", async (t) => {
+  const temporary = await temporarySocket("pi-gear-malformed-requests-");
+  const finder = {
+    getScanProgress: () => ({ ok: true, value: {} }),
+    healthCheck: () => ({ ok: true, value: {} }),
+    destroy: () => undefined,
+  } as unknown as FileFinderApi;
+  let daemon;
+  try {
+    daemon = await startFffSidecar({
+      socketPath: temporary.path,
+      basePath: "/workspace",
+      createFinder: () => ({ ok: true, value: finder }),
+    });
+  } catch (error) {
+    await rm(temporary.dir, { recursive: true, force: true });
+    if ((error as NodeJS.ErrnoException).code === "EPERM") { t.skip("Unix sockets unavailable in test harness"); return; }
+    throw error;
+  }
+
+  try {
+    for (const value of [null, 42, {}, [], { event: 123 }, { id: null }, { id: 1, method: 123 }]) {
+      const socket = await new Promise<Socket>((resolve, reject) => {
+        const connected = new Socket();
+        connected.once("error", reject);
+        connected.connect(temporary.path, () => { connected.off("error", reject); resolve(connected); });
+      });
+      const closed = new Promise<void>((resolve) => socket.once("close", () => resolve()));
+      socket.write(`${JSON.stringify(value)}\n`);
+      await closed;
+    }
+
+    const client = await FffClient.connect(temporary.path);
+    assert.equal(typeof await client.request("status"), "object");
+    client.close();
+  } finally {
+    await daemon.close();
+    await rm(temporary.dir, { recursive: true, force: true });
+  }
+});
+
+test("sidecar startup rejects spawn errors and removes its temporary directory", async () => {
+  const before = new Set((await readdir(tmpdir())).filter((name) => name.startsWith("pi-gear-fff-")));
+  const basePath = await mkdtemp(join(tmpdir(), "pi-gear-spawn-base-"));
+  try {
+    await assert.rejects(
+      FffSidecar.start(basePath, { nodePath: "/definitely/not/a/real/node", startupTimeoutMs: 200 }),
+      /FFF sidecar failed to start.*ENOENT/,
+    );
+    const after = (await readdir(tmpdir())).filter((name) => name.startsWith("pi-gear-fff-") && !before.has(name));
+    assert.deepEqual(after, []);
+  } finally {
+    await rm(basePath, { recursive: true, force: true });
   }
 });
 

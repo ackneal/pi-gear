@@ -27,6 +27,43 @@ export interface FffEvent {
 
 export type FffMessage = FffResponse | FffEvent;
 
+const fffMethods = new Set<FffMethod>([
+  "status", "fileSearch", "glob", "mixedSearch", "grep", "multiGrep",
+  "files", "dirtyFiles", "trackQuery", "subscribe", "unsubscribe", "shutdown",
+]);
+const watchKinds = new Set(["created", "modified", "removed", "rescan"]);
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+const hasOwn = (value: Record<string, unknown>, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(value, key);
+const isId = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+
+export function isFffRequest(value: unknown): value is FffRequest {
+  return isRecord(value)
+    && isId(value.id)
+    && typeof value.method === "string"
+    && fffMethods.has(value.method as FffMethod);
+}
+
+export function isFffMessage(value: unknown): value is FffMessage {
+  if (!isRecord(value)) return false;
+
+  if (value.event === "watch") {
+    return isId(value.subscriptionId)
+      && Array.isArray(value.data)
+      && value.data.every((event) =>
+        isRecord(event)
+        && typeof event.path === "string"
+        && typeof event.kind === "string"
+        && watchKinds.has(event.kind));
+  }
+
+  if (!isId(value.id)) return false;
+  const hasResult = hasOwn(value, "result");
+  const hasError = hasOwn(value, "error");
+  return hasResult !== hasError && (!hasError || typeof value.error === "string");
+}
+
 export interface FffParams {
   status: undefined;
   fileSearch: { query: string; options?: SearchOptions };

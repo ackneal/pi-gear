@@ -59,6 +59,29 @@ test("FFF autocomplete preserves discovery ranking and tracks actual selection",
   assert.deepEqual(tracked, [["allow", "src/allowed.ts"]]);
 });
 
+test("FFF autocomplete clears selections from the previous suggestion batch", async () => {
+  const tracked: [string, string][] = [];
+  let path = "first.ts";
+  const search = {
+    mixedSearch: async () => ({
+      items: [{ type: "file", item: { relativePath: path } }],
+    }),
+    trackQuery: async (query: string, selectedPath: string) => {
+      tracked.push([query, selectedPath]);
+    },
+  } as unknown as WorkspaceSearch;
+  const provider = new WorkspaceAutocompleteProvider(fallback, search);
+  const signal = new AbortController().signal;
+
+  const first = await provider.getSuggestions(["@first"], 0, 6, { signal });
+  path = "second.ts";
+  await provider.getSuggestions(["@second"], 0, 7, { signal });
+  provider.applyCompletion(["@first"], 0, 6, first!.items[0]!, "@first");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(tracked, []);
+});
+
 test("FFF autocomplete discards a search aborted while it is in flight", async () => {
   let resolveSearch!: (value: unknown) => void;
   let fallbackCalls = 0;

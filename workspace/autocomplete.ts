@@ -12,6 +12,7 @@ const atPrefix = (text: string): string | undefined =>
 export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
   readonly triggerCharacters = ["@"];
   private readonly selections = new Map<string, { query: string; path: string }>();
+  private suggestionGeneration = 0;
   private readonly current: AutocompleteProvider;
   private readonly search: WorkspaceSearch;
 
@@ -26,6 +27,8 @@ export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
     cursorCol: number,
     options: { signal: AbortSignal; force?: boolean },
   ): Promise<AutocompleteSuggestions | null> {
+    const generation = ++this.suggestionGeneration;
+    this.selections.clear();
     const line = (lines[cursorLine] ?? "").slice(0, cursorCol);
     const prefix = atPrefix(line);
     if (!prefix) {
@@ -45,7 +48,9 @@ export class WorkspaceAutocompleteProvider implements AutocompleteProvider {
         const displayPath = `${path}${directory && !path.endsWith("/") ? "/" : ""}`;
         const label = `${basename(path)}${directory ? "/" : ""}`;
         const value = `@${displayPath.includes(" ") ? `"${displayPath}"` : displayPath}`;
-        this.selections.set(value, { query, path });
+        if (generation === this.suggestionGeneration) {
+          this.selections.set(value, { query, path });
+        }
         return { value, label, description: displayPath };
       });
 

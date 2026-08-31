@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { createConnection, type Socket } from "node:net";
 import type { WatchEvent } from "@ff-labs/fff-node";
-import type { FffEvent, FffMessage, FffMethod, FffParams, FffResponse } from "./fff-protocol.ts";
+import { isFffMessage, type FffEvent, type FffMessage, type FffMethod, type FffParams, type FffResponse } from "./fff-protocol.ts";
 
 export interface FffClientEvents {
   watch: [subscriptionId: number, events: WatchEvent[]];
@@ -68,16 +68,18 @@ export class FffClient extends EventEmitter<FffClientEvents> {
       const line = this.#buffer.slice(0, newline);
       this.#buffer = this.#buffer.slice(newline + 1);
       if (!line.trim()) continue;
-      let message: FffMessage;
+      let parsed: unknown;
       try {
-        message = JSON.parse(line) as FffMessage;
+        parsed = JSON.parse(line);
       } catch {
-        const error = new Error("Invalid FFF sidecar JSON");
-        this.emit("error", error);
-        this.#fail(error);
-        this.socket.destroy();
+        this.#rejectProtocol("Invalid FFF sidecar JSON");
         return;
       }
+      if (!isFffMessage(parsed)) {
+        this.#rejectProtocol("Invalid FFF sidecar message");
+        return;
+      }
+      const message: FffMessage = parsed;
       if ("event" in message) {
         const event = message as FffEvent;
         this.emit("watch", event.subscriptionId, event.data);
@@ -90,6 +92,13 @@ export class FffClient extends EventEmitter<FffClientEvents> {
         else pending.resolve(response.result);
       }
     }
+  }
+
+  #rejectProtocol(message: string): void {
+    const error = new Error(message);
+    this.emit("error", error);
+    this.#fail(error);
+    this.socket.destroy();
   }
 
   #fail(error: Error): void {

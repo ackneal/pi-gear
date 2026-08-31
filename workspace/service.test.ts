@@ -84,24 +84,37 @@ test("onChange has one pending subscription and releases it when listeners disap
   assert.equal(unsubscribeCalls, 1);
 });
 
-test("onChange retries a failed pending subscription when another listener joined", async () => {
-  let rejectSubscription!: (error: Error) => void;
+test("onChange retries a transient first subscription failure for one listener", async () => {
   let subscribeCalls = 0;
   const client = {
     subscribe: async () => {
       subscribeCalls++;
-      if (subscribeCalls > 1) return async () => undefined;
-      return await new Promise<() => Promise<void>>((_resolve, reject) => {
-        rejectSubscription = reject;
-      });
+      if (subscribeCalls === 1) throw new Error("temporary failure");
+      return async () => undefined;
     },
   } as unknown as FffClient;
   const search = new WorkspaceSearch("/workspace", access(), client);
 
   search.onChange(() => undefined);
-  search.onChange(() => undefined);
-  rejectSubscription(new Error("temporary failure"));
-  await new Promise<void>((resolve) => setImmediate(resolve));
+  await new Promise<void>((resolve) => setTimeout(resolve, 40));
 
   assert.equal(subscribeCalls, 2);
+});
+
+test("onChange cancels scheduled retries when listeners disappear", async () => {
+  let subscribeCalls = 0;
+  const client = {
+    subscribe: async () => {
+      subscribeCalls++;
+      throw new Error("temporary failure");
+    },
+  } as unknown as FffClient;
+  const search = new WorkspaceSearch("/workspace", access(), client);
+
+  const remove = search.onChange(() => undefined);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  remove();
+  await new Promise<void>((resolve) => setTimeout(resolve, 40));
+
+  assert.equal(subscribeCalls, 1);
 });
