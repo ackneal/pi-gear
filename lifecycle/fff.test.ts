@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -77,11 +78,50 @@ test("client rejects valid JSON that is not a protocol response or event", () =>
   }
 });
 
-test("request validation rejects malformed protocol objects", () => {
-  for (const value of [null, 42, {}, [], { event: 123 }, { id: null, method: "status" }, { id: 1, method: 123 }]) {
-    assert.equal(isFffRequest(value), false);
-  }
-  assert.equal(isFffRequest({ id: 1, method: "status" }), true);
+test("FFF request validation accepts every supported method contract", () => {
+  const requests = [
+    { id: 1, method: "status" },
+    { id: 1, method: "fileSearch", params: { query: "src", options: { pageSize: 20 } } },
+    { id: 1, method: "glob", params: { pattern: "**/*.ts", options: { currentFile: "src/a.ts" } } },
+    { id: 1, method: "mixedSearch", params: { query: "src", options: { maxThreads: 2 } } },
+    { id: 1, method: "grep", params: { query: "TODO", options: { mode: "plain", smartCase: true } } },
+    { id: 1, method: "multiGrep", params: { patterns: ["TODO", "FIXME"], constraints: "*.ts" } },
+    { id: 1, method: "files", params: { pageSize: 100 } },
+    { id: 1, method: "dirtyFiles" },
+    { id: 1, method: "trackQuery", params: { query: "src", selectedFilePath: "/workspace/src.ts" } },
+    { id: 1, method: "subscribe", params: { pattern: "**/*.ts", options: { ignore: ["dist/**"] } } },
+    { id: 1, method: "unsubscribe", params: { subscriptionId: 2 } },
+    { id: 1, method: "shutdown" },
+  ];
+
+  for (const request of requests) assert.equal(isFffRequest(request), true, request.method);
+});
+
+test("FFF request validation rejects invalid envelopes and method payloads", () => {
+  const invalid = [
+    ["null", null],
+    ["primitive", 42],
+    ["array", []],
+    ["missing id", { method: "status" }],
+    ["invalid id", { id: null, method: "status" }],
+    ["missing method", { id: 1 }],
+    ["invalid method type", { id: 1, method: 123 }],
+    ["unsupported method", { id: 1, method: "unknown" }],
+    ["status params", { id: 1, method: "status", params: {} }],
+    ["fileSearch query", { id: 1, method: "fileSearch", params: { query: 42 } }],
+    ["glob pattern", { id: 1, method: "glob", params: { pattern: null } }],
+    ["mixedSearch options", { id: 1, method: "mixedSearch", params: { query: "src", options: [] } }],
+    ["grep option", { id: 1, method: "grep", params: { query: "x", options: { smartCase: "yes" } } }],
+    ["multiGrep patterns", { id: 1, method: "multiGrep", params: { patterns: ["x", 2] } }],
+    ["files pageSize", { id: 1, method: "files", params: { pageSize: "large" } }],
+    ["dirtyFiles params", { id: 1, method: "dirtyFiles", params: [] }],
+    ["trackQuery params", { id: 1, method: "trackQuery", params: null }],
+    ["subscribe ignore", { id: 1, method: "subscribe", params: { options: { ignore: "dist" } } }],
+    ["unsubscribe id", { id: 1, method: "unsubscribe", params: { subscriptionId: "invalid" } }],
+    ["shutdown params", { id: 1, method: "shutdown", params: {} }],
+  ] as const;
+
+  for (const [name, request] of invalid) assert.equal(isFffRequest(request), false, name);
 });
 
 test("client correlates concurrent out-of-order responses and delivers events", async (t) => {
@@ -142,7 +182,18 @@ test("sidecar closes malformed request connections without affecting valid clien
   }
 
   try {
-    for (const value of [null, 42, {}, [], { event: 123 }, { id: null }, { id: 1, method: 123 }]) {
+    for (const value of [
+      null,
+      42,
+      {},
+      [],
+      { event: 123 },
+      { id: null },
+      { id: 1, method: 123 },
+      { id: 1, method: "fileSearch", params: { query: 42 } },
+      { id: 1, method: "trackQuery", params: null },
+      { id: 1, method: "unsubscribe", params: { subscriptionId: "invalid" } },
+    ]) {
       const socket = await new Promise<Socket>((resolve, reject) => {
         const connected = new Socket();
         connected.once("error", reject);
@@ -173,6 +224,38 @@ test("sidecar startup rejects spawn errors and removes its temporary directory",
     const after = (await readdir(tmpdir())).filter((name) => name.startsWith("pi-gear-fff-") && !before.has(name));
     assert.deepEqual(after, []);
   } finally {
+    await rm(basePath, { recursive: true, force: true });
+  }
+});
+
+test("running sidecar child errors fail the client without becoming uncaught", async (t) => {
+  const socketProbe = await temporarySocket("pi-gear-sidecar-probe-");
+  const probe = createServer();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      probe.once("error", reject);
+      probe.listen(socketProbe.path, () => { probe.off("error", reject); resolve(); });
+    });
+  } catch (error) {
+    await rm(socketProbe.dir, { recursive: true, force: true });
+    if ((error as NodeJS.ErrnoException).code === "EPERM") { t.skip("Unix sockets unavailable in test harness"); return; }
+    throw error;
+  }
+  await new Promise<void>((resolve) => probe.close(() => resolve()));
+  await rm(socketProbe.dir, { recursive: true, force: true });
+
+  const basePath = await mkdtemp(join(tmpdir(), "pi-gear-running-error-"));
+  let sidecar: FffSidecar | undefined;
+  try {
+    sidecar = await FffSidecar.start(basePath);
+    const clientError = once(sidecar.client, "error");
+    const clientClose = once(sidecar.client, "close");
+    assert.doesNotThrow(() => sidecar!.child.emit("error", new Error("simulated child failure")));
+    assert.match((await clientError)[0].message, /simulated child failure/);
+    await clientClose;
+  } finally {
+    await sidecar?.dispose();
+    await sidecar?.dispose();
     await rm(basePath, { recursive: true, force: true });
   }
 });

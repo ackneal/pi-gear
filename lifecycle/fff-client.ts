@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { createConnection, type Socket } from "node:net";
 import type { WatchEvent } from "@ff-labs/fff-node";
-import { isFffMessage, type FffEvent, type FffMessage, type FffMethod, type FffParams, type FffResponse } from "./fff-protocol.ts";
+import { isFffMessage, type FffMethod, type FffParams } from "./fff-protocol.ts";
 
 export interface FffClientEvents {
   watch: [subscriptionId: number, events: WatchEvent[]];
@@ -38,7 +38,10 @@ export class FffClient extends EventEmitter<FffClientEvents> {
     });
   }
 
-  request<M extends FffMethod>(method: M, params?: FffParams[M]): Promise<unknown> {
+  request<M extends FffMethod>(
+    method: M,
+    ...[params]: undefined extends FffParams[M] ? [params?: FffParams[M]] : [params: FffParams[M]]
+  ): Promise<unknown> {
     const id = this.#nextId++;
     return new Promise((resolve, reject) => {
       this.#pending.set(id, { resolve, reject });
@@ -58,7 +61,7 @@ export class FffClient extends EventEmitter<FffClientEvents> {
     };
   }
 
-  close(): void { this.socket.destroy(); }
+  close(error?: Error): void { this.socket.destroy(error); }
 
   #receive(chunk: string): void {
     this.#buffer += chunk;
@@ -79,17 +82,15 @@ export class FffClient extends EventEmitter<FffClientEvents> {
         this.#rejectProtocol("Invalid FFF sidecar message");
         return;
       }
-      const message: FffMessage = parsed;
+      const message = parsed;
       if ("event" in message) {
-        const event = message as FffEvent;
-        this.emit("watch", event.subscriptionId, event.data);
+        this.emit("watch", message.subscriptionId, message.data);
       } else {
-        const response = message as FffResponse;
-        const pending = this.#pending.get(response.id);
+        const pending = this.#pending.get(message.id);
         if (!pending) continue;
-        this.#pending.delete(response.id);
-        if ("error" in response) pending.reject(new Error(response.error));
-        else pending.resolve(response.result);
+        this.#pending.delete(message.id);
+        if ("error" in message) pending.reject(new Error(message.error));
+        else pending.resolve(message.result);
       }
     }
   }

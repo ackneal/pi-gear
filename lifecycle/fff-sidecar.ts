@@ -1,7 +1,7 @@
 import { rm } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { FileFinder } from "@ff-labs/fff-node";
-import type { FileFinderApi, FileItem, InitOptions, MultiGrepOptions, Result, WatchUnsubscribe } from "@ff-labs/fff-node";
+import type { FileFinderApi, FileItem, InitOptions, Result, WatchUnsubscribe } from "@ff-labs/fff-node";
 import {
   DEFAULT_INDEX_READY_TIMEOUT_MS, FFF_SOCKET_ENV, isFffRequest,
   type FffRequest,
@@ -104,7 +104,6 @@ export async function startFffSidecar(options: FffSidecarServerOptions): Promise
 
   async function handle(socket: Socket, request: FffRequest): Promise<void> {
     try {
-      const params = (request.params ?? {}) as Record<string, any>;
       if (request.method !== "status" && request.method !== "shutdown" && request.method !== "subscribe" && request.method !== "unsubscribe") {
         const ready = unwrap(await finder.waitForIndexReady(options.readyTimeoutMs ?? DEFAULT_INDEX_READY_TIMEOUT_MS));
         if (!ready) throw new Error("FFF index is still building; retry shortly");
@@ -118,37 +117,38 @@ export async function startFffSidecar(options: FffSidecarServerOptions): Promise
           };
           break;
         case "fileSearch":
-          result = unwrap(finder.fileSearch(params.query, params.options));
+          result = unwrap(finder.fileSearch(request.params.query, request.params.options));
           break;
         case "glob":
-          result = unwrap(finder.glob(params.pattern, params.options));
+          result = unwrap(finder.glob(request.params.pattern, request.params.options));
           break;
         case "mixedSearch":
-          result = unwrap(finder.mixedSearch(params.query, params.options));
+          result = unwrap(finder.mixedSearch(request.params.query, request.params.options));
           break;
         case "grep":
-          result = unwrap(finder.grep(params.query, params.options));
+          result = unwrap(finder.grep(request.params.query, request.params.options));
           break;
         case "multiGrep":
-          result = unwrap(finder.multiGrep(params as MultiGrepOptions));
+          result = unwrap(finder.multiGrep(request.params));
           break;
         case "files":
-          result = await inventory(params.pageSize);
+          result = await inventory(request.params?.pageSize);
           break;
         case "dirtyFiles":
           unwrap(finder.refreshGitStatus());
-          result = (await inventory(params.pageSize)).filter((file) =>
+          result = (await inventory(request.params?.pageSize)).filter((file) =>
             file.gitStatus !== "clean" &&
             file.gitStatus !== "ignored" &&
             file.gitStatus !== ""
           );
           break;
         case "trackQuery":
-          result = unwrap(finder.trackQuery(params.query, params.selectedFilePath));
+          result = unwrap(finder.trackQuery(request.params.query, request.params.selectedFilePath));
           break;
         case "subscribe": {
           const subscriptionId = nextSubscriptionId++;
           const callback = (data: unknown): void => { socket.write(`${JSON.stringify({ event: "watch", subscriptionId, data })}\n`); };
+          const params = request.params ?? {};
           const watched = params.pattern === undefined
             ? finder.watch(callback, params.options)
             : finder.watch(params.pattern, callback, params.options);
@@ -158,16 +158,14 @@ export async function startFffSidecar(options: FffSidecarServerOptions): Promise
         }
         case "unsubscribe": {
           const subscriptions = subscriptionsBySocket.get(socket);
-          subscriptions?.get(params.subscriptionId)?.();
-          subscriptions?.delete(params.subscriptionId);
+          subscriptions?.get(request.params.subscriptionId)?.();
+          subscriptions?.delete(request.params.subscriptionId);
           result = true;
           break;
         }
         case "shutdown":
           result = true;
           break;
-        default:
-          throw new Error(`Unknown FFF method: ${String(request.method)}`);
       }
       socket.write(`${JSON.stringify({ id: request.id, result })}\n`, () => {
         if (request.method === "shutdown") void close();

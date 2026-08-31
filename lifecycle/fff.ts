@@ -21,6 +21,7 @@ export class FffSidecar {
   readonly child: ChildProcess;
   readonly #tempDir: string;
   #closed = false;
+  #failure: Error | undefined;
 
   private constructor(basePath: string, tempDir: string, socketPath: string, child: ChildProcess, client: FffClient) {
     this.basePath = basePath;
@@ -28,6 +29,21 @@ export class FffSidecar {
     this.socketPath = socketPath;
     this.child = child;
     this.client = client;
+
+    const fail = (error: Error): void => {
+      this.#failure ??= error;
+      this.client.close(error);
+    };
+    const exit = (code: number | null, signal: NodeJS.Signals | null): void => {
+      if (this.#closed || this.#failure) return;
+      fail(new Error(`FFF sidecar exited unexpectedly (${signal ?? `code ${code}`})`));
+    };
+    child.on("error", fail);
+    child.once("exit", exit);
+    child.once("close", () => {
+      child.off("error", fail);
+      child.off("exit", exit);
+    });
   }
 
   static async start(basePath: string, options: FffSidecarOptions = {}): Promise<FffSidecar> {
@@ -51,18 +67,20 @@ export class FffSidecar {
     try {
       for (;;) {
         if (spawnError) throw new Error(`FFF sidecar failed to start: ${spawnError.message}`, { cause: spawnError });
-        if (child.exitCode !== null) throw new Error(`FFF sidecar exited with code ${child.exitCode}`);
+        if (child.exitCode !== null || child.signalCode !== null) {
+          throw new Error(`FFF sidecar exited during startup (${child.signalCode ?? `code ${child.exitCode}`})`);
+        }
         try {
           const client = await FffClient.connect(socketPath);
+          const sidecar = new FffSidecar(basePath, tempDir, socketPath, child, client);
           child.off("error", recordSpawnError);
-          return new FffSidecar(basePath, tempDir, socketPath, child, client);
+          return sidecar;
         } catch (error) {
           if (Date.now() >= deadline) throw new Error(`FFF sidecar did not open its socket: ${error instanceof Error ? error.message : error}`);
           await new Promise((resolve) => setTimeout(resolve, 20));
         }
       }
     } catch (error) {
-      child.off("error", recordSpawnError);
       child.kill();
       await rm(tempDir, { recursive: true, force: true });
       throw error;
