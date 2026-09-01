@@ -30,6 +30,15 @@ const testTheme: Theme = {
   bold: (text) => text,
 };
 
+type RenderRange = { start: number; end: number; total: number };
+
+function renderRange(comp: SubagentDetailComponent, width = 80): RenderRange {
+  const output = comp.render(width).join("\n");
+  const match = /\[(\d+)-(\d+)\/(\d+)\]/.exec(output);
+  assert.ok(match, `expected a scroll range in rendered output:\n${output}`);
+  return { start: Number(match[1]), end: Number(match[2]), total: Number(match[3]) };
+}
+
 test("Test 1: toolCallId resolves correct subagent run from registry", () => {
   clearSubagentRegistry();
 
@@ -326,42 +335,33 @@ test("Test 6: scrolling (up, down, home, end, autoScroll)", () => {
     now: () => 1_000,
   });
 
-  // Initial render: autoScroll is true, scrollTop reaches maxScroll
-  comp.render(80);
-  assert.ok(comp.scrollTop > 0);
-  assert.equal(comp.autoScroll, true);
+  // Initial render follows the end.
+  const initial = renderRange(comp);
+  assert.ok(initial.start > 1);
+  assert.equal(initial.end, initial.total);
 
-  const maxScroll = comp.scrollTop;
-
-  // Scroll up with 'k' -> autoScroll disabled, scrollTop decreases
   comp.handleInput("k");
-  assert.equal(comp.autoScroll, false);
-  assert.equal(comp.scrollTop, maxScroll - 1);
+  const oneUp = renderRange(comp);
+  assert.equal(oneUp.start, initial.start - 1);
+  assert.equal(oneUp.end, initial.end - 1);
 
-  // Scroll up with Key.up -> scrollTop decreases further
   comp.handleInput(Key.up);
-  assert.equal(comp.autoScroll, false);
-  assert.equal(comp.scrollTop, maxScroll - 2);
+  const twoUp = renderRange(comp);
+  assert.equal(twoUp.start, initial.start - 2);
 
-  // 'g' -> top
   comp.handleInput("g");
-  assert.equal(comp.autoScroll, false);
-  assert.equal(comp.scrollTop, 0);
+  const top = renderRange(comp);
+  assert.equal(top.start, 1);
+  assert.ok(top.end < top.total);
 
-  // 'G' -> bottom
   comp.handleInput("G");
-  assert.equal(comp.autoScroll, true);
-  assert.equal(comp.scrollTop, maxScroll);
+  assert.deepEqual(renderRange(comp), initial);
 
-  // Down with 'j' at maxScroll -> remains autoScroll = true
+  // Down commands cannot overscroll past the end.
   comp.handleInput("j");
-  assert.equal(comp.autoScroll, true);
-  assert.equal(comp.scrollTop, maxScroll);
-
-  // Down with Key.down at maxScroll -> remains autoScroll = true
+  assert.deepEqual(renderRange(comp), initial);
   comp.handleInput(Key.down);
-  assert.equal(comp.autoScroll, true);
-  assert.equal(comp.scrollTop, maxScroll);
+  assert.deepEqual(renderRange(comp), initial);
 });
 
 test("Test 7: Esc key closes component cleanly without altering runtime state", () => {
@@ -598,14 +598,13 @@ test("Test 13: Key Hint Box renders framed with top/bottom borders and correct s
     updatedAt: 0,
   };
 
+  const viewport = ["line 1", "line 2", "", "", "", ""];
   const linesCollapsed = frameDetailBox(
-    ["line 1", "line 2"],
+    viewport,
     entry,
     120,
-    10,
-    0,
     testTheme,
-        1_000,
+    1_000,
   );
 
   // Height is 10 lines: innerHeight = 6, bottomSection = 4
@@ -626,13 +625,11 @@ test("Test 13: Key Hint Box renders framed with top/bottom borders and correct s
 
   // Expanded tools toggle changes hint line to collapse tools
   const linesExpanded = frameDetailBox(
-    ["line 1"],
+    ["line 1", "", "", "", "", ""],
     entry,
     120,
-    10,
-    0,
     testTheme,
-        1_000,
+    1_000,
   );
   assert.match(
     linesExpanded[7] ?? "",
@@ -642,7 +639,12 @@ test("Test 13: Key Hint Box renders framed with top/bottom borders and correct s
 
 test("frameDetailBox respects widths below 20 cells", () => {
   for (const width of [1, 8, 19]) {
-    const lines = frameDetailBox(["content wider than the panel"], "researcher", width, 6, 0, testTheme);
+    const lines = frameDetailBox(
+      ["content wider than the panel", ""],
+      "researcher",
+      width,
+      testTheme,
+    );
     assert.ok(lines.every((line) => visibleWidth(line) <= width));
   }
 });
@@ -661,13 +663,14 @@ test("Test 14: Single Footer line renders subagent label, tool counts, scroll in
   };
 
   const linesNoTools = frameDetailBox(
-    ["line 1"],
+    ["line 1", "", "", "", "", ""],
     entryNoTools,
     120,
-    10,
-    0,
     testTheme,
-        1_000,
+    1_000,
+    "",
+    "",
+    { start: 1, end: 1, total: 1 },
   );
   // Footer is index 9 (index 6 border, 7 hint, 8 border, 9 footer)
   assert.match(linesNoTools[9] ?? "", /^Researcher · 0 tools/);
@@ -695,13 +698,14 @@ test("Test 14: Single Footer line renders subagent label, tool counts, scroll in
 
   const longContent = Array.from({ length: 20 }, (_, i) => `content line ${i + 1}`);
   const linesWithTools = frameDetailBox(
-    longContent,
+    longContent.slice(2, 8),
     entryWithTools,
     120,
-    10,
-    2,
     testTheme,
-        1_000,
+    1_000,
+    "",
+    "",
+    { start: 3, end: 8, total: 20 },
   );
 
   assert.match(
@@ -730,13 +734,11 @@ test("Test 15: Single Footer line renders usage stats and duration when usage is
   };
 
   const linesWithUsage = frameDetailBox(
-    ["line 1"],
+    ["line 1", "", "", "", "", ""],
     entryWithUsage,
     120,
-    10,
-    0,
     testTheme,
-        4_900,
+    4_900,
   );
   // Footer is index 9
   assert.match(linesWithUsage[9] ?? "", /^Researcher · 0 tools/);
@@ -755,11 +757,9 @@ test("Test 15: Single Footer line renders usage stats and duration when usage is
   };
 
   const linesNoUsage = frameDetailBox(
-    ["line 1"],
+    ["line 1", "", "", "", "", ""],
     entryNoUsage,
     120,
-    10,
-    0,
     testTheme,
     5_000,
   );
@@ -954,37 +954,177 @@ test("Test 17: handleInput navigates with vim, arrows, half-page, full-page, hom
     now: () => 1_000,
   });
 
-  // Render initially with 24 rows -> innerHeight = 20, content length > 40 lines
-  comp.render(120);
-  const initialScrollTop = comp.scrollTop;
-  assert.ok(initialScrollTop > 0, "Initially scrolled to bottom");
+  const initial = renderRange(comp, 120);
+  assert.ok(initial.start > 1, "initially scrolled to bottom");
+  assert.equal(initial.end, initial.total);
 
-  // Line Up via 'k'
   comp.handleInput("k");
-  assert.equal(comp.scrollTop, initialScrollTop - 1);
-  assert.equal(comp.autoScroll, false);
-
-  // Line Down via 'j'
+  assert.equal(renderRange(comp, 120).start, initial.start - 1);
   comp.handleInput("j");
-  assert.equal(comp.scrollTop, initialScrollTop);
+  assert.deepEqual(renderRange(comp, 120), initial);
 
-  // Half-page Up via ctrl+u (\x15)
   comp.handleInput("\x15");
-  assert.ok(comp.scrollTop < initialScrollTop);
-  const afterHalfUp = comp.scrollTop;
-
-  // Half-page Down via ctrl+d (\x04)
+  const afterHalfUp = renderRange(comp, 120);
+  assert.ok(afterHalfUp.start < initial.start);
   comp.handleInput("\x04");
-  assert.ok(comp.scrollTop > afterHalfUp);
+  assert.ok(renderRange(comp, 120).start > afterHalfUp.start);
 
-  // 'g' -> top
   comp.handleInput("g");
-  assert.equal(comp.scrollTop, 0);
-
-  // 'G' -> bottom
+  assert.equal(renderRange(comp, 120).start, 1);
   comp.handleInput("G");
-  assert.equal(comp.scrollTop, initialScrollTop);
-  assert.equal(comp.autoScroll, true);
+  assert.deepEqual(renderRange(comp, 120), initial);
+
+  // SGR mouse wheel moves three lines in each direction.
+  comp.handleInput("\x1b[<64;40;10M");
+  assert.equal(renderRange(comp, 120).start, initial.start - 3);
+  comp.handleInput("\x1b[<65;40;10M");
+  assert.deepEqual(renderRange(comp, 120), initial);
+
+  // Legacy X10 wheel behaves identically.
+  comp.handleInput(`\x1b[M${String.fromCharCode(96, 73, 42)}`);
+  assert.equal(renderRange(comp, 120).start, initial.start - 3);
+  comp.handleInput(`\x1b[M${String.fromCharCode(97, 73, 42)}`);
+  assert.deepEqual(renderRange(comp, 120), initial);
+
+  // Non-wheel mouse input is ignored.
+  comp.handleInput("\x1b[<0;40;10M");
+  comp.handleInput(`\x1b[M${String.fromCharCode(32, 73, 42)}`);
+  assert.deepEqual(renderRange(comp, 120), initial);
 });
 
 
+
+test("streaming updates follow the end while auto-scroll is enabled", () => {
+  const entry: SubagentViewEntry = {
+    toolCallId: "stream-follow",
+    task: "Streaming follow",
+    profile: workerProfile,
+    run: {
+      status: "running",
+      startedAt: 0,
+      items: Array.from({ length: 30 }, (_, i) => ({
+        kind: "tool" as const,
+        name: `before_${i}`,
+        status: "success" as const,
+      })),
+    },
+    updatedAt: 0,
+  };
+  const comp = new SubagentDetailComponent({
+    entry,
+    theme: testTheme,
+    onClose: () => {},
+    invalidate: () => {},
+  });
+
+  const before = renderRange(comp, 100);
+  assert.equal(before.end, before.total);
+  const appended = [...entry.run.items, { kind: "tool" as const, name: "newest_stream_item", status: "running" as const }];
+  comp.update({ ...entry.run, items: appended });
+  const output = comp.render(100).join("\n");
+  const followed = renderRange(comp, 100);
+  assert.ok(followed.total > before.total);
+  assert.equal(followed.end, followed.total);
+  assert.match(output, /Newest Stream Item/);
+
+  // Once the user scrolls upward, streaming does not steal their position.
+  comp.handleInput("k");
+  const unpinned = renderRange(comp, 100);
+  comp.update({
+    ...entry.run,
+    items: [...appended, { kind: "tool", name: "hidden_newest_item", status: "running" }],
+  });
+  const afterUnpinnedUpdate = renderRange(comp, 100);
+  assert.equal(afterUnpinnedUpdate.start, unpinned.start);
+  assert.ok(afterUnpinnedUpdate.end < afterUnpinnedUpdate.total);
+  assert.doesNotMatch(comp.render(100).join("\n"), /Hidden Newest Item/);
+});
+
+test("resize updates the native viewport height", () => {
+  const descriptor = Object.getOwnPropertyDescriptor(process.stdout, "rows");
+  try {
+    Object.defineProperty(process.stdout, "rows", { configurable: true, value: 30 });
+    const entry: SubagentViewEntry = {
+      toolCallId: "resize",
+      task: "Resize test",
+      profile: researcherProfile,
+      run: {
+        status: "running",
+        startedAt: 0,
+        items: Array.from({ length: 40 }, (_, i) => ({
+          kind: "tool" as const,
+          name: `resize_${i}`,
+          status: "success" as const,
+        })),
+      },
+      updatedAt: 0,
+    };
+    const comp = new SubagentDetailComponent({ entry, theme: testTheme, onClose: () => {}, invalidate: () => {} });
+    assert.equal(comp.render(80).length, 30);
+    const tallEnd = renderRange(comp);
+    assert.equal(tallEnd.end, tallEnd.total);
+
+    // A pinned viewport remains at the end when it shrinks.
+    Object.defineProperty(process.stdout, "rows", { configurable: true, value: 10 });
+    assert.equal(comp.render(80).length, 10);
+    const shortEnd = renderRange(comp);
+    assert.equal(shortEnd.end, shortEnd.total);
+    assert.ok(shortEnd.start > tallEnd.start);
+
+    // Growing an unpinned viewport preserves its visible starting position,
+    // clamping only if the new viewport would extend beyond the end.
+    comp.handleInput("g");
+    comp.scrollByLines(9);
+    const shortPosition = renderRange(comp);
+    Object.defineProperty(process.stdout, "rows", { configurable: true, value: 30 });
+    const grown = renderRange(comp);
+    assert.equal(grown.start, shortPosition.start);
+    assert.ok(grown.end <= grown.total);
+  } finally {
+    if (descriptor) Object.defineProperty(process.stdout, "rows", descriptor);
+    else Reflect.deleteProperty(process.stdout, "rows");
+  }
+});
+
+test("switching entries resets the viewport to the end", () => {
+  const makeEntry = (id: string, profile: SubagentViewEntry["profile"]): SubagentViewEntry => ({
+    toolCallId: id,
+    task: `Task ${id}`,
+    profile,
+    run: {
+      status: "running",
+      startedAt: 0,
+      items: Array.from({ length: 35 }, (_, i) => ({ kind: "tool" as const, name: `${id}_item_${i}`, status: "success" as const })),
+    },
+    updatedAt: 0,
+  });
+  const first = makeEntry("first", workerProfile);
+  const second = makeEntry("second", researcherProfile);
+  const comp = new SubagentDetailComponent({
+    entry: first, entries: [first, second], theme: testTheme, onClose: () => {}, invalidate: () => {},
+  });
+  renderRange(comp, 100);
+  comp.handleInput("g");
+  assert.equal(renderRange(comp, 100).start, 1);
+  comp.handleInput("l");
+  const output = comp.render(100).join("\n");
+  const switched = renderRange(comp, 100);
+  assert.ok(switched.start > 1);
+  assert.equal(switched.end, switched.total);
+  assert.match(output, /Second Item 34/);
+});
+
+test("mouse wheel overscroll is contained at both boundaries", () => {
+  const entry: SubagentViewEntry = {
+    toolCallId: "wheel-bounds", task: "Wheel bounds", profile: workerProfile,
+    run: { status: "running", startedAt: 0, items: Array.from({ length: 30 }, (_, i) => ({ kind: "tool" as const, name: `wheel_${i}`, status: "success" as const })) },
+    updatedAt: 0,
+  };
+  const comp = new SubagentDetailComponent({ entry, theme: testTheme, onClose: () => {}, invalidate: () => {} });
+  const end = renderRange(comp);
+  for (let i = 0; i < 100; i++) comp.handleInput("\x1b[<64;1;1M");
+  const top = renderRange(comp);
+  assert.equal(top.start, 1);
+  for (let i = 0; i < 100; i++) comp.handleInput("\x1b[<65;1;1M");
+  assert.deepEqual(renderRange(comp), end);
+});

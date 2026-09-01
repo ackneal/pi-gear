@@ -253,35 +253,30 @@ export function formatDetailContent(
 
 export const BOTTOM_SECTION_HEIGHT = 4;
 
+export interface DetailScrollInfo {
+  start: number;
+  end: number;
+  total: number;
+}
+
 export function frameDetailBox(
-  contentLines: string[],
+  viewportLines: string[],
   entryOrTitle: SubagentViewEntry | string,
   width: number,
-  height: number,
-  scrollTop: number,
   theme: Theme,
   now: number = Date.now(),
   prevLabel: string = "",
   nextLabel: string = "",
+  scroll?: DetailScrollInfo,
 ): string[] {
   const panelWidth = Math.max(0, width);
   const borderLine = theme.fg("border", "─".repeat(panelWidth));
-  const totalContent = contentLines.length;
-
-  const innerHeight = Math.max(1, height - BOTTOM_SECTION_HEIGHT);
-  const maxScroll = Math.max(0, totalContent - innerHeight);
-  const clampedScroll = Math.max(0, Math.min(scrollTop, maxScroll));
-
   const resultLines: string[] = [];
 
-  // Content area (clamped at the current scroll)
-  for (let i = 0; i < innerHeight; i++) {
-    const rawLine = contentLines[clampedScroll + i] ?? "";
-    const visLen = visibleWidth(rawLine);
-    let lineContent = rawLine;
-    if (visLen > panelWidth) {
-      lineContent = truncateToWidth(rawLine, panelWidth);
-    }
+  for (const rawLine of viewportLines) {
+    const lineContent = visibleWidth(rawLine) > panelWidth
+      ? truncateToWidth(rawLine, panelWidth)
+      : rawLine;
     const padLen = Math.max(0, panelWidth - visibleWidth(lineContent));
     resultLines.push(lineContent + " ".repeat(padLen));
   }
@@ -351,14 +346,10 @@ export function frameDetailBox(
     ) ?? [];
   const toolStr = tools.length ? formatToolCount(tools) : "0 tools";
 
-  let scrollInfo = "";
-  if (totalContent > innerHeight) {
-    const startNum = clampedScroll + 1;
-    const endNum = Math.min(totalContent, clampedScroll + innerHeight);
-    scrollInfo = `[${startNum}-${endNum}/${totalContent}]`;
-  }
-
-  const scrollPart = scrollInfo ? ` · ${scrollInfo}` : "";
+  const scrollText = scroll && scroll.total > viewportLines.length
+    ? `[${scroll.start}-${scroll.end}/${scroll.total}]`
+    : "";
+  const scrollPart = scrollText ? ` · ${scrollText}` : "";
   const run = entry?.run;
   const dispatch = formatSubagentDispatch(run?.dispatch);
   const dispatchPart = dispatch ? ` · ${dispatch}` : "";
