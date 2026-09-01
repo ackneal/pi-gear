@@ -20,7 +20,7 @@ Install pi-gear through Pi's package manager:
 pi install git:github.com/ackneal/pi-gear
 ```
 
-Requirements: Node.js 22.19 or newer and macOS when sandboxing is enabled. Tested with Pi 0.84.3.
+Requirements: Node.js 22.19 or newer, Pi coding-agent and pi-tui 0.84.2 or newer, and macOS when sandboxing is enabled. The minimum supported Pi version is 0.84.2; this release is tested with Pi 0.84.3.
 
 Update installed Pi packages with:
 

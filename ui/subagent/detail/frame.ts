@@ -1,5 +1,5 @@
 import { ScrollView, type Component } from "@earendil-works/pi-tui";
-import { renderLayoutFrame } from "@earendil-works/pi-tui/dist/layout.js";
+import { renderLayoutFrame } from "./pi-tui-layout.ts";
 import {
   BOTTOM_SECTION_HEIGHT,
   frameDetailBox,
