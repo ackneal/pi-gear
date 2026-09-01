@@ -8,18 +8,20 @@ import { setupLifecycle } from "./lifecycle/index.ts";
 import { setupLsp } from "./lsp/index.ts";
 import { setupSubagents } from "./subagents/index.ts";
 import { setupThinkingDisplay } from "./ui/thinking/index.ts";
+import { setupWorkspace } from "./workspace/setup.ts";
 
 export default async function gear(pi: ExtensionAPI): Promise<void> {
   const config = await loadExtensionConfig();
   const execution = setupExecution(pi, config);
-  setupLifecycle(pi);
+  const lifecycle = setupLifecycle(pi);
+  const workspace = setupWorkspace(pi, execution.filesystem, lifecycle.fff);
 
   setupTaskState(pi);
   setupPromptComposer(pi);
 
   setupThinkingDisplay(pi);
-  const subagents = setupSubagents(pi);
-  const lsp = setupLsp(pi);
+  const subagents = setupSubagents(pi, workspace);
+  const lsp = setupLsp(pi, { workspace, filesystem: execution.filesystem });
 
-  setupCommands(pi, { execution, subagents, lsp });
+  setupCommands(pi, { execution, subagents, lsp, workspace });
 }

@@ -6,9 +6,10 @@ test("concurrent requests share one approval message", async () => {
   let approve!: (approved: boolean) => void;
   const confirmation = new Promise<boolean>((resolve) => { approve = resolve; });
   const messages: string[] = [];
+  let promptMessage: string | undefined;
   const approvals = new SessionApprovals({
     hasUI: true,
-    confirm: () => confirmation,
+    confirm: (_title, message) => { promptMessage = message; return confirmation; },
     notify: () => undefined,
     sendMessage: (message) => { messages.push(message); },
   }, () => true);
@@ -22,5 +23,6 @@ test("concurrent requests share one approval message", async () => {
   approve(true);
 
   assert.deepEqual(await results, [true, true, true]);
+  assert.equal(promptMessage, "Allow bash to connect to registry.npmjs.org:443?");
   assert.deepEqual(messages, ["User approved network access: registry.npmjs.org:443"]);
 });

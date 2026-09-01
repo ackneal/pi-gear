@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ExtensionConfig } from "../../config/index.ts";
 import { SandboxController, type SandboxStatus } from "./controller.ts";
 import { createSandboxBashTool } from "../../ui/tools/index.ts";
+import { ConfirmationQueue } from "../confirmation-queue.ts";
 
 export interface SandboxDiagnostics {
   status(): SandboxStatus;
@@ -15,11 +16,15 @@ const disabledStatus: SandboxStatus = Object.freeze({
   network: undefined,
 });
 
+export interface SandboxSetupOptions {
+  readonly confirmationQueue?: ConfirmationQueue;
+  readonly createController?: (send: (content: string) => void | Promise<void>) => SandboxController;
+}
+
 export function setupSandbox(
   pi: ExtensionAPI,
   config: ExtensionConfig,
-  createController: (send: (content: string) => void | Promise<void>) => SandboxController =
-    (send) => new SandboxController(send),
+  options: SandboxSetupOptions = {},
 ): SandboxDiagnostics {
   if (!config.sandbox.enabled) {
     pi.on("session_start", (_event, ctx) => {
@@ -33,6 +38,8 @@ export function setupSandbox(
     return { status: () => disabledStatus };
   }
 
+  const confirmationQueue = options.confirmationQueue ?? new ConfirmationQueue();
+  const createController = options.createController ?? ((send) => new SandboxController(send, undefined, undefined, confirmationQueue));
   const controller = createController((content) =>
     pi.sendMessage({ customType: "sandbox", content, display: false }),
   );

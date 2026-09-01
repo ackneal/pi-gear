@@ -538,7 +538,7 @@ test("Test 10.5: detail output carries no OSC133 zone markers (no transcript pol
   assert.match(output, /Final answer/);
 });
 
-test("Test 11: subagent registry is cleared on lifecycle events", () => {
+test("Test 11: subagent registry survives before-switch and clears at session boundaries", () => {
   clearSubagentRegistry();
   recordSubagentLiveStart("call_live", researcherProfile, "Live task");
   assert.equal(getAllSubagentEntries().length, 1);
@@ -555,15 +555,13 @@ test("Test 11: subagent registry is cleared on lifecycle events", () => {
   handlers.session_start?.();
   assert.equal(getAllSubagentEntries().length, 0);
 
-  // Add entry and trigger session_before_switch
+  // A switch can be canceled, so before-switch must preserve the active registry.
   recordSubagentLiveStart("call_live2", researcherProfile, "Live task 2");
   assert.equal(getAllSubagentEntries().length, 1);
-  handlers.session_before_switch?.();
-  assert.equal(getAllSubagentEntries().length, 0);
-
-  // Add entry and trigger session_shutdown
-  recordSubagentLiveStart("call_live3", researcherProfile, "Live task 3");
+  assert.equal(handlers.session_before_switch, undefined);
   assert.equal(getAllSubagentEntries().length, 1);
+
+  // Shutdown clears the active registry.
   handlers.session_shutdown?.();
   assert.equal(getAllSubagentEntries().length, 0);
 });

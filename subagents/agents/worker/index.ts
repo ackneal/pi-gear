@@ -1,4 +1,5 @@
 import { Type } from "typebox";
+import { withoutWorkspaceSearch } from "../../runtime/process.ts";
 import { runChildSubagent, type RunChildSubagentOptions } from "../../runtime/runner.ts";
 import type { SubagentRun } from "../../runtime/types.ts";
 import { workerProfile } from "./profile.ts";
@@ -15,7 +16,7 @@ export interface WorkerSubagentInput {
 export const workerParameters = Type.Object({
   task: Type.String({ description: "The bounded task to complete." }),
   targetFiles: Type.Optional(
-    Type.Array(Type.String(), { description: "Files relevant to the task, if any." }),
+    Type.Array(Type.String(), { description: "Intended write scope when the task may modify files. Overlapping active scopes are rejected." }),
   ),
   findings: Type.Optional(
     Type.String({ description: "Known context, constraints, or prior work to build on." }),
@@ -38,11 +39,12 @@ export function formatWorkerInput(input: WorkerSubagentInput): string {
 
 export function runWorker(
   task: string,
-  options: Omit<RunChildSubagentOptions, "task" | "profile" | "childExtension">,
+  options: Omit<RunChildSubagentOptions, "task" | "profile" | "childExtension"> & { workspaceSearch?: boolean },
 ): Promise<SubagentRun> {
+  const { workspaceSearch = true, ...runOptions } = options;
   return runChildSubagent({
-    ...options,
-    profile: workerProfile,
+    ...runOptions,
+    profile: workspaceSearch ? workerProfile : withoutWorkspaceSearch(workerProfile),
     childExtension: new URL("./extension.ts", import.meta.url),
     task,
   });

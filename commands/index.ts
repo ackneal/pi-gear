@@ -3,6 +3,7 @@ import type { ExecutionServices } from "../execution/index.ts";
 import type { LspServices } from "../lsp/index.ts";
 import type { SubagentServices } from "../subagents/index.ts";
 import { formatDoctor } from "./doctor.ts";
+import type { WorkspaceServices } from "../workspace/setup.ts";
 
 export const GEAR_COMMANDS = {
   doctor: "gear:doctor",
@@ -14,6 +15,7 @@ export interface GearCommandServices {
   execution: ExecutionServices;
   subagents: SubagentServices;
   lsp: LspServices;
+  workspace?: WorkspaceServices;
 }
 
 export function setupCommands(pi: ExtensionAPI, services: GearCommandServices): void {
@@ -40,6 +42,7 @@ export function setupCommands(pi: ExtensionAPI, services: GearCommandServices): 
         process.platform,
         services.subagents.settings.runtimeError(),
         lspServers,
+        await services.workspace?.status(ctx.cwd),
       );
       ctx.ui.notify(output, "info");
     },

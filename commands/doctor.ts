@@ -1,6 +1,7 @@
 import type { SandboxStatus } from "../execution/sandbox/controller.ts";
 import { formatSubagentDispatch } from "../subagents/runtime/dispatch.ts";
 import type { SubagentSummary } from "../subagents/settings.ts";
+import type { WorkspaceSearchStatus } from "../workspace/service.ts";
 
 const describeDomains = (domains: readonly string[]): string => domains.length > 0 ? domains.join(", ") : "(none)";
 
@@ -18,6 +19,7 @@ export function formatDoctor(
   platform: NodeJS.Platform = process.platform,
   runtimeError?: string,
   lspServers: readonly LspServerSummary[] = [],
+  workspaceSearch?: WorkspaceSearchStatus,
 ): string {
   const sandboxState = !status.configured ? "disabled by configuration" : status.enabled ? "enabled" : "unavailable";
   const bashState = !status.configured ? "host (sandbox disabled)" : status.enabled ? "sandboxed" : "unavailable";
@@ -40,6 +42,15 @@ export function formatDoctor(
   }
   if (status.configured && !status.enabled && status.reason !== undefined) {
     lines.splice(1, 0, `Reason: ${status.reason}`);
+  }
+
+  if (workspaceSearch) {
+    lines.push("", "Workspace search:");
+    lines.push(`- backend FFF ${workspaceSearch.version}`);
+    lines.push(`- ${workspaceSearch.state}${workspaceSearch.error ? ` · ${workspaceSearch.error}` : ""}`);
+    lines.push(`- ${workspaceSearch.indexedFiles} indexed files · watcher ${workspaceSearch.watcherReady ? "ready" : "starting"}`);
+    lines.push(`- content index ${workspaceSearch.contentIndex ? "enabled" : "disabled"} · shared sidecar ${workspaceSearch.sharedSidecar ? "connected" : "unavailable"}`);
+    lines.push("- frecency/history session-only");
   }
 
   lines.push("", "Subagents:");

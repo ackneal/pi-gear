@@ -6,6 +6,8 @@ import { formatDiagnostics } from "./normalize.ts";
 import { LspManager } from "./manager.ts";
 import type { NormalizedDiagnostic } from "./types.ts";
 import { lspToolRenderers } from "../ui/tools/index.ts";
+import type { FilesystemAccessService } from "../execution/filesystem/guard.ts";
+import type { WorkspaceServices } from "../workspace/setup.ts";
 
 export interface LspServices {
   statuses(cwd: string): Promise<readonly LspServerSummary[]>;
@@ -83,18 +85,29 @@ const navigationParameters = Type.Object({
   column: Type.Integer({ minimum: 1, description: "1-based source column." }),
 }, { additionalProperties: false });
 
-export function setupLsp(
-  pi: ExtensionAPI,
-  loadConfig: typeof loadExtensionConfig = loadExtensionConfig,
-): LspServices {
+export interface SetupLspOptions {
+  readonly workspace?: WorkspaceServices;
+  readonly filesystem?: FilesystemAccessService;
+  readonly loadConfig?: typeof loadExtensionConfig;
+}
+
+export function setupLsp(pi: ExtensionAPI, options: SetupLspOptions = {}): LspServices {
   let manager: LspManager | undefined;
+  const { workspace, filesystem, loadConfig: configLoader = loadExtensionConfig } = options;
 
   pi.on("session_start", async (_event, ctx) => {
-    const config = await loadConfig();
+    const config = await configLoader();
     if (!config.lsp || config.lsp.servers.length === 0) return;
 
-    manager = new LspManager(config.lsp.servers, ctx.cwd, undefined, config, config.lsp.idleTimeoutMinutes);
-    await manager.initializeWorkspace();
+    manager = new LspManager(
+      config.lsp.servers,
+      ctx.cwd,
+      undefined,
+      config,
+      config.lsp.idleTimeoutMinutes,
+      filesystem?.forWorkspace(ctx.cwd),
+      workspace?.current(ctx.cwd),
+    );
     manager.startWatching();
 
     pi.registerTool({
@@ -146,7 +159,7 @@ export function setupLsp(
   return {
     async statuses(cwd) {
       if (manager && manager.cwd === cwd) return manager.statuses();
-      const config = await loadConfig();
+      const config = await configLoader();
       if (!config.lsp || config.lsp.servers.length === 0) return [];
       return new LspManager(
         config.lsp.servers,
