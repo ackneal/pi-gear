@@ -164,7 +164,7 @@ Successful Pi `edit` and `write` calls synchronize matching LSP files and report
 - File paths are checked for traversal, symlink escape, and dangling-symlink writes, but authorization remains a preflight check and cannot eliminate all filesystem races.
 - Workspace `grep` filters content exposure through filesystem policy. Workspace `find` intentionally provides path discovery without per-file content-read filtering. Pi's builtin recursive `ls` remains outside filesystem-policy guarding.
 - Network approvals are scoped to the current sandbox generation and cleared on shutdown.
-- Researcher queries may be sent to the remote Exa, Context7, and grep.app MCP services. These MCP connections are separate from sandboxed Bash network policy and approval. Understand this external trust and privacy boundary before using researcher.
+- Researcher queries may be sent to the remote Exa and grep.app MCP services. These MCP connections are separate from sandboxed Bash network policy and approval. Understand this external trust and privacy boundary before using researcher.
 - Sandboxed Bash inherits the host process environment subject to runtime configuration; avoid exposing credentials through environment variables.
 - Sandbox Runtime currently supports macOS. LSP uses one session working directory as its workspace root and does not discover monorepo roots.
 
