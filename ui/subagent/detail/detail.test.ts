@@ -190,7 +190,7 @@ test("Test 4: live SubagentRun updates trigger component re-render / update", ()
     items: [
       {
         kind: "tool",
-        name: "mcp__context7__query",
+        name: "exa_web_fetch_exa",
         status: "running",
       },
     ],
@@ -200,8 +200,8 @@ test("Test 4: live SubagentRun updates trigger component re-render / update", ()
   assert.equal(invalidations, 1);
 
   const updatedRender = comp.render(80).join("\n");
-  assert.match(updatedRender, /Context7/);
-  assert.match(updatedRender, /● Context7/);
+  assert.match(updatedRender, /Exa/);
+  assert.match(updatedRender, /● Exa/);
 });
 
 test("Test 5: completed, failed, and aborted states format and render correctly", () => {
@@ -455,9 +455,9 @@ test("Test 9: main transcript formatting / rendering remains completely unchange
       {
         kind: "tool",
         id: "tool_2",
-        name: "mcp__context7__query",
+        name: "exa_web_fetch_exa",
         status: "success",
-        result: "Context finding",
+        result: "Fetch finding",
       },
     ],
     result: "Final report",
