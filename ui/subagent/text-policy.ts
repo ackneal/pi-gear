@@ -5,7 +5,6 @@ const USEFUL_JSON_KEYS = new Set(["text", "content", "result", "output", "messag
 export function readableProvider(name: string): string {
   const normalized = name.toLowerCase();
   if (/(?:^|__|[_-])exa(?:__|[_-]|$)/.test(normalized)) return "Exa";
-  if (/(?:^|__|[_-])context7(?:__|[_-]|$)/.test(normalized)) return "Context7";
   if (/(?:^|__|[_-])gh_grep(?:__|[_-]|$)|(?:^|__|[_-])searchgithub(?:__|[_-]|$)/.test(normalized)) return "GitHub grep";
   const parts = name.split(/__|::|\//).filter(Boolean);
   const provider = (parts.length > 1 && /^mcp$/i.test(parts[0] ?? "") ? parts[1] : parts[0]) ?? name;

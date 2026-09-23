@@ -4,19 +4,11 @@ export const RESEARCH_MCP_CAPABILITIES = [
   {
     kind: "mcp",
     id: "exa",
-    endpoint: "https://mcp.exa.ai/mcp",
+    endpoint: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa",
     tools: [
       { name: "web_search_exa" },
-      { name: "get_code_context_exa" },
-      { name: "research_paper_exa" },
-      { name: "crawling_exa" },
+      { name: "web_fetch_exa" },
     ],
-  },
-  {
-    kind: "mcp",
-    id: "context7",
-    endpoint: "https://mcp.context7.com/mcp",
-    tools: [{ name: "resolve-library-id" }, { name: "query-docs" }],
   },
   {
     kind: "mcp",
