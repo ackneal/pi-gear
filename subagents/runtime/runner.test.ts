@@ -139,6 +139,25 @@ test("child returns a final report and rejects an empty successful result", asyn
   assert.match((await failed).error ?? "", /without a final report/);
 });
 
+test("an errored assistant message surfaces the provider error instead of a missing report", async () => {
+  const errored = JSON.stringify({
+    type: "message_end",
+    message: { role: "assistant", content: [], stopReason: "error", errorMessage: "Payment Required" },
+  });
+  const events = new PiJsonDecoder().push(`${errored}\n`, true);
+  assert.deepEqual(events, [{ type: "model_error", message: "Payment Required" }]);
+
+  const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), kill: () => true });
+  const result = runChildSubagent({ task: "inspect", profile, childExtension: new URL("./runner.test.ts", import.meta.url), spawnChild: () => child as never, onUpdate: () => {} });
+
+  child.stdout.emit("data", Buffer.from(`${errored}\n`));
+  child.emit("close", 0);
+
+  const failed = await result;
+  assert.equal(failed.status, "error");
+  assert.match(failed.error ?? "", /Payment Required/);
+});
+
 test("error then close resolves once, while concurrent aborts stay isolated", async () => {
   const first = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), kill: () => true });
   let updates = 0;

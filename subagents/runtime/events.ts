@@ -5,6 +5,7 @@ export type SubagentEvent =
   | { type: "tool_start"; id: string; name: string; args?: Record<string, unknown> }
   | { type: "tool_end"; id: string; isError: boolean; result: string }
   | { type: "result"; text: string }
+  | { type: "model_error"; message: string }
   | { type: "usage"; usage: NonNullable<SubagentRun["usage"]> }
   | { type: "diagnostic"; message: string };
 

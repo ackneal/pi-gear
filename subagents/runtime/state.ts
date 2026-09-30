@@ -54,6 +54,10 @@ export function reduceSubagentEvent(
     };
   }
 
+  if (event.type === "model_error") {
+    return { ...run, lastActivityAt: now, modelError: event.message };
+  }
+
   const items = run.items.map((item) => ({ ...item }));
 
   if (event.type === "thinking") {
