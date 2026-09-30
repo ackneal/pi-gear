@@ -64,6 +64,7 @@ test("child process inherits the active session cwd and receives an explicit wor
   }) as never, "/session/workspace", undefined, { PI_GEAR_FFF_SOCKET: "/tmp/session.sock" });
   assert.equal(receivedCwd, "/session/workspace");
   assert.equal(receivedEnv?.PI_GEAR_FFF_SOCKET, "/tmp/session.sock");
+  assert.equal(receivedEnv?.PI_GEAR_CHILD, "1");
 });
 
 test("researcher child arguments isolate the child and use exactly its allowlist", () => {
@@ -73,7 +74,6 @@ test("researcher child arguments isolate the child and use exactly its allowlist
   });
   assert.ok(
     args.includes("--no-session") &&
-    args.includes("--no-extensions") &&
     args.includes("--no-skills") &&
     args.includes("--no-context-files") &&
     args.includes("--no-prompt-templates"),

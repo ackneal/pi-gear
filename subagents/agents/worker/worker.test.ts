@@ -46,7 +46,6 @@ test("worker child arguments configure isolation, capabilities, and system promp
   const args = childArgs(workerProfile, "implement feature", extensionUrl);
   assert.ok(
     args.includes("--no-session") &&
-    args.includes("--no-extensions") &&
     args.includes("--no-skills") &&
     args.includes("--no-context-files") &&
     args.includes("--no-prompt-templates"),
