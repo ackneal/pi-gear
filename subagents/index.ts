@@ -60,7 +60,7 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
   pi.registerTool({
     name: RESEARCHER_TOOL_NAME,
     label: researcherProfile.label,
-    description: "Start focused read-only research. Returns immediately with a runId; use subagent_observe for progress or completion.",
+    description: "Start focused read-only research. The researcher inspects the workspace and can search the web (Exa) and GitHub code for external evidence. Returns immediately with a runId; use subagent_observe for progress or completion.",
     parameters: researcherParameters,
     executionMode: "parallel",
     async execute(toolCallId, { question, scope }, signal, _onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {

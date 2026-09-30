@@ -51,7 +51,7 @@ test("worker child arguments configure isolation, capabilities, and system promp
     args.includes("--no-prompt-templates"),
   );
   assert.equal(args[args.indexOf("--tools") + 1], "read,find,grep,edit,write,bash");
-  assert.equal(args[args.indexOf("--append-system-prompt") + 1], WORKER_SYSTEM_PROMPT);
+  assert.equal(args[args.indexOf("--system-prompt") + 1], WORKER_SYSTEM_PROMPT);
   assert.equal(args[args.indexOf("--extension") + 1]?.endsWith("subagents/agents/worker/extension.ts"), true);
   assert.equal(args[args.length - 1], "implement feature");
 });

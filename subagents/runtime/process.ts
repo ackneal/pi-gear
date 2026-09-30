@@ -50,7 +50,7 @@ export function childArgs(profile: SubagentProfile, task: string, childExtension
     fileURLToPath(childExtension),
     "--tools",
     capabilityToolNames(profile.capabilities).join(","),
-    "--append-system-prompt",
+    "--system-prompt",
     profile.systemPrompt,
     task,
   ];
