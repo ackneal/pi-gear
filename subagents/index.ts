@@ -60,7 +60,7 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
   pi.registerTool({
     name: RESEARCHER_TOOL_NAME,
     label: researcherProfile.label,
-    description: "Start focused read-only research. The researcher inspects the workspace and can search the web (Exa) and GitHub code for external evidence. Returns immediately with a runId; use subagent_observe for progress or completion.",
+    description: "Start focused read-only research. Pass the research question as question (optional scope). The researcher inspects the workspace and can search the web (Exa) and GitHub code for external evidence. Returns immediately with a runId; use subagent_observe for progress or completion.",
     parameters: researcherParameters,
     executionMode: "parallel",
     async execute(toolCallId, { question, scope }, signal, _onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
@@ -97,7 +97,7 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
   pi.registerTool({
     name: WORKER_TOOL_NAME,
     label: workerProfile.label,
-    description: "Start one bounded task. Returns immediately with a runId; use subagent_observe for progress or completion. Set targetFiles when files may be modified so active scope conflicts can be rejected.",
+    description: "Start one bounded task. Pass the work as task, with optional targetFiles, findings, and verification. Returns immediately with a runId; use subagent_observe for progress or completion. Set targetFiles when files may be modified so active scope conflicts can be rejected.",
     parameters: workerParameters,
     executionMode: "parallel",
     async execute(toolCallId, { task: requestedTask, targetFiles, findings, verification }, signal, _onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
