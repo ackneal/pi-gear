@@ -134,7 +134,7 @@ test("setupSubagents registers asynchronous subagent and control tools", async (
   assert.equal(workerTool.executionMode, "parallel");
   assert.match(workerTool.description, /Returns immediately with a runId/);
   assert.match(workerTool.description, /Set targetFiles when files may be modified/);
-  assert.match(tools.get("subagent_observe")?.description ?? "", /meaningful subagent progress, completion, or a bounded timeout/);
+  assert.match(tools.get("subagent_observe")?.description ?? "", /finishes, goes quiet for a few seconds, or the timeout elapses/);
   assert.match(tools.get("subagent_observe")?.description ?? "", /subagent keeps running/);
   assert.match(tools.get("subagent_cancel")?.description ?? "", /Other runs and the main agent continue/);
   assert.match(tools.get("subagent_cancel")?.description ?? "", /repeated cancellation returns the same terminal state/);

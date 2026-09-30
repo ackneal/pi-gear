@@ -137,7 +137,7 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
   pi.registerTool({
     name: "subagent_observe",
     label: "Observe subagent",
-    description: "Wait for meaningful subagent progress, completion, or a bounded timeout. A timeout ends only this observation; the subagent keeps running.",
+    description: "Wait until the run finishes, goes quiet for a few seconds, or the timeout elapses (default 30s). A timeout ends only this observation; the subagent keeps running. Prefer one long wait over repeated polling; omit afterRevision unless resuming from a known revision.",
     parameters: Type.Object({
       runId: Type.String({ description: "Run identifier returned by researcher or worker." }),
       afterRevision: Type.Integer({ minimum: 0, description: "Last observed revision. Returns when a newer revision is available." }),
