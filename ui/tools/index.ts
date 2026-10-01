@@ -369,6 +369,7 @@ export function createSandboxBashTool(cwd: string, operations: BashOperations): 
 }
 
 function mcpToolName(name: string): string {
+  if (name.startsWith("mcp__")) return name.split("__").slice(2).join("__");
   const i = name.indexOf("_");
   return i === -1 ? name : name.slice(i + 1);
 }

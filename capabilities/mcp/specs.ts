@@ -18,6 +18,6 @@ export const RESEARCH_MCP_CAPABILITIES = [
   },
 ] as const satisfies readonly McpCapabilitySpec[];
 
-export function bridgeToolName(capabilityId: string, toolName: string): string {
-  return `${capabilityId}_${toolName.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+export function mcpToolName(capabilityId: string, toolName: string): string {
+  return `mcp__${capabilityId}__${toolName}`.replace(/[^a-zA-Z0-9_]/g, "_");
 }

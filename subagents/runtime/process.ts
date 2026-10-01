@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
-import { bridgeToolName, type CapabilitySpec } from "../../capabilities/index.ts";
+import { mcpToolName, type CapabilitySpec } from "../../capabilities/index.ts";
 import type { SubagentDispatch, SubagentProfile } from "./types.ts";
 
 export const KILL_TIMEOUT_MS = 1_000;
@@ -25,7 +25,7 @@ export function resolvePiInvocation(runtime: PiRuntime = { argv: process.argv, e
 }
 
 export function capabilityToolNames(capabilities: readonly CapabilitySpec[]): string[] {
-  return capabilities.flatMap((capability) => capability.kind === "builtin" ? [capability.name] : capability.tools.map((tool) => bridgeToolName(capability.id, tool.name)));
+  return capabilities.flatMap((capability) => capability.kind === "builtin" ? [capability.name] : capability.tools.map((tool) => mcpToolName(capability.id, tool.name)));
 }
 
 export function withoutWorkspaceSearch(profile: SubagentProfile): SubagentProfile {

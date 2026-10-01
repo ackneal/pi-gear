@@ -79,7 +79,7 @@ test("researcher child arguments isolate the child and use exactly its allowlist
     args.includes("--no-prompt-templates"),
   );
   assert.equal(args[args.indexOf("--extension") + 1]?.endsWith("subagents/agents/researcher/extension.ts"), true);
-  assert.equal(args[args.indexOf("--tools") + 1], "read,find,grep,exa_web_search_exa,exa_web_fetch_exa,gh_grep_searchGitHub");
+  assert.equal(args[args.indexOf("--tools") + 1], "read,find,grep,mcp__exa__web_search_exa,mcp__exa__web_fetch_exa,mcp__gh_grep__searchGitHub");
   assert.equal(args.join(",").match(/\b(?:bash|edit|write)\b/), null);
   assert.equal(args[args.indexOf("--system-prompt") + 1], RESEARCHER_SYSTEM_PROMPT);
   assert.equal(args[args.indexOf("--model") + 1], "openai/gpt-test");

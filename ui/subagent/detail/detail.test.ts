@@ -59,7 +59,7 @@ test("Test 1: toolCallId resolves correct subagent run from registry", () => {
       {
         kind: "tool",
         id: "t1",
-        name: "mcp__exa__search",
+        name: "mcp__exa__web_search_exa",
         status: "success",
         result: "No leaks found",
       },
@@ -116,7 +116,7 @@ test("Test 3: opening one overlay component displays only that run's content", (
       startedAt: 0,
       items: [
         { kind: "thinking", text: "Checking pg_stat_activity" },
-        { kind: "tool", name: "mcp__exa__search", status: "success", result: "Exa index tips" },
+        { kind: "tool", name: "mcp__exa__web_search_exa", status: "success", result: "Exa index tips" },
       ],
     },
     updatedAt: 0,
@@ -190,7 +190,7 @@ test("Test 4: live SubagentRun updates trigger component re-render / update", ()
     items: [
       {
         kind: "tool",
-        name: "exa_web_fetch_exa",
+        name: "mcp__exa__web_fetch_exa",
         status: "running",
       },
     ],
@@ -235,7 +235,7 @@ test("Test 5: completed, failed, and aborted states format and render correctly"
         status: "running",
         startedAt: 0,
         lastActivityAt: 1_000,
-        items: [{ kind: "tool", name: "mcp__exa__search", status: "running" }],
+        items: [{ kind: "tool", name: "mcp__exa__web_search_exa", status: "running" }],
       },
     },
     testTheme,
@@ -448,14 +448,14 @@ test("Test 9: main transcript formatting / rendering remains completely unchange
       {
         kind: "tool",
         id: "tool_1",
-        name: "mcp__exa__search",
+        name: "mcp__exa__web_search_exa",
         status: "success",
         result: '{"result":{"summary":"Exa finding"},"toolCallId":"call_hidden"}',
       },
       {
         kind: "tool",
         id: "tool_2",
-        name: "exa_web_fetch_exa",
+        name: "mcp__exa__web_fetch_exa",
         status: "success",
         result: "Fetch finding",
       },
@@ -913,15 +913,23 @@ test("Test 19: thinking block collapses to the + Thought label and expands with 
   assert.match(expandedLines, /\u2726 Third/);
 });
 
-test("Test 20: MCP tool call renders a compact tool-style header", () => {
-  const def = getCustomToolDefinition("exa_web_search_exa", process.cwd());
-  assert.ok(def, "MCP tool should get a custom definition");
+test("Test 20: native MCP tool calls render compact tool-style headers", () => {
+  const cases = [
+    ["mcp__exa__web_search_exa", "web_search_exa"],
+    ["mcp__exa__web_fetch_exa", "web_fetch_exa"],
+    ["mcp__gh_grep__searchGitHub", "searchGitHub"],
+  ] as const;
 
-  const header = (def as unknown as { renderCall: (a: unknown, t: Theme, c: unknown) => { render(w: number): string[] } })
-    .renderCall({ query: "hello world" }, testTheme, {});
-  const output = header.render(80).join("\n");
-  assert.match(output, /MCP\(web_search_exa\)/);
-  assert.match(output, /hello world/);
+  for (const [name, label] of cases) {
+    const def = getCustomToolDefinition(name, process.cwd());
+    assert.ok(def, "MCP tool should get a custom definition");
+
+    const header = (def as unknown as { renderCall: (a: unknown, t: Theme, c: unknown) => { render(w: number): string[] } })
+      .renderCall({ query: "hello world" }, testTheme, {});
+    const output = header.render(80).join("\n");
+    assert.ok(output.includes(`MCP(${label})`), name);
+    assert.match(output, /hello world/);
+  }
 });
 
 test("Test 17: handleInput navigates with vim, arrows, half-page, full-page, home, and end", () => {

@@ -7,7 +7,6 @@
       "dependencies": {
         "@anthropic-ai/sandbox-runtime": "0.0.71",
         "@ff-labs/fff-bun": "0.10.5",
-        "@modelcontextprotocol/sdk": "^1.30.0",
       },
       "devDependencies": {
         "@earendil-works/pi-coding-agent": "0.99.2",
