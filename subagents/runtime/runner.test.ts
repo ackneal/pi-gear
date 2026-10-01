@@ -78,7 +78,11 @@ test("researcher child arguments isolate the child and use exactly its allowlist
     args.includes("--no-context-files") &&
     args.includes("--no-prompt-templates"),
   );
-  assert.equal(args[args.indexOf("--extension") + 1]?.endsWith("subagents/agents/researcher/extension.ts"), true);
+  const extensions = args.flatMap((arg, index) => arg === "--extension" ? [args[index + 1]] : []);
+  assert.deepEqual(extensions, [
+    new URL("../../index.ts", import.meta.url).pathname,
+    new URL("../agents/researcher/extension.ts", import.meta.url).pathname,
+  ]);
   assert.equal(args[args.indexOf("--tools") + 1], "read,find,grep,mcp__exa__web_search_exa,mcp__exa__web_fetch_exa,mcp__gh_grep__searchGitHub");
   assert.equal(args.join(",").match(/\b(?:bash|edit|write)\b/), null);
   assert.equal(args[args.indexOf("--system-prompt") + 1], RESEARCHER_SYSTEM_PROMPT);

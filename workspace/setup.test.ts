@@ -2,8 +2,55 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { FilesystemAccessService } from "../execution/filesystem/guard.ts";
-import type { FffClient } from "../lifecycle/fff-client.ts";
+import { FffClient } from "../lifecycle/fff-client.ts";
+import { FFF_SOCKET_ENV } from "../lifecycle/fff-protocol.ts";
+import { setupLifecycle } from "../lifecycle/index.ts";
 import { setupWorkspace } from "./setup.ts";
+
+test("child workspace reuses the parent socket and closes only its connection", async (t) => {
+  const previous = process.env[FFF_SOCKET_ENV];
+  process.env[FFF_SOCKET_ENV] = "/tmp/parent-fff.sock";
+  t.after(() => {
+    if (previous === undefined) delete process.env[FFF_SOCKET_ENV];
+    else process.env[FFF_SOCKET_ENV] = previous;
+  });
+  const handlers = new Map<string, ((event: unknown, ctx: ExtensionContext) => unknown)[]>();
+  const registered: string[] = [];
+  const calls: string[] = [];
+  const client = {
+    close: () => { calls.push("close"); },
+    request: async (method: string) => { assert.fail(`unexpected parent request: ${method}`); },
+    subscribe: async () => async () => undefined,
+  } as unknown as FffClient;
+  t.mock.method(FffClient, "connect", async (endpoint: string) => {
+    calls.push(`connect:${endpoint}`);
+    return client;
+  });
+  const pi = {
+    on: (event: string, handler: (event: unknown, ctx: ExtensionContext) => unknown) => {
+      handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+    },
+    registerTool: (tool: ToolDefinition) => { registered.push(tool.name); },
+    getActiveTools: () => ["find", "grep"],
+    setActiveTools: () => undefined,
+  } as unknown as ExtensionAPI;
+  const lifecycle = setupLifecycle(pi, {
+    child: true,
+    startFff: async () => { assert.fail("child must not start a sidecar"); },
+  });
+  const filesystem = { forWorkspace: () => ({}) } as unknown as FilesystemAccessService;
+  const services = setupWorkspace(pi, filesystem, lifecycle.fff);
+  const ctx = { cwd: "/workspace", hasUI: false } as ExtensionContext;
+
+  for (const handler of handlers.get("session_start") ?? []) await handler({}, ctx);
+  assert.ok(services.current(ctx.cwd));
+  assert.equal(services.endpoint(ctx.cwd), "/tmp/parent-fff.sock");
+  assert.deepEqual(registered, ["find", "grep"]);
+  for (const handler of handlers.get("session_shutdown") ?? []) await handler({}, ctx);
+
+  assert.deepEqual(calls, ["connect:/tmp/parent-fff.sock", "close"]);
+  assert.equal(services.current(ctx.cwd), undefined);
+});
 
 const item = (relativePath: string) => ({
   relativePath,

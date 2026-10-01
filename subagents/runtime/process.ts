@@ -46,8 +46,10 @@ export function childArgs(profile: SubagentProfile, task: string, childExtension
     "--no-skills",
     "--no-prompt-templates",
     "--no-context-files",
-    "--extension",
-    fileURLToPath(childExtension),
+    ...[...new Set([
+      fileURLToPath(new URL("../../index.ts", import.meta.url)),
+      fileURLToPath(childExtension),
+    ])].flatMap((path) => ["--extension", path]),
     "--tools",
     capabilityToolNames(profile.capabilities).join(","),
     "--system-prompt",

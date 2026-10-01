@@ -13,6 +13,7 @@ export interface LifecycleServices {
 }
 
 export interface LifecycleOptions {
+  child?: boolean;
   startFff?: (cwd: string) => Promise<FffSidecar>;
 }
 
@@ -31,6 +32,7 @@ export function setupLifecycle(pi: ExtensionAPI, options: LifecycleOptions = {})
     clearSubagentRegistry();
     await stopFff();
     startupFailure = undefined;
+    if (options.child) return;
     try {
       resource = await (options.startFff ?? FffSidecar.start)(ctx.cwd);
     } catch (error) {
