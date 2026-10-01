@@ -5,7 +5,18 @@ import type { UnresolvedBackgroundRun } from "./background.ts";
 import { setupSubagentSettleGuard } from "./settle-guard.ts";
 
 function turn(turnIndex: number, toolResults: unknown[] = []): TurnEndEvent {
-  return { type: "turn_end", turnIndex, message: { role: "assistant", content: [] } as never, toolResults: toolResults as never };
+  return {
+    type: "turn_end",
+    turnIndex,
+    message: { role: "assistant", content: [] } as never,
+    toolResults: toolResults as never,
+    messageEntryId: `message-${turnIndex}`,
+    toolResultEntryIds: toolResults.map((_, index) => `tool-${turnIndex}-${index}`),
+    entries: [],
+    continue: false,
+    context: { contextEntries: [], contextMessages: [], llmMessages: [], pendingMessages: [], canContinue: false },
+    outcome: "completed",
+  };
 }
 
 function harness(unresolved: UnresolvedBackgroundRun[]) {
