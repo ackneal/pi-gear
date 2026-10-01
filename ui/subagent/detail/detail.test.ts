@@ -932,6 +932,36 @@ test("Test 20: native MCP tool calls render compact tool-style headers", () => {
   }
 });
 
+for (const { name, args, result } of [
+  { name: "grep", args: { pattern: "needle", path: "." }, result: "src/example.ts:1:needle" },
+  { name: "find", args: { pattern: "*.ts", path: "." }, result: "src/example.ts" },
+  { name: "customlookup", args: { query: "example" }, result: "Custom lookup expanded result" },
+]) {
+  test(`non-MCP tool ${name} has no custom tool definition`, () => {
+    assert.equal(getCustomToolDefinition(name, process.cwd()), undefined);
+  });
+
+  test(`non-MCP tool ${name} renders its name and expanded result in detail`, () => {
+    const entry: SubagentViewEntry = {
+      toolCallId: `call_non_mcp_${name}`,
+      task: "Ordinary tool activity",
+      profile: workerProfile,
+      run: {
+        status: "success",
+        startedAt: 0,
+        finishedAt: 1_000,
+        items: [{ kind: "tool", id: `tool_${name}`, name, args, status: "success", result }],
+      },
+      updatedAt: 0,
+    };
+
+    const output = formatDetailContent(entry, testTheme, 80, 5_000, true).join("\n");
+    assert.ok(output.toLowerCase().includes(name), `expected tool name ${name}:\n${output}`);
+    assert.doesNotMatch(output, /MCP\(/);
+    assert.ok(output.includes(result), `expected expanded result:\n${output}`);
+  });
+}
+
 test("Test 17: handleInput navigates with vim, arrows, half-page, full-page, home, and end", () => {
   const entry: SubagentViewEntry = {
     toolCallId: "call_scroll_test",

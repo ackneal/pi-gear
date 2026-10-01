@@ -430,8 +430,10 @@ export function getCustomToolDefinition(name: string, cwd: string = process.cwd(
   if (name === "bash") {
     return decorateSandboxBash(createBashToolDefinition(cwd));
   }
-  // MCP capability tools: render with a compact tool-style header like the built-ins.
-  return createMcpDefinition(name, cwd);
+  if (name.startsWith("mcp__")) {
+    return createMcpDefinition(name, cwd);
+  }
+  return undefined;
 }
 
 export function setupFileToolUi(pi: ExtensionAPI): void {
