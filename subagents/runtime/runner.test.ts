@@ -64,6 +64,7 @@ test("child process inherits the active session cwd and receives an explicit wor
   }) as never, "/session/workspace", undefined, { PI_GEAR_FFF_SOCKET: "/tmp/session.sock" });
   assert.equal(receivedCwd, "/session/workspace");
   assert.equal(receivedEnv?.PI_GEAR_FFF_SOCKET, "/tmp/session.sock");
+  assert.equal(receivedEnv?.PI_GEAR_CHILD, "1");
 });
 
 test("researcher child arguments isolate the child and use exactly its allowlist", () => {
@@ -73,7 +74,6 @@ test("researcher child arguments isolate the child and use exactly its allowlist
   });
   assert.ok(
     args.includes("--no-session") &&
-    args.includes("--no-extensions") &&
     args.includes("--no-skills") &&
     args.includes("--no-context-files") &&
     args.includes("--no-prompt-templates"),
@@ -81,7 +81,7 @@ test("researcher child arguments isolate the child and use exactly its allowlist
   assert.equal(args[args.indexOf("--extension") + 1]?.endsWith("subagents/agents/researcher/extension.ts"), true);
   assert.equal(args[args.indexOf("--tools") + 1], "read,find,grep,exa_web_search_exa,exa_web_fetch_exa,gh_grep_searchGitHub");
   assert.equal(args.join(",").match(/\b(?:bash|edit|write)\b/), null);
-  assert.equal(args[args.indexOf("--append-system-prompt") + 1], RESEARCHER_SYSTEM_PROMPT);
+  assert.equal(args[args.indexOf("--system-prompt") + 1], RESEARCHER_SYSTEM_PROMPT);
   assert.equal(args[args.indexOf("--model") + 1], "openai/gpt-test");
   assert.equal(args[args.indexOf("--thinking") + 1], "high");
 });
@@ -137,6 +137,25 @@ test("child returns a final report and rejects an empty successful result", asyn
   empty.emit("close", 0);
 
   assert.match((await failed).error ?? "", /without a final report/);
+});
+
+test("an errored assistant message surfaces the provider error instead of a missing report", async () => {
+  const errored = JSON.stringify({
+    type: "message_end",
+    message: { role: "assistant", content: [], stopReason: "error", errorMessage: "Payment Required" },
+  });
+  const events = new PiJsonDecoder().push(`${errored}\n`, true);
+  assert.deepEqual(events, [{ type: "model_error", message: "Payment Required" }]);
+
+  const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), kill: () => true });
+  const result = runChildSubagent({ task: "inspect", profile, childExtension: new URL("./runner.test.ts", import.meta.url), spawnChild: () => child as never, onUpdate: () => {} });
+
+  child.stdout.emit("data", Buffer.from(`${errored}\n`));
+  child.emit("close", 0);
+
+  const failed = await result;
+  assert.equal(failed.status, "error");
+  assert.match(failed.error ?? "", /Payment Required/);
 });
 
 test("error then close resolves once, while concurrent aborts stay isolated", async () => {

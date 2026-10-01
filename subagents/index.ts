@@ -60,7 +60,7 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
   pi.registerTool({
     name: RESEARCHER_TOOL_NAME,
     label: researcherProfile.label,
-    description: "Start focused read-only research. Returns immediately with a runId; use subagent_observe for progress or completion.",
+    description: "Start focused read-only research. Pass the research question as question (optional scope). The researcher inspects the workspace and can search the web (Exa) and GitHub code for external evidence. Returns immediately with a runId; use subagent_observe for progress or completion.",
     parameters: researcherParameters,
     executionMode: "parallel",
     async execute(toolCallId, { question, scope }, signal, _onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
@@ -97,7 +97,7 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
   pi.registerTool({
     name: WORKER_TOOL_NAME,
     label: workerProfile.label,
-    description: "Start one bounded task. Returns immediately with a runId; use subagent_observe for progress or completion. Set targetFiles when files may be modified so active scope conflicts can be rejected.",
+    description: "Start one bounded task. Pass the work as task, with optional targetFiles, findings, and verification. Returns immediately with a runId; use subagent_observe for progress or completion. Set targetFiles when files may be modified so active scope conflicts can be rejected.",
     parameters: workerParameters,
     executionMode: "parallel",
     async execute(toolCallId, { task: requestedTask, targetFiles, findings, verification }, signal, _onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
@@ -137,7 +137,7 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
   pi.registerTool({
     name: "subagent_observe",
     label: "Observe subagent",
-    description: "Wait for meaningful subagent progress, completion, or a bounded timeout. A timeout ends only this observation; the subagent keeps running.",
+    description: "Wait until the run finishes, goes quiet for a few seconds, or the timeout elapses (default 30s). A timeout ends only this observation; the subagent keeps running. Prefer one long wait over repeated polling; omit afterRevision unless resuming from a known revision.",
     parameters: Type.Object({
       runId: Type.String({ description: "Run identifier returned by researcher or worker." }),
       afterRevision: Type.Integer({ minimum: 0, description: "Last observed revision. Returns when a newer revision is available." }),

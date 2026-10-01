@@ -124,7 +124,8 @@ export async function runChildSubagent(options: RunChildSubagentOptions): Promis
       } else if (code !== 0) {
         finish("error", `Subagent exited with code ${code ?? "unknown"}.${stderr.trim() ? ` ${stderr.trim()}` : ""}`);
       } else if (!run.result?.trim()) {
-        finish("error", "Subagent exited successfully without a final report.");
+        const detail = run.modelError ?? stderr.trim();
+        finish("error", `Subagent exited without a final report.${detail ? ` ${detail}` : ""}`);
       } else {
         finish("success");
       }

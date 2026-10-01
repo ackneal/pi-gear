@@ -11,6 +11,7 @@ export interface SubagentRun {
   items: SubagentItem[];
   dispatch?: SubagentDispatch;
   result?: string;
+  modelError?: string;
   error?: string;
   usage?: {
     input: number;

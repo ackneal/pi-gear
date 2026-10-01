@@ -55,7 +55,7 @@ test("wait reports immediate changes, later changes, timeout, and terminal compl
   const timers = new Timers();
   const done = deferred<SubagentRun>();
   let update!: (value: SubagentRun) => void;
-  const subject = registry({ setTimer: timers.set, clearTimer: timers.clear });
+  const subject = registry({ setTimer: timers.set, clearTimer: timers.clear, settleMs: 0 });
   const initial = subject.start({ profile, task: "wait", run: (_signal, onUpdate) => { update = onUpdate; return done.promise; } });
 
   assert.equal((await subject.wait(initial.runId, 0)).reason, "changed");
@@ -73,6 +73,48 @@ test("wait reports immediate changes, later changes, timeout, and terminal compl
   done.resolve(run("success", "complete"));
   assert.equal((await terminal).reason, "terminal");
   assert.equal((await subject.wait(initial.runId, 999)).reason, "terminal");
+});
+
+test("a burst of progress wakes the waiter once after the settle window", async () => {
+  const done = deferred<SubagentRun>();
+  let update!: (value: SubagentRun) => void;
+  const subject = registry({ settleMs: 40, settleCheckMs: 10 });
+  const initial = subject.start({ profile, task: "burst", run: (_signal, onUpdate) => { update = onUpdate; return done.promise; } });
+
+  const waited = subject.wait(initial.runId, initial.revision, 5);
+  for (let index = 0; index < 5; index++) update({ ...run(), result: `r${index}` });
+  const result = await waited;
+
+  assert.equal(result.reason, "changed");
+  assert.equal(result.snapshot.revision, initial.revision + 1);
+  assert.equal(result.snapshot.partialResult, "r4");
+  done.resolve(run("success"));
+});
+
+test("terminal completion wakes a settled waiter immediately without waiting out the quiet window", async () => {
+  const done = deferred<SubagentRun>();
+  let update!: (value: SubagentRun) => void;
+  const subject = registry({ settleMs: 40, settleCheckMs: 10 });
+  const initial = subject.start({ profile, task: "finish", run: (_signal, onUpdate) => { update = onUpdate; return done.promise; } });
+
+  const waited = subject.wait(initial.runId, initial.revision, 5);
+  update({ ...run(), result: "partial" });
+  done.resolve(run("success", "complete"));
+  const result = await waited;
+
+  assert.equal(result.reason, "terminal");
+  assert.equal(result.snapshot.partialResult, "complete");
+});
+
+test("a wait with no pending change ignores the settle window and reports timeout", async () => {
+  const timers = new Timers();
+  const done = deferred<SubagentRun>();
+  const subject = registry({ settleMs: 40, settleCheckMs: 10, setTimer: timers.set, clearTimer: timers.clear });
+  const initial = subject.start({ profile, task: "quiet", run: () => done.promise });
+
+  const waited = subject.wait(initial.runId, initial.revision, 7);
+  timers.fire(timers.latest());
+  assert.equal((await waited).reason, "timeout");
 });
 
 test("streaming result updates create one meaningful checkpoint rather than token revisions", async () => {
@@ -95,10 +137,11 @@ test("wait does not lose an update between its initial check and waiter registra
   let update!: (value: SubagentRun) => void;
   let timerCalls = 0;
   const subject = registry({
-    setTimer: ((callback: (...args: unknown[]) => void) => {
+    settleMs: 0,
+    setTimer: ((callback: (...args: unknown[]) => void, ms?: number) => {
       timerCalls++;
       if (timerCalls === 2) update({ ...run(), result: "raced update" });
-      return setTimeout(callback, 60_000);
+      return setTimeout(callback, ms ?? 60_000);
     }) as typeof setTimeout,
   });
   const initial = subject.start({ profile, task: "race", run: (_signal, onUpdate) => { update = onUpdate; return done.promise; } });

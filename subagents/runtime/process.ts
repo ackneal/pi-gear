@@ -43,7 +43,6 @@ export function childArgs(profile: SubagentProfile, task: string, childExtension
     "--no-session",
     ...(dispatch?.model ? ["--model", dispatch.model] : []),
     ...(dispatch?.thinkingLevel ? ["--thinking", dispatch.thinkingLevel] : []),
-    "--no-extensions",
     "--no-skills",
     "--no-prompt-templates",
     "--no-context-files",
@@ -51,7 +50,7 @@ export function childArgs(profile: SubagentProfile, task: string, childExtension
     fileURLToPath(childExtension),
     "--tools",
     capabilityToolNames(profile.capabilities).join(","),
-    "--append-system-prompt",
+    "--system-prompt",
     profile.systemPrompt,
     task,
   ];
@@ -70,6 +69,6 @@ export function spawnPiChild(
   return spawnProcess(invocation.command, [...invocation.prefixArgs, ...childArgs(profile, task, childExtension, dispatch)], {
     cwd,
     stdio: ["ignore", "pipe", "pipe"],
-    ...(env ? { env: { ...process.env, ...env } } : {}),
+    env: { ...process.env, ...env, PI_GEAR_CHILD: "1" },
   });
 }

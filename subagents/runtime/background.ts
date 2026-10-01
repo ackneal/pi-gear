@@ -5,6 +5,9 @@ import type { SubagentDispatch, SubagentProfile, SubagentRun } from "./types.ts"
 export const MAX_ACTIVE_BACKGROUND_RUNS = 4;
 export const MAX_BACKGROUND_RUNTIME_MS = 30 * 60_000;
 export const MAX_WAIT_SECONDS = 60;
+/** Quiet window before a non-terminal progress burst wakes a waiting observer. */
+export const WAKE_SETTLE_MS = 2_000;
+const SETTLE_CHECK_MS = 250;
 export const MAX_RETAINED_BACKGROUND_RUNS = 20;
 
 export type BackgroundStatus = SubagentRun["status"] | "cancelling";
@@ -75,6 +78,8 @@ export interface BackgroundRegistryOptions {
   maxRuntimeMs?: number;
   maxRetained?: number;
   maxWaitSeconds?: number;
+  settleMs?: number;
+  settleCheckMs?: number;
   now?: () => number;
   createRunId?: () => string;
   setTimer?: typeof setTimeout;
@@ -100,6 +105,8 @@ export class BackgroundRunRegistry {
   private readonly maxRuntimeMs: number;
   private readonly maxRetained: number;
   private readonly maxWaitSeconds: number;
+  private readonly settleMs: number;
+  private readonly settleCheckMs: number;
   private readonly now: () => number;
   private readonly createRunId: () => string;
   private readonly setTimer: typeof setTimeout;
@@ -110,6 +117,8 @@ export class BackgroundRunRegistry {
     this.maxRuntimeMs = options.maxRuntimeMs ?? MAX_BACKGROUND_RUNTIME_MS;
     this.maxRetained = options.maxRetained ?? MAX_RETAINED_BACKGROUND_RUNS;
     this.maxWaitSeconds = options.maxWaitSeconds ?? MAX_WAIT_SECONDS;
+    this.settleMs = options.settleMs ?? WAKE_SETTLE_MS;
+    this.settleCheckMs = options.settleCheckMs ?? SETTLE_CHECK_MS;
     this.now = options.now ?? Date.now;
     this.createRunId = options.createRunId ?? randomUUID;
     this.setTimer = options.setTimer ?? setTimeout;
@@ -182,15 +191,39 @@ export class BackgroundRunRegistry {
       this.resolve(entry);
       return { reason: "terminal", snapshot: this.snapshot(entry) };
     }
-    if (entry.revision > afterRevision) return { reason: "changed", snapshot: this.snapshot(entry) };
+    // Long-poll semantics: a pending change wakes the waiter only after the run
+    // has gone quiet for settleMs, so a burst of progress events costs one wake
+    // instead of one per revision.
+    const settledChange = (): boolean =>
+      entry.revision > afterRevision && this.now() - (entry.run.lastActivityAt ?? entry.startedAt) >= this.settleMs;
+    if (settledChange()) return { reason: "changed", snapshot: this.snapshot(entry) };
 
     const milliseconds = Math.max(0, Math.min(timeoutSeconds, this.maxWaitSeconds)) * 1000;
     let timedOut = false;
+    let settleTimer: ReturnType<typeof setTimeout> | undefined;
     await new Promise<void>((resolveWait) => {
-      const wake = (): void => { this.clearTimer(timer); entry.waiters.delete(wake); resolveWait(); };
-      const timer = this.setTimer(() => { timedOut = true; entry.waiters.delete(wake); resolveWait(); }, milliseconds);
+      let finishWait!: () => void;
+      const shouldWake = (): boolean => terminal(entry.status) || settledChange();
+      const wake = (): void => {
+        if (!shouldWake()) {
+          if (entry.revision > afterRevision) armSettleCheck();
+          return;
+        }
+        finishWait();
+      };
+      const timer = this.setTimer(() => { timedOut = true; finishWait(); }, milliseconds);
+      const armSettleCheck = (): void => {
+        if (settleTimer) this.clearTimer(settleTimer);
+        settleTimer = this.setTimer(wake, this.settleCheckMs);
+      };
+      finishWait = (): void => {
+        this.clearTimer(timer);
+        if (settleTimer) this.clearTimer(settleTimer);
+        entry.waiters.delete(wake);
+        resolveWait();
+      };
       entry.waiters.add(wake);
-      if (terminal(entry.status) || entry.revision > afterRevision) wake();
+      if (entry.revision > afterRevision) armSettleCheck();
     });
 
     if (terminal(entry.status)) this.resolve(entry);

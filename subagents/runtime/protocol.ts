@@ -51,6 +51,9 @@ function assistantEnd(event: Record<string, unknown>, messageId: number): Subage
     } else if (value.type === "text" && typeof value.text === "string") text += value.text;
   });
   if (text) output.push({ type: "result", text: truncateRetainedText(text) });
+  if (message.stopReason === "error" && typeof message.errorMessage === "string" && message.errorMessage) {
+    output.push({ type: "model_error", message: message.errorMessage });
+  }
   if (typeof message.usage === "object" && message.usage !== null) {
     output.push({ type: "usage", usage: message.usage as NonNullable<SubagentRun["usage"]> });
   }

@@ -20,8 +20,12 @@ export default async function gear(pi: ExtensionAPI): Promise<void> {
   setupPromptComposer(pi);
 
   setupThinkingDisplay(pi);
-  const subagents = setupSubagents(pi, workspace);
   const lsp = setupLsp(pi, { workspace, filesystem: execution.filesystem });
 
+  // Children inherit extension discovery, so pi-gear loads inside every subagent too;
+  // the marker set by spawnPiChild keeps subagents from spawning subagents.
+  if (process.env.PI_GEAR_CHILD === "1") return;
+
+  const subagents = setupSubagents(pi, workspace);
   setupCommands(pi, { execution, subagents, lsp, workspace });
 }
