@@ -28,7 +28,11 @@ export function renderSubagentResult(
   theme: Theme,
   context: ToolRenderContext,
 ): Text {
-  if (context.toolCallId && result.details && context.args) {
+  const details = result.details && !Array.isArray(result.details.items)
+    ? { ...result.details, items: [] }
+    : result.details;
+
+  if (context.toolCallId && details && context.args) {
     const primary = context.args.question ?? context.args.task;
     const task = typeof primary === "string" && primary.trim()
       ? primary
@@ -37,7 +41,7 @@ export function renderSubagentResult(
       context.toolCallId,
       profile as unknown as SubagentProfile,
       task,
-      result.details,
+      details,
     );
   }
 
@@ -47,9 +51,9 @@ export function renderSubagentResult(
     context.lastComponent instanceof SubagentResultComponent
       ? context.lastComponent
       : new SubagentResultComponent(context.invalidate, format);
-  const runId = (result.details as SubagentRun & { runId?: string } | undefined)?.runId;
+  const runId = (details as SubagentRun & { runId?: string } | undefined)?.runId;
   const liveToolCallId = runId && context.toolCallId;
-  const run = liveToolCallId ? getSubagentEntry(liveToolCallId)?.run ?? result.details : result.details;
+  const run = liveToolCallId ? getSubagentEntry(liveToolCallId)?.run ?? details : details;
   component.update(run, options, format);
   if (liveToolCallId && run?.status === "running") {
     component.bindLive(liveToolCallId, (listener) => subscribeSubagent(liveToolCallId, listener));
