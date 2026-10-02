@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AccessPolicy } from "../../config/index.ts";
 import { CONFIRMATION_TIMEOUT_MS, ConfirmationQueue } from "../confirmation-queue.ts";
 import { loadExtensionConfig } from "../../config/index.ts";
@@ -87,7 +87,6 @@ export class FilesystemAccess {
     operation: FilesystemOperation,
     label: string,
     ctx: ExtensionContext,
-    _pi: ExtensionAPI,
   ): Promise<FilesystemAuthorization> {
     const authorization = await this.authorize(path, operation);
     if (authorization.decision !== "ask") return authorization;

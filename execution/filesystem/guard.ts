@@ -57,7 +57,7 @@ export function setupFilesystemGuard(
     const operation = filesystemOperations[guarded.toolName];
     try {
       const access = forWorkspace(ctx.cwd);
-      const authorization = await access.request(path, operation, guarded.toolName, ctx, pi);
+      const authorization = await access.request(path, operation, guarded.toolName, ctx);
       guarded.input.path = authorization.path;
       if (authorization.decision === "deny") {
         return block(guarded.toolName, authorization.path, "Access is not permitted.", ctx);

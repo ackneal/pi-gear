@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { CONFIRMATION_TIMEOUT_MS } from "../confirmation-queue.ts";
 import { FilesystemAccess } from "./access.ts";
 
@@ -39,7 +39,7 @@ test("filesystem access reloads policy and recovers from loader failures", async
   }
 });
 
-test("filesystem requests notify approval and denial without sending messages or changing authorization semantics", async () => {
+test("filesystem requests notify approval and denial without changing authorization semantics", async () => {
   const cases = [
     { allowed: true, decision: "allow", status: "approved", severity: "info" },
     { allowed: false, decision: "ask", status: "denied", severity: "warning" },
@@ -51,7 +51,6 @@ test("filesystem requests notify approval and denial without sending messages or
     const outside = join(root, "outside.txt");
     const confirmations: unknown[][] = [];
     const notifications: unknown[][] = [];
-    const messages: unknown[] = [];
     const ctx = {
       hasUI: true,
       ui: {
@@ -59,7 +58,6 @@ test("filesystem requests notify approval and denial without sending messages or
         notify: (...args: unknown[]) => { notifications.push(args); },
       },
     } as unknown as ExtensionContext;
-    const pi = { sendMessage: (message: unknown) => { messages.push(message); } } as unknown as ExtensionAPI;
 
     try {
       await mkdir(workspace);
@@ -71,7 +69,7 @@ test("filesystem requests notify approval and denial without sending messages or
       const authorization = await access.authorize(outside, "read");
       assert.equal(authorization.decision, "ask");
 
-      const result = await access.request(outside, "read", "read", ctx, pi);
+      const result = await access.request(outside, "read", "read", ctx);
 
       assert.deepEqual(result, { ...authorization, decision });
       assert.deepEqual(confirmations, [[
@@ -83,7 +81,6 @@ test("filesystem requests notify approval and denial without sending messages or
         `User ${status} outside-workspace access: read ${authorization.path}`,
         severity,
       ]]);
-      assert.deepEqual(messages, []);
       assert.deepEqual(await access.authorize(outside, "read"), authorization);
     } finally {
       await rm(root, { recursive: true, force: true });
