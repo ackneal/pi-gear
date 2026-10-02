@@ -62,6 +62,7 @@ test("delegation guidance preserves research terms and explains asynchronous sub
   assert.match(prompt, /Do not parallelize dependencies or overlapping edits/);
   assert.match(prompt, /Workers should satisfy focused completion checks/);
   assert.match(prompt, /Keep integration and final verification in the main agent/);
+  assert.match(prompt, /Subagents do not inherit the parent agent's skills; provide the absolute path of any skill needed for the delegated task/);
   assert.match(prompt, /Do independent work before observing\. Use bounded subagent_observe calls and avoid repeated polling/);
   assert.doesNotMatch(prompt, /resolve background runs before|before completing/i);
   assert.match(prompt, /Cancel or redispatch narrower work when stalled, repeatedly failing, unnecessary, or over budget/);
