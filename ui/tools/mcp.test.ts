@@ -63,3 +63,55 @@ test("collapsed MCP results retain full-output path and error color", () => {
   assert.match(output, /Full output: \/tmp\/mcp-output.txt/);
   assert.ok(colors.includes("error"));
 });
+
+for (const { name, texts, expected } of [
+  { name: "SGR styling", texts: ["\x1b[31mred\x1b[0m"], expected: "red" },
+  { name: "colon-separated SGR", texts: ["\x1b[38:2::255:0:0mRGB\x1b[0m"], expected: "RGB" },
+  { name: "cursor and erase sequences", texts: ["one\x1b[2J\x1b[3A two"], expected: "one two" },
+  { name: "OSC hyperlinks", texts: ["\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\"], expected: "link" },
+  { name: "OSC title with BEL", texts: ["\x1b]0;hidden title\x07visible"], expected: "visible" },
+  { name: "OSC title with C1 terminator", texts: ["\x1b]0;hidden title\u009cvisible"], expected: "visible" },
+  { name: "C1 CSI styling", texts: ["\u009b31mred\u009b0m"], expected: "red" },
+  { name: "binary controls", texts: ["a\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0b\x0c\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1fb"], expected: "ab" },
+  { name: "interlinear annotations and Unicode", texts: ["你好\ufff9🙂\ufffaé\ufffb"], expected: "你好🙂é" },
+  { name: "CR removal and tab expansion", texts: ["one\r\n\nnext\tword\rlast"], expected: "one\n\nnext   wordlast" },
+  { name: "multiple text blocks", texts: ["\x1b[31mone\x1b[0m", "\x00two"], expected: "one\ntwo" },
+  { name: "control-only output", texts: ["\x00\ufff9\x1b[0m\r"], expected: "" },
+]) {
+  for (const expanded of [false, true]) {
+    for (const isError of [false, true]) {
+      test(`MCP result sanitizes ${name}: ${expanded ? "expanded" : "collapsed"}, ${isError ? "error" : "success"}`, () => {
+        const styledLines: { color: string; text: string }[] = [];
+        const recordingTheme = { ...theme, fg: (color: string, text: string) => {
+          styledLines.push({ color, text });
+          return text;
+        } };
+
+        const component = renderer().renderResult(
+          { content: texts.map((text) => ({ type: "text", text })), details: {} },
+          { expanded }, recordingTheme, { isError, showImages: false },
+        );
+
+        assert.deepEqual(styledLines, expected ? expected.split("\n").map((text) => ({
+          color: isError ? "error" : "toolOutput", text,
+        })) : []);
+        assert.equal(component.render(120).map((line) => line.trimEnd()).join("\n"), expected ? `\n${expected}` : "");
+      });
+    }
+  }
+}
+
+for (const { name, text, expected } of [
+  { name: "image-only output", text: "", expected: "[Image: [image/png]]" },
+  { name: "sanitized text with image", text: "\x1b[31mcaption\x1b[0m\x00", expected: "caption\n[Image: [image/png]]" },
+]) {
+  for (const expanded of [false, true]) {
+    test(`MCP result preserves ${name}: ${expanded ? "expanded" : "collapsed"}`, () => {
+      const component = renderer().renderResult(
+        { content: [{ type: "text", text }, { type: "image", data: "", mimeType: "image/png" }], details: {} },
+        { expanded }, theme, { isError: false, showImages: false },
+      );
+      assert.equal(component.render(120).map((line) => line.trimEnd()).join("\n"), `\n${expected}`);
+    });
+  }
+}

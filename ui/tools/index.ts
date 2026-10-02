@@ -15,6 +15,7 @@ import {
   type ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
 import { Container, Spacer, Text, getCapabilities, getImageDimensions, imageFallback, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { NormalizedDiagnostic, SourceLocation } from "../../lsp/types.ts";
@@ -423,7 +424,14 @@ function createMcpDefinition(name: string, cwd: string): AnyDefinition {
     renderResult: (result: AnyResult, options: ToolRenderResultOptions, theme: Theme, context: AnyContext) => {
       const component = context.lastComponent instanceof Container ? context.lastComponent : new Container();
       component.clear();
-      let output = textResult(result).replace(/\r/g, "");
+      // Match Pi's binary filter; its sanitizeBinaryOutput helper is not a public export.
+      let output = result.content.filter((item) => item.type === "text")
+        .map((item) => stripVTControlCharacters((item.text || "")
+          // Node's stripper misses Pi's general OSC strings and colon-separated SGR parameters.
+          .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\|\u009c)/g, "")
+          .replace(/(?:\x1b\[|\u009b)\d{1,4}(?:[;:]\d{0,4})*m/g, ""))
+          .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\uFFF9-\uFFFB]/g, "").replace(/\r/g, ""))
+        .join("\n");
       if (!getCapabilities().images || !context.showImages) {
         const images = result.content.filter((item) => item.type === "image").map((image) =>
           imageFallback(image.mimeType ?? "image/unknown", getImageDimensions(image.data, image.mimeType) ?? undefined));
