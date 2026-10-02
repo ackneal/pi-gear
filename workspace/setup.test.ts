@@ -104,6 +104,9 @@ test("a canceled session switch leaves the original workspace find and grep usab
   const grep = await run("grep", { pattern: "usable", literal: true });
 
   assert.equal(services.current(ctx.cwd), original);
+  for (const toolName of ["find", "grep"]) {
+    assert.equal(await handlers.tool_call?.({ toolName }, ctx), undefined);
+  }
   assert.match(JSON.stringify(find), /kept\.ts/);
   assert.match(JSON.stringify(grep), /still usable/);
 });
@@ -132,4 +135,46 @@ test("unavailable FFF omits workspace tools and preserves its diagnostic", async
   assert.deepEqual(activeTools, ["read", "write"]);
   assert.equal(services.current(ctx.cwd), undefined);
   assert.equal((await services.status(ctx.cwd))?.error, "FFF sidecar unavailable: Bun executable not found");
+  for (const name of ["find", "grep"]) {
+    assert.deepEqual(await handlers.tool_call?.({ toolName: name }, ctx), {
+      block: true,
+      reason: "FFF sidecar unavailable: Bun executable not found",
+    });
+  }
+  assert.equal(await handlers.tool_call?.({ toolName: "read" }, ctx), undefined);
+});
+
+test("failed child FFF connection blocks search reactivated by MCP registration", async (t) => {
+  t.mock.method(FffClient, "connect", async () => { throw new Error("Parent FFF socket unavailable"); });
+  const handlers: Record<string, (...args: any[]) => any> = {};
+  const allowedTools = ["read", "find", "grep", "mcp__exa__web_search_exa"];
+  let activeTools = [...allowedTools];
+  const pi = {
+    on: (event: string, handler: (...args: any[]) => any) => { handlers[event] = handler; },
+    // Pi 1.0 registry refresh reactivates tools named in the CLI allowlist.
+    registerTool: () => { activeTools = [...allowedTools]; },
+    getActiveTools: () => activeTools,
+    setActiveTools: (tools: string[]) => { activeTools = tools; },
+  } as unknown as ExtensionAPI;
+  const filesystem = { forWorkspace: () => { assert.fail("failed connection must not initialize search"); } } as unknown as FilesystemAccessService;
+  setupWorkspace(pi, filesystem, {
+    current: () => undefined,
+    endpoint: () => "/tmp/unavailable-parent-fff.sock",
+  });
+  const ctx = { cwd: "/workspace", hasUI: false } as ExtensionContext;
+
+  assert.ok(handlers.session_start);
+  assert.ok(handlers.tool_call);
+  await handlers.session_start({}, ctx);
+  assert.ok(!activeTools.includes("find") && !activeTools.includes("grep"));
+  pi.registerTool({ name: "mcp__exa__web_search_exa" } as ToolDefinition);
+
+  for (const toolName of ["find", "grep"]) {
+    assert.ok(activeTools.includes(toolName));
+    assert.deepEqual(await handlers.tool_call({ toolName }, ctx), {
+      block: true,
+      reason: "Parent FFF socket unavailable",
+    });
+  }
+  assert.equal(await handlers.tool_call({ toolName: "mcp__exa__web_search_exa" }, ctx), undefined);
 });
