@@ -5,6 +5,8 @@ import {
   createWriteToolDefinition,
   getLanguageFromPath,
   highlightCode,
+  keyHint,
+  truncateToVisualLines,
   renderDiff,
   type AgentToolResult,
   type ExtensionAPI,
@@ -14,7 +16,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { Container, Spacer, Text, getCapabilities, getImageDimensions, imageFallback, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { NormalizedDiagnostic, SourceLocation } from "../../lsp/types.ts";
 
 const LABEL_WIDTH = 16;
@@ -368,57 +370,79 @@ export function createSandboxBashTool(cwd: string, operations: BashOperations): 
   return decorateSandboxBash(createBashToolDefinition(cwd, { operations }));
 }
 
-function mcpToolName(name: string): string {
-  if (name.startsWith("mcp__")) return name.split("__").slice(2).join("__");
-  const i = name.indexOf("_");
-  return i === -1 ? name : name.slice(i + 1);
-}
-
-const MCP_TARGET_KEYS = ["query", "search", "keyword", "text", "message", "prompt", "term", "url", "path", "id", "name"];
-
-function mcpTarget(args: Record<string, unknown>, name: string): string {
-  for (const key of MCP_TARGET_KEYS) {
-    const v = args?.[key];
-    if (typeof v === "string" && v.trim()) {
-      return v.trim().replace(/\s+/g, " ");
-    }
+/** Native-style MCP preview, bounded by visual rather than logical lines. */
+class McpPreview {
+  private text: string;
+  private theme: Theme;
+  constructor(text: string, theme: Theme) {
+    this.text = text;
+    this.theme = theme;
   }
-  return name;
+  render(width: number): string[] {
+    const safeWidth = Math.max(1, width);
+    const { visualLines, skippedCount } = truncateToVisualLines(this.text, 5, safeWidth, 0, "start");
+    if (skippedCount > 0) {
+      const hint = `${this.theme.fg("muted", `... (${skippedCount} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${this.theme.fg("muted", ")")}`;
+      visualLines.push(truncateToWidth(hint, safeWidth, safeWidth < 3 ? "" : "..."));
+    }
+    return visualLines;
+  }
+  invalidate(): void {}
 }
 
-/** Compact tool-style header for an MCP call, matching the built-in file/exec tools. */
 function createMcpDefinition(name: string, cwd: string): AnyDefinition {
   const base = createReadToolDefinition(cwd);
+  const parts = name.slice("mcp__".length).split("__");
+  const label = `${parts.shift()}/${parts.join("__")}`;
   return {
     ...base,
     name,
-    label: name,
+    label,
     renderShell: "default",
     renderCall: (rawArgs: unknown, theme: Theme, context: AnyContext) => {
-      const args = parseArgsObject(rawArgs ?? context?.args);
-      const marker = context.expanded ? "-" : "+";
-      const label = `MCP(${mcpToolName(name)})`;
-      const head =
-        theme.fg("muted", marker) +
-        " " +
-        theme.fg("toolTitle", theme.bold(label.padEnd(LABEL_WIDTH)));
-      const target = mcpTarget(args, name);
-      if (!context.expanded) {
-        return new CompactText(
-          head + theme.fg("text", ` ${target}`),
-          "compact",
-          theme.fg("muted", "(truncated)"),
-        );
+      const args = rawArgs ?? context.args;
+      const entries = args == null ? [] : typeof args === "object" && !Array.isArray(args)
+        ? Object.entries(args) : [["args", args]];
+      let text = theme.fg("toolTitle", theme.bold(label));
+      if (entries.length > 0) {
+        if (context.expanded) {
+          const lines = entries.map(([key, value]) => {
+            const valueText = typeof value === "string" ? value : (JSON.stringify(value, null, 2) ?? String(value));
+            return `  ${key}: ${valueText.replace(/\t/g, "   ").replace(/\r/g, "").split("\n").join("\n    ")}`;
+          });
+          text += `\n${theme.fg("muted", lines.join("\n"))}`;
+        } else {
+          const pairs = entries.map(([key, value]) => `${key}=${JSON.stringify(value) ?? String(value)}`).join(" ");
+          text += ` ${theme.fg("muted", pairs.length > 100 ? `${pairs.slice(0, 97)}...` : pairs)}`;
+        }
       }
-      // Expanded: full target as a raw line (no mid-token wrapping).
-      return CompactText.headerAndLines(head, theme.fg("text", target));
+      const component = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+      component.setText(text);
+      return component;
     },
-    renderResult: (result: AnyResult, options: ToolRenderResultOptions, theme: Theme, _context: AnyContext) => {
-      if (!options.expanded) return empty();
-      const text = textResult(result);
-      return text
-        ? new CompactText(`\n${theme.fg("toolOutput", text)}`, "detail")
-        : empty();
+    renderResult: (result: AnyResult, options: ToolRenderResultOptions, theme: Theme, context: AnyContext) => {
+      const component = context.lastComponent instanceof Container ? context.lastComponent : new Container();
+      component.clear();
+      let output = textResult(result).replace(/\r/g, "");
+      if (!getCapabilities().images || !context.showImages) {
+        const images = result.content.filter((item) => item.type === "image").map((image) =>
+          imageFallback(image.mimeType ?? "image/unknown", getImageDimensions(image.data, image.mimeType) ?? undefined));
+        output = [output, ...images].filter(Boolean).join("\n");
+      }
+      output = output.trim();
+      if (!output) return component;
+      const styled = output.replace(/\t/g, "   ").split("\n")
+        .map((line) => theme.fg(context.isError ? "error" : "toolOutput", line)).join("\n");
+      component.addChild(new Spacer(1));
+      if (options.expanded) {
+        component.addChild(new Text(styled, 0, 0));
+      } else {
+        component.addChild(new McpPreview(styled, theme));
+        if (result.details?.fullOutputPath) {
+          component.addChild(new Text(theme.fg("muted", `Full output: ${result.details.fullOutputPath}`), 0, 0));
+        }
+      }
+      return component;
     },
   };
 }
@@ -429,6 +453,10 @@ export function getCustomToolDefinition(name: string, cwd: string = process.cwd(
   }
   if (name === "bash") {
     return decorateSandboxBash(createBashToolDefinition(cwd));
+  }
+  if (name === "find" || name === "grep") {
+    const base: AnyDefinition = createReadToolDefinition(cwd);
+    return { ...base, name, ...workspaceToolRenderers(name) };
   }
   if (name.startsWith("mcp__")) {
     return createMcpDefinition(name, cwd);

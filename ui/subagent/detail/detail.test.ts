@@ -913,11 +913,11 @@ test("Test 19: thinking block collapses to the + Thought label and expands with 
   assert.match(expandedLines, /\u2726 Third/);
 });
 
-test("Test 20: native MCP tool calls render compact tool-style headers", () => {
+test("Test 20: native MCP tool calls render server/tool headers", () => {
   const cases = [
-    ["mcp__exa__web_search_exa", "web_search_exa"],
-    ["mcp__exa__web_fetch_exa", "web_fetch_exa"],
-    ["mcp__gh_grep__searchGitHub", "searchGitHub"],
+    ["mcp__exa__web_search_exa", "exa/web_search_exa"],
+    ["mcp__exa__web_fetch_exa", "exa/web_fetch_exa"],
+    ["mcp__gh_grep__searchGitHub", "gh_grep/searchGitHub"],
   ] as const;
 
   for (const [name, label] of cases) {
@@ -927,14 +927,29 @@ test("Test 20: native MCP tool calls render compact tool-style headers", () => {
     const header = (def as unknown as { renderCall: (a: unknown, t: Theme, c: unknown) => { render(w: number): string[] } })
       .renderCall({ query: "hello world" }, testTheme, {});
     const output = header.render(80).join("\n");
-    assert.ok(output.includes(`MCP(${label})`), name);
+    assert.ok(output.includes(label), name);
+    assert.doesNotMatch(output, /MCP\(/);
     assert.match(output, /hello world/);
   }
 });
 
+for (const { name, pattern, label } of [
+  { name: "find", pattern: "*.ts", label: "FIND" },
+  { name: "grep", pattern: "needle", label: "GREP" },
+]) {
+  test(`workspace tool ${name} uses its shared uppercase renderer`, () => {
+    const definition = getCustomToolDefinition(name, process.cwd());
+    assert.ok(definition?.renderCall);
+    const component = definition.renderCall({ pattern, path: "." }, testTheme as never, { cwd: process.cwd(), expanded: false } as never);
+    assert.ok(component);
+    const output = component.render(80).join("\n");
+    assert.ok(output.includes(`+ ${label}`), output);
+    assert.ok(output.includes(pattern), output);
+    assert.doesNotMatch(output, /MCP\(/);
+  });
+}
+
 for (const { name, args, result } of [
-  { name: "grep", args: { pattern: "needle", path: "." }, result: "src/example.ts:1:needle" },
-  { name: "find", args: { pattern: "*.ts", path: "." }, result: "src/example.ts" },
   { name: "customlookup", args: { query: "example" }, result: "Custom lookup expanded result" },
 ]) {
   test(`non-MCP tool ${name} has no custom tool definition`, () => {
