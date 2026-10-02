@@ -87,7 +87,7 @@ export class FilesystemAccess {
     operation: FilesystemOperation,
     label: string,
     ctx: ExtensionContext,
-    pi: ExtensionAPI,
+    _pi: ExtensionAPI,
   ): Promise<FilesystemAuthorization> {
     const authorization = await this.authorize(path, operation);
     if (authorization.decision !== "ask") return authorization;
@@ -100,11 +100,10 @@ export class FilesystemAccess {
       { timeout: CONFIRMATION_TIMEOUT_MS },
     ));
 
-    pi.sendMessage({
-      customType: "filesystem",
-      content: `User ${allowed ? "approved" : "denied"} outside-workspace access: ${label} ${authorization.path}`,
-      display: false,
-    });
+    ctx.ui.notify(
+      `User ${allowed ? "approved" : "denied"} outside-workspace access: ${label} ${authorization.path}`,
+      allowed ? "info" : "warning",
+    );
     return allowed ? { ...authorization, decision: "allow" } : authorization;
   }
 

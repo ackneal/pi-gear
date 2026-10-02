@@ -63,7 +63,7 @@ export function setupFilesystemGuard(
         return block(guarded.toolName, authorization.path, "Access is not permitted.", ctx);
       }
       if (authorization.decision === "ask") {
-        return block(guarded.toolName, authorization.path, "Access outside the workspace requires confirmation.", ctx);
+        return block(guarded.toolName, authorization.path, "Outside-workspace access was denied.", ctx);
       }
     } catch {
       return block(guarded.toolName, path, "File access policy is unavailable.", ctx);

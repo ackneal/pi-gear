@@ -86,7 +86,7 @@ async function authorizeRoot(access: FilesystemAccess, root: string, label: stri
 
   const authorization = await access.request(root, "read", label, ctx, pi);
   if (authorization.decision === "deny") throw new Error("Access is not permitted.");
-  if (authorization.decision === "ask") throw new Error("Access outside the workspace requires confirmation.");
+  if (authorization.decision === "ask") throw new Error("Outside-workspace access was denied.");
   return { authorization, approvedAsk: true };
 }
 
