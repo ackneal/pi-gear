@@ -11,9 +11,10 @@ import { setupThinkingDisplay } from "./ui/thinking/index.ts";
 import { setupWorkspace } from "./workspace/setup.ts";
 
 export default async function gear(pi: ExtensionAPI): Promise<void> {
+  const child = process.env.PI_GEAR_CHILD === "1";
   const config = await loadExtensionConfig();
   const execution = setupExecution(pi, config);
-  const lifecycle = setupLifecycle(pi);
+  const lifecycle = setupLifecycle(pi, { child });
   const workspace = setupWorkspace(pi, execution.filesystem, lifecycle.fff);
 
   setupTaskState(pi);
@@ -22,9 +23,8 @@ export default async function gear(pi: ExtensionAPI): Promise<void> {
   setupThinkingDisplay(pi);
   const lsp = setupLsp(pi, { workspace, filesystem: execution.filesystem });
 
-  // Children inherit extension discovery, so pi-gear loads inside every subagent too;
-  // the marker set by spawnPiChild keeps subagents from spawning subagents.
-  if (process.env.PI_GEAR_CHILD === "1") return;
+  // Children share runtime services but cannot spawn another layer of subagents.
+  if (child) return;
 
   const subagents = setupSubagents(pi, workspace);
   setupCommands(pi, { execution, subagents, lsp, workspace });

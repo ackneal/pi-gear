@@ -6,7 +6,6 @@ import { childArgs, withoutWorkspaceSearch } from "../../runtime/process.ts";
 import type { SubagentRun } from "../../runtime/types.ts";
 import { WORKER_CAPABILITIES, workerProfile } from "./profile.ts";
 import { WORKER_SYSTEM_PROMPT } from "./prompt.ts";
-import workerExtension from "./extension.ts";
 import { formatWorkerInput, WORKER_TOOL_NAME, runWorker } from "./index.ts";
 import type { WorkerSubagentInput } from "./index.ts";
 import { setupSubagents } from "../../index.ts";
@@ -42,7 +41,7 @@ test("worker profile, prompt, and capabilities match specification", () => {
 });
 
 test("worker child arguments configure isolation, capabilities, and system prompt", () => {
-  const extensionUrl = new URL("./extension.ts", import.meta.url);
+  const extensionUrl = new URL("../../../index.ts", import.meta.url);
   const args = childArgs(workerProfile, "implement feature", extensionUrl);
   assert.ok(
     args.includes("--no-session") &&
@@ -52,45 +51,17 @@ test("worker child arguments configure isolation, capabilities, and system promp
   );
   assert.equal(args[args.indexOf("--tools") + 1], "read,find,grep,edit,write,bash");
   assert.equal(args[args.indexOf("--system-prompt") + 1], WORKER_SYSTEM_PROMPT);
-  assert.equal(args[args.indexOf("--extension") + 1]?.endsWith("subagents/agents/worker/extension.ts"), true);
+  assert.equal(args.filter((arg) => arg === "--extension").length, 1);
+  assert.equal(args[args.indexOf("--extension") + 1], new URL("../../../index.ts", import.meta.url).pathname);
   assert.equal(args[args.length - 1], "implement feature");
 });
 
 test("unavailable workspace search is omitted from child capabilities", () => {
   const profile = withoutWorkspaceSearch(workerProfile);
-  const args = childArgs(profile, "implement feature", new URL("./extension.ts", import.meta.url));
+  const args = childArgs(profile, "implement feature", new URL("../../../index.ts", import.meta.url));
 
   assert.equal(args[args.indexOf("--tools") + 1], "read,edit,write,bash");
   assert.equal(workerProfile.capabilities, WORKER_CAPABILITIES);
-});
-
-test("worker extension configures filesystem guard and sandbox", async () => {
-  const registeredTools: string[] = [];
-  const registeredCommands: string[] = [];
-  const handlers = new Map<string, Array<(event: unknown, ctx: { cwd: string }) => unknown>>();
-
-  const mockPi = {
-    registerTool: (tool: { name: string }) => { registeredTools.push(tool.name); },
-    registerCommand: (name: string) => { registeredCommands.push(name); },
-    on: (event: string, handler: (event: unknown, ctx: { cwd: string }) => unknown) => {
-      const eventHandlers = handlers.get(event) ?? [];
-      eventHandlers.push(handler);
-      handlers.set(event, eventHandlers);
-    },
-    sendMessage: () => {},
-  } as unknown as ExtensionAPI;
-
-  await workerExtension(mockPi, async () => ({
-    version: 1,
-    filesystem: { rules: [] },
-    sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } },
-  }));
-  handlers.get("session_start")?.at(-1)?.({}, { cwd: "/workspace" });
-
-  assert.ok(handlers.has("tool_call")); // filesystem guard
-  assert.ok(handlers.has("session_start")); // sandbox
-  assert.deepEqual(registeredCommands, []); // child runtime exposes no user commands
-  assert.ok(registeredTools.includes("bash")); // sandbox bash
 });
 
 test("setupSubagents registers asynchronous subagent and control tools", async () => {

@@ -44,7 +44,7 @@ export function setupCommands(pi: ExtensionAPI, services: GearCommandServices): 
         lspServers,
         await services.workspace?.status(ctx.cwd),
       );
-      ctx.ui.notify(output, "info");
+      pi.sendMessage({ customType: GEAR_COMMANDS.doctor, content: output, display: true });
     },
   });
 }

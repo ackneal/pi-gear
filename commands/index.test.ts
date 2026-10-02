@@ -101,6 +101,12 @@ test("gear commands are centrally registered and delegate to their services", as
       commands.set(name, definition);
     },
     getActiveTools: () => ["researcher", "worker"],
+    sendMessage: (message: { customType: string; content: string; display: boolean }, options: unknown) => {
+      assert.equal(message.customType, GEAR_COMMANDS.doctor);
+      assert.equal(message.display, true);
+      assert.equal(options, undefined);
+      calls.push(`doctor:${message.content.split("\n")[0]}`);
+    },
   } as unknown as ExtensionAPI;
   const services = {
     execution: { sandbox: { status: () => sandboxStatus } },
@@ -115,7 +121,7 @@ test("gear commands are centrally registered and delegate to their services", as
       },
     },
   } as unknown as GearCommandServices;
-  const ctx = { cwd: "/workspace", ui: { notify: (message: string) => { calls.push(`doctor:${message.split("\n")[0]}`); } } };
+  const ctx = { cwd: "/workspace", ui: { notify: () => { assert.fail("doctor should render a custom message, not a notification"); } } };
 
   setupCommands(pi, services);
 

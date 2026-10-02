@@ -57,7 +57,7 @@ test("headless outside-workspace file access is denied when policy asks", async 
     );
     assert.deepEqual(result, {
       block: true,
-      reason: "Access outside the workspace requires confirmation.",
+      reason: "Outside-workspace access was denied.",
     });
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -142,7 +142,7 @@ test("dangling symlink writes are blocked as outside-workspace access", async ()
     );
     assert.deepEqual(result, {
       block: true,
-      reason: "Access outside the workspace requires confirmation.",
+      reason: "Outside-workspace access was denied.",
     });
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -170,7 +170,7 @@ test("built-in tmp access does not follow symlinks outside temp roots", async ()
     );
     assert.deepEqual(result, {
       block: true,
-      reason: "Access outside the workspace requires confirmation.",
+      reason: "Outside-workspace access was denied.",
     });
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -313,7 +313,7 @@ test("sibling temp roots still require confirmation", async () => {
         { type: "tool_call", toolName: "read", toolCallId: "test-sibling-read", input: { path: join(sibling, "file.txt") } },
         { cwd: workspace, hasUI: false } as ExtensionContext,
       ),
-      { block: true, reason: "Access outside the workspace requires confirmation." },
+      { block: true, reason: "Outside-workspace access was denied." }
     );
   } finally {
     await rm(root, { recursive: true, force: true });
