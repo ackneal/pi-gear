@@ -45,7 +45,7 @@ export function runWorker(
   return runChildSubagent({
     ...runOptions,
     profile: workspaceSearch ? workerProfile : withoutWorkspaceSearch(workerProfile),
-    childExtension: new URL("./extension.ts", import.meta.url),
+    childExtension: new URL("../../../index.ts", import.meta.url),
     task,
   });
 }

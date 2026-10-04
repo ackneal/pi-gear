@@ -40,7 +40,7 @@ test("sandbox exposes diagnostics without owning commands", () => {
     on: () => undefined,
     registerTool: () => undefined,
     registerCommand: () => { registeredCommand = true; },
-    sendMessage: () => undefined,
+    sendMessage: () => { assert.fail("sandbox must not send model messages"); },
   } as unknown as ExtensionAPI;
 
   const diagnostics = setupSandbox(pi, {

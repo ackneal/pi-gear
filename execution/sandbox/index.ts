@@ -18,7 +18,7 @@ const disabledStatus: SandboxStatus = Object.freeze({
 
 export interface SandboxSetupOptions {
   readonly confirmationQueue?: ConfirmationQueue;
-  readonly createController?: (send: (content: string) => void | Promise<void>) => SandboxController;
+  readonly createController?: () => SandboxController;
 }
 
 export function setupSandbox(
@@ -39,10 +39,8 @@ export function setupSandbox(
   }
 
   const confirmationQueue = options.confirmationQueue ?? new ConfirmationQueue();
-  const createController = options.createController ?? ((send) => new SandboxController(send, undefined, undefined, confirmationQueue));
-  const controller = createController((content) =>
-    pi.sendMessage({ customType: "sandbox", content, display: false }),
-  );
+  const createController = options.createController ?? (() => new SandboxController(undefined, undefined, confirmationQueue));
+  const controller = createController();
   pi.on("session_start", async (_event, ctx) => controller.start(ctx));
   pi.on("session_shutdown", async () => {
     await controller.shutdown();

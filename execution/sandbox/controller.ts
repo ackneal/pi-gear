@@ -40,18 +40,15 @@ export interface SandboxStatus {
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
 export class SandboxController {
-  private readonly sendApprovalMessage: (content: string) => void | Promise<void>;
   private readonly manager: SandboxManagerLike;
   private readonly loadConfig: typeof loadExtensionConfig;
   private readonly confirmationQueue: ConfirmationQueue;
 
   constructor(
-    sendApprovalMessage: (content: string) => void | Promise<void>,
     manager: SandboxManagerLike = SandboxManager,
     loadConfig: typeof loadExtensionConfig = loadExtensionConfig,
     confirmationQueue: ConfirmationQueue = new ConfirmationQueue(),
   ) {
-    this.sendApprovalMessage = sendApprovalMessage;
     this.manager = manager;
     this.loadConfig = loadConfig;
     this.confirmationQueue = confirmationQueue;
@@ -92,7 +89,6 @@ export class SandboxController {
         { timeout: CONFIRMATION_TIMEOUT_MS },
       )),
       notify: (message, level) => ctx.ui.notify(message, level),
-      sendMessage: this.sendApprovalMessage,
     }, () => this.generation === generation && this.approvals === approvals);
     this.approvals = approvals;
     this.state = { kind: "starting" };

@@ -34,7 +34,7 @@ test("sandbox lifecycle serializes shutdown behind an in-flight start", { skip: 
     hasUI: false,
     ui: { confirm: async () => false, notify: () => undefined },
   } as unknown as ExtensionContext;
-  const controller = new SandboxController(() => undefined, manager, async () => ({
+  const controller = new SandboxController(manager, async () => ({
     version: 1,
     filesystem: { rules: [] },
     sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } },

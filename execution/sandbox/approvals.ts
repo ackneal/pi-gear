@@ -3,8 +3,7 @@ import type { NetworkHostPattern } from "@anthropic-ai/sandbox-runtime";
 export interface ApprovalUI {
   readonly hasUI: boolean;
   readonly confirm: (title: string, message: string) => Promise<boolean>;
-  readonly notify: (message: string, level: "warning") => void;
-  readonly sendMessage: (content: string) => void | Promise<void>;
+  readonly notify: (message: string, level: "info" | "warning") => void;
 }
 
 const networkKey = ({ host, port }: NetworkHostPattern): string =>
@@ -45,14 +44,14 @@ export class SessionApprovals {
     if (this.pendingHostPrompts.get(key) === prompt) this.pendingHostPrompts.delete(key);
 
     if (!approved) {
-      void Promise.resolve(this.ui.sendMessage(`User denied network access: ${key}`)).catch(() => undefined);
+      this.ui.notify(`User denied network access: ${key}`, "warning");
       return false;
     }
     if (!this.isCurrent()) return false;
     if (this.approvedHosts.has(key)) return true;
 
     this.approvedHosts.add(key);
-    void Promise.resolve(this.ui.sendMessage(`User approved network access: ${key}`)).catch(() => undefined);
+    this.ui.notify(`User approved network access: ${key}`, "info");
     return true;
   }
 

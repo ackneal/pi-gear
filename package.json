@@ -26,22 +26,21 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --experimental-strip-types --test commands/*.test.ts config/*.test.ts context/*/*.test.ts execution/*/*.test.ts execution/*/*/*.test.ts lifecycle/*.test.ts lsp/*.test.ts workspace/*.test.ts subagents/*/*.test.ts subagents/*/*/*.test.ts ui/*/*.test.ts ui/*/*/*.test.ts",
+    "test": "node --experimental-strip-types --test capabilities/*/*.test.ts commands/*.test.ts config/*.test.ts context/*/*.test.ts execution/*/*.test.ts execution/*/*/*.test.ts lifecycle/*.test.ts lsp/*.test.ts workspace/*.test.ts subagents/*/*.test.ts subagents/*/*/*.test.ts ui/*/*.test.ts ui/*/*/*.test.ts",
     "test:sandbox:macos": "node --experimental-strip-types --test execution/sandbox/integration.test.ts && node --experimental-strip-types --test --test-name-pattern='sandbox spawn abort and timeout' execution/sandbox/spawn.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.71",
-    "@ff-labs/fff-bun": "0.10.5",
-    "@modelcontextprotocol/sdk": "^1.30.0"
+    "@ff-labs/fff-bun": "0.10.5"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.84.2",
-    "@earendil-works/pi-tui": "^0.84.2",
+    "@earendil-works/pi-coding-agent": ">=1.0.0 <2.0.0",
+    "@earendil-works/pi-tui": ">=1.0.0 <2.0.0",
     "typebox": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.84.3",
-    "@earendil-works/pi-tui": "0.84.3",
+    "@earendil-works/pi-coding-agent": "1.0.2",
+    "@earendil-works/pi-tui": "1.0.2",
     "typebox": "1.3.13",
     "@types/node": "26.2.0",
     "typescript": "7.0.2"

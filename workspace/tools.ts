@@ -79,14 +79,14 @@ interface RootAuthorization {
   readonly approvedAsk: boolean;
 }
 
-async function authorizeRoot(access: FilesystemAccess, root: string, label: string, ctx: ExtensionContext, pi: ExtensionAPI): Promise<RootAuthorization> {
+async function authorizeRoot(access: FilesystemAccess, root: string, label: string, ctx: ExtensionContext): Promise<RootAuthorization> {
   const initial = await access.authorize(root, "read");
   if (initial.decision === "deny") throw new Error("Access is not permitted.");
   if (initial.decision === "allow") return { authorization: initial, approvedAsk: false };
 
-  const authorization = await access.request(root, "read", label, ctx, pi);
+  const authorization = await access.request(root, "read", label, ctx);
   if (authorization.decision === "deny") throw new Error("Access is not permitted.");
-  if (authorization.decision === "ask") throw new Error("Access outside the workspace requires confirmation.");
+  if (authorization.decision === "ask") throw new Error("Outside-workspace access was denied.");
   return { authorization, approvedAsk: true };
 }
 
@@ -126,7 +126,6 @@ async function workspaceFind(search: WorkspaceSearch, root: string, pattern: str
 async function executeFind(
   search: WorkspaceSearch,
   access: FilesystemAccess,
-  pi: ExtensionAPI,
   ctx: ExtensionContext,
   pattern: string,
   rawPath: string | undefined,
@@ -139,7 +138,7 @@ async function executeFind(
     return workspaceFind(search, requestedRoot, pattern, limit);
   }
 
-  const root = await authorizeRoot(access, requestedRoot, "find", ctx, pi);
+  const root = await authorizeRoot(access, requestedRoot, "find", ctx);
   return runExternal(root.authorization.path);
 }
 
@@ -292,7 +291,7 @@ async function nativeGrepOutput(
   return formatGrep(matches.slice(0, limit), limit, matches.length <= limit);
 }
 
-async function executeGrep(search: WorkspaceSearch, access: FilesystemAccess, pi: ExtensionAPI, ctx: ExtensionContext, input: GrepInput, signal?: AbortSignal) {
+async function executeGrep(search: WorkspaceSearch, access: FilesystemAccess, ctx: ExtensionContext, input: GrepInput, signal?: AbortSignal) {
   const requestedRoot = resolve(search.root, input.path ?? ".");
   if (isPathWithin(search.root, requestedRoot)) {
     const info = await pathInfo(requestedRoot);
@@ -301,7 +300,7 @@ async function executeGrep(search: WorkspaceSearch, access: FilesystemAccess, pi
       : nativeGrepOutput(requestedRoot, access, input, signal);
   }
 
-  const root = await authorizeRoot(access, requestedRoot, "grep", ctx, pi);
+  const root = await authorizeRoot(access, requestedRoot, "grep", ctx);
   await pathInfo(root.authorization.path);
   return nativeGrepOutput(root.authorization.path, approvedRootAccess(access, root), input, signal);
 }
@@ -317,7 +316,6 @@ export function registerWorkspaceTools(pi: ExtensionAPI, search: WorkspaceSearch
       executeFind(
         search,
         access,
-        pi,
         ctx,
         pattern,
         path,
@@ -339,7 +337,7 @@ export function registerWorkspaceTools(pi: ExtensionAPI, search: WorkspaceSearch
     renderResult: grepUi.renderResult as any,
     parameters: grepParameters,
     execute: async (_id, input, signal, _onUpdate, ctx) =>
-      executeGrep(search, access, pi, ctx, input, signal),
+      executeGrep(search, access, ctx, input, signal),
   });
 
   pi.setActiveTools([...new Set([...pi.getActiveTools(), "find", "grep"])]);

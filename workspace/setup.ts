@@ -72,6 +72,12 @@ export function setupWorkspace(
     }
   });
 
+  pi.on("tool_call", (event) => {
+    if (!search && (event.toolName === "find" || event.toolName === "grep")) {
+      return { block: true, reason: connectionError ?? "FFF sidecar unavailable" };
+    }
+  });
+
   pi.on("tool_result", (event) => {
     if (!search || event.isError || !["read", "edit", "write"].includes(event.toolName)) {
       return;
