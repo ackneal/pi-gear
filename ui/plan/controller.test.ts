@@ -43,8 +43,8 @@ test("rapid done then started updates coalesce from the original stable state", 
   const done = state(["pending", "done", "pending", "pending"]);
   const started = state(["pending", "done", "in_progress", "pending"]);
   controller.reconstruct(ctx as never, before);
-  controller.update(ctx as never, before, done, { action: "complete_step" });
-  controller.update(ctx as never, done, started, { action: "start_step" });
+  controller.update(ctx as never, before, done, { action: "update_step" });
+  controller.update(ctx as never, done, started, { action: "update_step" });
   assert.match(line(2), /✓ #2 completed · ✓1\/4 → ● #3 started · Integrate context/);
   timers.run(0);
   assert.match(line(2), /✓ #2 completed · ✓1\/4 → ● #3 started/);
@@ -59,7 +59,7 @@ test("final completion stays visible before hiding", () => {
   const before = state(["done", "done", "in_progress", "done"]);
   const complete = state(["done", "done", "done", "done"]);
   controller.reconstruct(ctx as never, before);
-  controller.update(ctx as never, before, complete, { action: "complete_step" });
+  controller.update(ctx as never, before, complete, { action: "advance_step" });
   assert.match(line(1), /✓ Plan complete · 4\/4/);
   timers.run(0);
   assert.deepEqual(calls[2], [PLAN_WIDGET_ID, undefined, { placement: "aboveEditor" }]);
@@ -73,7 +73,7 @@ test("revisions settle while findings, constraints, and show do not reset their 
   const revised = { ...before, steps: [{ ...before.steps[0]!, outcome: "Revised outcome" }, ...before.steps.slice(1)] };
   const withFinding = { ...revised, findings: ["Useful finding"] };
   controller.reconstruct(ctx as never, before);
-  controller.update(ctx as never, before, revised, { action: "revise_step" });
+  controller.update(ctx as never, before, revised, { action: "update_step" });
   controller.update(ctx as never, revised, withFinding, { action: "add_finding" });
   controller.update(ctx as never, withFinding, withFinding, { action: "show" });
   assert.equal(timers.callbacks.length, 1);
@@ -95,7 +95,7 @@ test("reconstruction is steady, shutdown cancels timers, and widget lines fit CJ
     assert.equal(rendered.length, 1);
     assert.ok(visibleWidth(rendered[0] ?? "") <= Math.max(1, width));
   }
-  controller.update(ctx as never, cjk, { ...cjk, steps: [{ ...cjk.steps[0]!, outcome: "Revised" }, ...cjk.steps.slice(1)] }, { action: "revise_step" });
+  controller.update(ctx as never, cjk, { ...cjk, steps: [{ ...cjk.steps[0]!, outcome: "Revised" }, ...cjk.steps.slice(1)] }, { action: "update_step" });
   controller.shutdown(ctx as never);
   timers.run(0);
   assert.deepEqual(calls.at(-1), [PLAN_WIDGET_ID, undefined, { placement: "aboveEditor" }]);

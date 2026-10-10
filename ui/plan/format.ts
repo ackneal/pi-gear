@@ -35,7 +35,3 @@ export function formatPlanSnapshot(state: TaskState | undefined, expanded: boole
 export function formatPlanChange(label: string, value: string, theme: PlanTheme): string {
   return `${theme.fg("toolOutput", "✓")} ${theme.bold(theme.fg("toolTitle", label))}${theme.fg("text", ` · ${sanitizeDisplayText(value)}`)}`;
 }
-
-export function formatPlanRemoval(label: string, value: string, theme: PlanTheme): string {
-  return `${theme.fg("muted", "✓")} ${theme.bold(theme.fg("toolTitle", `${label} removed`))}${theme.fg("text", ` · ${sanitizeDisplayText(value)}`)}`;
-}

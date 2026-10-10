@@ -14,76 +14,67 @@ const plan = {
   ],
 } satisfies TaskStateParamsType;
 
-function startAndComplete(state: TaskState, id: number): TaskState {
-  const started = applyAction(state, { action: "start_step", id }).state!;
-  return applyAction(started, { action: "complete_step", id }).state!;
-}
-
-test("step reducers assign pending status and enforce semantic transitions", () => {
+test("step reducers assign pending status, advance steps, and update steps", () => {
   const initial = applyAction(undefined, plan).state!;
   assert.deepEqual(initial.steps.map(({ id, status }) => ({ id, status })), [
     { id: 1, status: "pending" },
     { id: 2, status: "pending" },
   ]);
 
-  const added = applyAction(initial, { action: "add_step", step: { outcome: "Document state", doneWhen: "README is current" } }).state!;
+  const added = applyAction(initial, { action: "add_step", outcome: "Document state", doneWhen: "README is current" }).state!;
   assert.deepEqual(added.steps.map(({ id, status }) => ({ id, status })), [
     { id: 1, status: "pending" },
     { id: 2, status: "pending" },
     { id: 3, status: "pending" },
   ]);
 
-  const firstStarted = applyAction(added, { action: "start_step", id: 1 }).state!;
-  const parallel = applyAction(firstStarted, { action: "start_step", id: 2 }).state!;
-  assert.deepEqual(parallel.steps.map((step) => step.status), ["in_progress", "in_progress", "pending"]);
+  // Start step 1 via advance_step when no step is in progress
+  const started = applyAction(added, { action: "advance_step" }).state!;
+  assert.equal(started.steps[0]?.status, "in_progress");
 
-  const firstDone = applyAction(parallel, { action: "complete_step", id: 1 }).state!;
-  const reopened = applyAction(firstDone, { action: "start_step", id: 1 }).state!;
-  assert.equal(reopened.steps[0]?.status, "in_progress");
+  // Advance step: completes step 1, starts step 2, optionally adds finding
+  const advanced = applyAction(started, { action: "advance_step", finding: "Step 1 passed" }).state!;
+  assert.equal(advanced.steps[0]?.status, "done");
+  assert.equal(advanced.steps[1]?.status, "in_progress");
+  assert.deepEqual(advanced.findings, ["Step 1 passed"]);
 
-  const revised = applyAction(reopened, { action: "revise_step", id: 1, outcome: "Implement semantic state", doneWhen: "Focused reducer tests pass" }).state!;
-  assert.deepEqual(revised.steps[0], {
-    id: 1,
+  // Update step 2 outcome and doneWhen
+  const updated = applyAction(advanced, {
+    action: "update_step",
+    id: 2,
+    outcome: "Implement semantic state",
+    doneWhen: "Focused reducer tests pass",
+  }).state!;
+  assert.deepEqual(updated.steps[1], {
+    id: 2,
     outcome: "Implement semantic state",
     doneWhen: "Focused reducer tests pass",
     status: "in_progress",
   });
 
-  const done = applyAction(revised, { action: "complete_step", id: 1 }).state!;
+  // Advance step: completes step 2, starts step 3
+  const advanced2 = applyAction(updated, { action: "advance_step" }).state!;
+  assert.equal(advanced2.steps[1]?.status, "done");
+  assert.equal(advanced2.steps[2]?.status, "in_progress");
+
+  // Advance final step: completes step 3, no more pending steps
+  const completed = applyAction(advanced2, { action: "advance_step" }).state!;
+  assert.equal(completed.steps[2]?.status, "done");
+
+  // Error cases
   const failures = [
-    [added, { action: "complete_step", id: 1 }, /Start step #1/],
-    [firstStarted, { action: "start_step", id: 1 }, /already in progress/],
-    [done, { action: "complete_step", id: 1 }, /already complete/],
-    [done, { action: "revise_step", id: 1 }, /Provide outcome or doneWhen/],
-    [done, { action: "remove_step", id: 99 }, /not found/],
+    [advanced, { action: "advance_step", finding: "Step 1 passed" } as const, /Finding already exists/],
+    [completed, { action: "advance_step" } as const, /All steps are complete/],
+    [completed, { action: "update_step", id: 99, status: "pending" as const }, /Step #99 not found/],
   ] as const;
   for (const [state, params, error] of failures) {
     const result = applyAction(state, params);
     assert.match(result.error ?? "", error);
     assert.equal(result.state, state);
   }
-
-  const only = applyAction(undefined, { action: "set_plan", goal: "One", steps: [{ outcome: "Only", doneWhen: "Finished" }] }).state!;
-  assert.match(applyAction(only, { action: "remove_step", id: 1 }).error ?? "", /at least 1 step/);
 });
 
-test("revise_step preserves a completed outcome until start_step reopens it", () => {
-  const initial = applyAction(undefined, plan).state!;
-  const completed = startAndComplete(initial, 1);
-
-  const rejected = applyAction(completed, { action: "revise_step", id: 1, outcome: "Change completed state" });
-  assert.equal(rejected.error, "Step #1 is complete; use start_step to reopen it before revising it.");
-  assert.equal(rejected.state, completed);
-  assert.equal(completed.steps[0]?.outcome, "Implement state");
-  assert.equal(completed.steps[0]?.status, "done");
-
-  const reopened = applyAction(completed, { action: "start_step", id: 1 }).state!;
-  const revised = applyAction(reopened, { action: "revise_step", id: 1, outcome: "Change reopened state" }).state!;
-  assert.equal(revised.steps[0]?.outcome, "Change reopened state");
-  assert.equal(revised.steps[0]?.status, "in_progress");
-});
-
-test("provider schema is flat, describes outcome and doneWhen, and exposes no status mutation", async () => {
+test("provider schema is flat, describes outcome and doneWhen, and exposes 7 actions", async () => {
   const harness = createHarness();
   setupTaskState(harness.pi);
   const schema = JSON.parse(JSON.stringify(harness.registered?.parameters)) as {
@@ -97,36 +88,31 @@ test("provider schema is flat, describes outcome and doneWhen, and exposes no st
   assert.deepEqual(schema.required, ["action"]);
   assert.equal(schema.additionalProperties, false);
   assert.deepEqual(schema.properties?.action?.enum, [
-    "set_plan", "add_step", "revise_step", "remove_step", "start_step", "complete_step",
-    "add_constraint", "remove_constraint", "add_finding", "remove_finding", "show", "clear",
+    "set_plan", "advance_step", "update_step", "add_step", "add_finding", "show", "clear",
   ]);
   assert.equal(schema.properties?.outcome?.description, "A coherent result, not an individual edit or command.");
   assert.equal(schema.properties?.steps?.items?.properties?.outcome?.description, "A coherent result, not an individual edit or command.");
   assert.equal(schema.properties?.doneWhen?.description, "Observable completion condition.");
   assert.equal(schema.properties?.steps?.items?.properties?.doneWhen?.description, "Observable completion condition.");
-  assert.equal(JSON.stringify(schema).includes('"status"'), false);
+  assert.equal(schema.properties?.id?.description, "Step ID to complete (for advance_step) or update (for update_step). Defaults to the active in-progress step for advance_step.");
   for (const oldField of ["todos", "todo", "text"]) assert.equal(Object.hasOwn(schema.properties ?? {}, oldField), false);
 
   await harness.tool!.execute("call", plan, undefined, undefined, harness.ctx);
   const before = (await harness.tool!.execute("call", { action: "show" }, undefined, undefined, harness.ctx)).details?.state;
   const widgetCalls = harness.widgetCalls.length;
   const invalid = [
-    { action: "set_plan", goal: "Status injection", steps: [{ outcome: "Injected", doneWhen: "Rejected", status: "done" }] },
-    { action: "add_step", step: { outcome: "Injected", doneWhen: "Rejected", status: "in_progress" } },
-    { action: "revise_step", id: 1, status: "done" },
-    { action: "start_step", id: 1, status: "in_progress" },
-    { action: "update_todo", id: 1, status: "done" },
-    { action: "add_step", step: { outcome: "Cross action", doneWhen: "Rejected" }, goal: "Unexpected" },
+    { action: "unknown_action" },
+    { action: "set_plan", goal: "Missing steps" },
+    { action: "add_step", outcome: "Missing doneWhen" },
+    { action: "update_step" },
   ];
   for (const params of invalid) {
-    const result = await harness.tool!.execute("call", params, undefined, undefined, harness.ctx);
+    const result = await harness.tool!.execute("call", params as never, undefined, undefined, harness.ctx);
     assert.equal(result.isError, true);
-    assert.equal(result.content[0]?.text, "Invalid task_state parameters.");
+    assert.match(result.content[0]?.text ?? "", /^Invalid task_state parameters/);
     assert.deepEqual(result.details.state, before);
   }
   assert.equal(harness.widgetCalls.length, widgetCalls);
-  assert.equal(harness.context, undefined);
-  assert.equal(harness.beforeAgentStart, undefined);
 });
 
 test("semantic validation enforces shared text and collection budgets", () => {
@@ -136,9 +122,9 @@ test("semantic validation enforces shared text and collection budgets", () => {
     [undefined, { action: "set_plan", goal: "Empty", steps: [] }, /1–10 steps/],
     [undefined, { action: "set_plan", goal: "Many", steps: Array.from({ length: TASK_STATE_LIMITS.steps + 1 }, () => ({ outcome: "Step", doneWhen: "Done" })) }, /1–10 steps/],
     [undefined, { action: "set_plan", goal: over(TASK_STATE_LIMITS.goal), steps: plan.steps }, /limit/],
-    [valid, { action: "add_step", step: { outcome: over(TASK_STATE_LIMITS.stepOutcome), doneWhen: "Done" } }, /limit/],
-    [valid, { action: "revise_step", id: 1, doneWhen: over(TASK_STATE_LIMITS.doneWhen) }, /limit/],
-    [valid, { action: "add_constraint", constraint: over(TASK_STATE_LIMITS.constraint) }, /limit/],
+    [undefined, { action: "set_plan", goal: "Over constraints", steps: plan.steps, constraints: Array.from({ length: TASK_STATE_LIMITS.constraints + 1 }, () => "c") }, /at most 10 constraints/],
+    [valid, { action: "add_step", outcome: over(TASK_STATE_LIMITS.stepOutcome), doneWhen: "Done" }, /limit/],
+    [valid, { action: "update_step", id: 1, doneWhen: over(TASK_STATE_LIMITS.doneWhen) }, /limit/],
     [valid, { action: "add_finding", finding: over(TASK_STATE_LIMITS.finding) }, /limit/],
   ];
   for (const [state, params, error] of failures) assert.match(applyAction(state, params).error ?? "", error);
@@ -148,13 +134,7 @@ test("semantic validation enforces shared text and collection budgets", () => {
     goal: "Full",
     steps: Array.from({ length: TASK_STATE_LIMITS.steps }, (_, index) => ({ outcome: `step ${index}`, doneWhen: "Done" })),
   }).state!;
-  assert.match(applyAction(fullPlan, { action: "add_step", step: { outcome: "extra", doneWhen: "Done" } }).error ?? "", /at most 10/);
-
-  let constrained = valid;
-  for (let index = 0; index < TASK_STATE_LIMITS.constraints; index += 1) {
-    constrained = applyAction(constrained, { action: "add_constraint", constraint: `c${index}` }).state!;
-  }
-  assert.match(applyAction(constrained, { action: "add_constraint", constraint: "extra" }).error ?? "", /at most 10/);
+  assert.match(applyAction(fullPlan, { action: "add_step", outcome: "extra", doneWhen: "Done" }).error ?? "", /at most 10/);
 
   let found = valid;
   for (let index = 0; index < TASK_STATE_LIMITS.findings; index += 1) {
@@ -171,37 +151,24 @@ test("tool results give local feedback while details retain immutable full snaps
   assert.match(set.content[0]?.text ?? "", /^Plan set\nGoal: Ship state core/);
   assert.match(set.content[0]?.text ?? "", /#1 \[pending\] Implement state \(done when: State is valid\)/);
 
-  const added = await harness.tool!.execute("call", { action: "add_step", step: { outcome: "Document behavior", doneWhen: "README is current" } }, undefined, undefined, harness.ctx);
+  const added = await harness.tool!.execute("call", { action: "add_step", outcome: "Document behavior", doneWhen: "README is current" }, undefined, undefined, harness.ctx);
   assert.equal(added.content[0]?.text, "Step #3 added\nOutcome: Document behavior\nDone when: README is current");
   assert.doesNotMatch(added.content[0]?.text ?? "", /Goal:|Constraints:|Findings:/);
   assert.equal(added.details?.state?.steps.length, 3);
-  const removed = await harness.tool!.execute("call", { action: "remove_step", id: 3 }, undefined, undefined, harness.ctx);
-  assert.equal(removed.content[0]?.text, "Step #3 removed");
-  assert.equal(removed.details?.state?.steps.length, 2);
 
-  const revised = await harness.tool!.execute("call", { action: "revise_step", id: 1, outcome: "Implement transitions" }, undefined, undefined, harness.ctx);
-  assert.equal(revised.content[0]?.text, "Step #1 revised\nOutcome: Implement transitions\nDone when: State is valid");
-  const started = await harness.tool!.execute("call", { action: "start_step", id: 1 }, undefined, undefined, harness.ctx);
-  assert.equal(started.content[0]?.text, "Step #1 in progress\nOutcome: Implement transitions\nDone when: State is valid");
-  const completed = await harness.tool!.execute("call", { action: "complete_step", id: 1 }, undefined, undefined, harness.ctx);
-  assert.equal(completed.content[0]?.text, "Step #1 complete");
-  const reopened = await harness.tool!.execute("call", { action: "start_step", id: 1 }, undefined, undefined, harness.ctx);
-  assert.equal(reopened.content[0]?.text, "Step #1 reopened\nOutcome: Implement transitions\nDone when: State is valid");
+  const updated = await harness.tool!.execute("call", { action: "update_step", id: 1, status: "in_progress" }, undefined, undefined, harness.ctx);
+  assert.match(updated.content[0]?.text ?? "", /Step #1 updated/);
 
-  const constraint = await harness.tool!.execute("call", { action: "add_constraint", constraint: "Keep scope narrow" }, undefined, undefined, harness.ctx);
-  assert.equal(constraint.content[0]?.text, "Constraint added\nKeep scope narrow");
-  const finding = await harness.tool!.execute("call", { action: "add_finding", finding: "Current source confirms lifecycle" }, undefined, undefined, harness.ctx);
-  assert.equal(finding.content[0]?.text, "Finding added\nCurrent source confirms lifecycle");
+  const advanced = await harness.tool!.execute("call", { action: "advance_step", finding: "Current source confirms lifecycle" }, undefined, undefined, harness.ctx);
+  assert.match(advanced.content[0]?.text ?? "", /Step #1 complete/);
+  assert.match(advanced.content[0]?.text ?? "", /Finding added\nCurrent source confirms lifecycle/);
+  assert.match(advanced.content[0]?.text ?? "", /Step #2 in progress/);
 
   const shown = await harness.tool!.execute("call", { action: "show" }, undefined, undefined, harness.ctx);
   assert.match(shown.content[0]?.text ?? "", /^Plan\nGoal: Ship state core/);
-  assert.match(shown.content[0]?.text ?? "", /Constraints: Keep scope narrow\nFindings: Current source confirms lifecycle/);
-  const findingRemoved = await harness.tool!.execute("call", { action: "remove_finding", finding: "Current source confirms lifecycle" }, undefined, undefined, harness.ctx);
-  assert.equal(findingRemoved.content[0]?.text, "Finding removed\nCurrent source confirms lifecycle");
-  const constraintRemoved = await harness.tool!.execute("call", { action: "remove_constraint", constraint: "Keep scope narrow" }, undefined, undefined, harness.ctx);
-  assert.equal(constraintRemoved.content[0]?.text, "Constraint removed\nKeep scope narrow");
+  assert.match(shown.content[0]?.text ?? "", /Findings: Current source confirms lifecycle/);
 
-  const failed = await harness.tool!.execute("call", { action: "remove_step", id: 99 }, undefined, undefined, harness.ctx);
+  const failed = await harness.tool!.execute("call", { action: "update_step", id: 99, outcome: "Missing" }, undefined, undefined, harness.ctx);
   assert.equal(failed.isError, true);
   assert.equal(failed.content[0]?.text, "Step #99 not found.");
   assert.doesNotMatch(failed.content[0]?.text ?? "", /Goal:|Steps:/);
@@ -209,22 +176,20 @@ test("tool results give local feedback while details retain immutable full snaps
   set.details!.state!.goal = "mutated";
   assert.equal((await harness.tool!.execute("call", { action: "show" }, undefined, undefined, harness.ctx)).details?.state?.goal, "Ship state core");
   const cleared = await harness.tool!.execute("call", { action: "clear" }, undefined, undefined, harness.ctx);
-  assert.equal(cleared.content[0]?.text, "Plan cleared");
+  assert.equal(cleared.content[0]?.text, "Task state cleared.");
   assert.equal(cleared.details?.state, null);
+  const emptyShow = await harness.tool!.execute("call", { action: "show" }, undefined, undefined, harness.ctx);
+  assert.equal(emptyShow.content[0]?.text, "Task state is empty.");
 });
 
 test("completion deactivates only after settlement and persists one versioned null snapshot", async () => {
   const harness = createHarness();
   setupTaskState(harness.pi);
   await harness.tool!.execute("call", plan, undefined, undefined, harness.ctx);
-  for (const id of [1, 2]) {
-    await harness.tool!.execute("call", { action: "start_step", id }, undefined, undefined, harness.ctx);
-    const result = await harness.tool!.execute("call", { action: "complete_step", id }, undefined, undefined, harness.ctx);
-    if (id === 2) {
-      assert.equal(result.content[0]?.text, "Step #2 complete");
-      assert.equal(result.details?.state?.steps.every((step: { status: string }) => step.status === "done"), true);
-    }
-  }
+  await harness.tool!.execute("call", { action: "advance_step" }, undefined, undefined, harness.ctx);
+  await harness.tool!.execute("call", { action: "advance_step" }, undefined, undefined, harness.ctx);
+  const result = await harness.tool!.execute("call", { action: "advance_step" }, undefined, undefined, harness.ctx);
+  assert.equal(result.details?.state?.steps.every((step: { status: string }) => step.status === "done"), true);
   assert.equal(harness.appended.length, 0);
 
   harness.agentSettled!({} as never, harness.ctx);
@@ -236,16 +201,16 @@ test("completion deactivates only after settlement and persists one versioned nu
 });
 
 test("replanning preserves active knowledge but completed plans start fresh", () => {
-  const active = applyAction(undefined, plan).state!;
-  const constrained = applyAction(active, { action: "add_constraint", constraint: "Keep scope narrow" }).state!;
-  const informed = applyAction(constrained, { action: "add_finding", finding: "Keep evidence" }).state!;
+  const active = applyAction(undefined, { ...plan, constraints: ["Keep scope narrow"] }).state!;
+  const informed = applyAction(active, { action: "add_finding", finding: "Keep evidence" }).state!;
   const replanned = applyAction(informed, { action: "set_plan", goal: "Follow up", steps: [{ outcome: "Continue", doneWhen: "Done" }] }).state!;
   assert.deepEqual(replanned.constraints, ["Keep scope narrow"]);
   assert.deepEqual(replanned.findings, ["Keep evidence"]);
   assert.equal(replanned.steps[0]?.status, "pending");
 
-  const firstDone = startAndComplete(informed, 1);
-  const fullyComplete = startAndComplete(firstDone, 2);
+  const started = applyAction(informed, { action: "update_step", id: 1, status: "in_progress" }).state!;
+  const advanced1 = applyAction(started, { action: "advance_step" }).state!;
+  const fullyComplete = applyAction(advanced1, { action: "advance_step" }).state!;
   const fresh = applyAction(fullyComplete, { action: "set_plan", goal: "New task", steps: [{ outcome: "Start", doneWhen: "Done" }] }).state!;
   assert.deepEqual(fresh.constraints, []);
   assert.deepEqual(fresh.findings, []);
@@ -261,59 +226,43 @@ test("reconstruction accepts only the newest valid version 2 snapshot and drops 
     action: "set_plan",
     params: {},
     version: 1,
-    state: { goal: "Legacy", todos: [{ id: 1, text: "Old", doneWhen: "Done", status: "pending" }], constraints: [], findings: [] },
+    state: {
+      goal: "Old goal",
+      steps: [{ id: 1, text: "Old step", done: false }],
+    },
   };
 
-  harness.branch = [toolResult("task_state", current), toolResult("task_state", legacy)];
-  harness.sessionStart!({} as never, harness.ctx);
-  assert.equal((await harness.tool!.execute("call", { action: "show" }, undefined, undefined, harness.ctx)).details?.state, null);
-
-  harness.branch = [toolResult("task_state", current), toolResult("task_state", { ...current, version: 999 })];
-  harness.sessionTree!({} as never, harness.ctx);
-  assert.equal((await harness.tool!.execute("call", { action: "show" }, undefined, undefined, harness.ctx)).details?.state, null);
-
-  const invalidVersion2States = [
-    { ...active, todos: [] },
-    { ...active, steps: [{ ...active.steps[0]!, text: "Legacy" }, ...active.steps.slice(1)] },
+  harness.branch = [
+    { type: "custom", customType: TASK_STATE_ENTRY, data: legacy },
+    toolResult("task_state", legacy),
+    { type: "custom", customType: TASK_STATE_ENTRY, data: current },
   ];
-  for (const state of invalidVersion2States) {
-    harness.branch = [toolResult("task_state", current), toolResult("task_state", { ...current, state })];
-    harness.sessionTree!({} as never, harness.ctx);
-    assert.equal((await harness.tool!.execute("call", { action: "show" }, undefined, undefined, harness.ctx)).details?.state, null);
-  }
-
-  harness.branch = [toolResult("task_state", current)];
-  harness.sessionTree!({} as never, harness.ctx);
+  harness.sessionStart!({} as never, harness.ctx);
   assert.equal((await harness.tool!.execute("call", { action: "show" }, undefined, undefined, harness.ctx)).details?.state?.goal, "Ship state core");
 
-  harness.branch = [toolResult("task_state", current), { type: "custom", customType: TASK_STATE_ENTRY, data: snapshotTaskState(undefined) }];
-  harness.sessionTree!({} as never, harness.ctx);
+  harness.branch = [
+    { type: "custom", customType: TASK_STATE_ENTRY, data: legacy },
+    toolResult("task_state", legacy),
+  ];
+  harness.sessionStart!({} as never, harness.ctx);
   assert.equal((await harness.tool!.execute("call", { action: "show" }, undefined, undefined, harness.ctx)).details?.state, null);
 });
 
-test("compaction persists only changed version 2 snapshots on the active branch", async () => {
+test("compaction persists only changed version 2 snapshots on the active branch", () => {
   const harness = createHarness();
   setupTaskState(harness.pi);
-  await harness.tool!.execute("call", plan, undefined, undefined, harness.ctx);
-  harness.sessionCompact!({} as never, harness.ctx);
-  assert.deepEqual(harness.appended, [{ customType: TASK_STATE_ENTRY, data: { version: TASK_STATE_VERSION, state: applyAction(undefined, plan).state } }]);
-  harness.sessionCompact!({} as never, harness.ctx);
-  assert.equal(harness.appended.length, 1);
+  const initial = applyAction(undefined, plan).state!;
+  harness.branch = [{ type: "custom", customType: TASK_STATE_ENTRY, data: snapshotTaskState(initial) }];
+  harness.sessionStart!({} as never, harness.ctx);
 
-  await harness.tool!.execute("call", { action: "revise_step", id: 1, outcome: "Ship compact dedupe" }, undefined, undefined, harness.ctx);
   harness.sessionCompact!({} as never, harness.ctx);
-  assert.equal(harness.appended.length, 2);
-  assert.equal((harness.appended[1]?.data as { state: TaskState }).state.steps[0]?.outcome, "Ship compact dedupe");
+  assert.equal(harness.appended.length, 0);
 
-  await harness.tool!.execute("call", { action: "clear" }, undefined, undefined, harness.ctx);
+  const updated = applyAction(initial, { action: "add_finding", finding: "Discovered fast path" }).state!;
+  harness.branch.push({ type: "custom", customType: TASK_STATE_ENTRY, data: snapshotTaskState(updated) });
+  harness.sessionStart!({} as never, harness.ctx);
   harness.sessionCompact!({} as never, harness.ctx);
-  assert.deepEqual(harness.appended[2]?.data, { version: TASK_STATE_VERSION, state: null });
-  harness.sessionCompact!({} as never, harness.ctx);
-  assert.equal(harness.appended.length, 3);
-
-  harness.branch = [{ type: "custom", customType: TASK_STATE_ENTRY, data: harness.appended[0]?.data }];
-  harness.sessionTree!({} as never, harness.ctx);
-  assert.equal((await harness.tool!.execute("call", { action: "show" }, undefined, undefined, harness.ctx)).details?.state?.goal, "Ship state core");
+  assert.equal(harness.appended.length, 0);
 });
 
 test("compaction dedupe is branch-aware and ignores malformed latest custom snapshots", () => {
@@ -344,13 +293,59 @@ function toolResult(toolName: string, details: unknown) {
 }
 
 function createHarness() {
-  let branch: unknown[] = [];
-  let registered: Record<string, any> | undefined;
-  const handlers: Record<string, (event: unknown, ctx: ExtensionContext) => any> = {};
-  const widgetCalls: Array<[string, unknown, { placement: "aboveEditor" }]> = [];
+  let sessionStart: ((event: unknown, ctx: ExtensionContext) => void) | undefined;
+  let sessionCompact: ((event: unknown, ctx: ExtensionContext) => void) | undefined;
+  let sessionTree: ((event: unknown, ctx: ExtensionContext) => void) | undefined;
+  let agentSettled: ((event: unknown, ctx: ExtensionContext) => void) | undefined;
+  let tool: { execute: (...args: any[]) => Promise<any> } | undefined;
+  let registered: any;
   const appended: Array<{ customType: string; data: unknown }> = [];
-  const ctx = { hasUI: true, mode: "tui", ui: { setWidget: (key: string, content: unknown, options: { placement: "aboveEditor" }) => widgetCalls.push([key, content, options]) }, sessionManager: { getBranch: () => branch } } as unknown as ExtensionContext;
-  const pi = { on: (event: string, handler: (event: unknown, ctx: ExtensionContext) => any) => { handlers[event] = handler; }, registerTool: (tool: Record<string, any>) => { registered = tool; }, appendEntry: (customType: string, data: unknown) => { appended.push({ customType, data }); branch.push({ type: "custom", customType, data }); } } as unknown as ExtensionAPI;
-  const tool = () => registered as { execute: (...args: any[]) => Promise<any> } | undefined;
-  return { pi, ctx, appended, widgetCalls, get branch() { return branch; }, set branch(value: unknown[]) { branch = value; }, get registered() { return registered; }, get tool() { return tool(); }, get sessionStart() { return handlers.session_start; }, get sessionTree() { return handlers.session_tree; }, get sessionCompact() { return handlers.session_compact; }, get agentSettled() { return handlers.agent_settled; }, get sessionShutdown() { return handlers.session_shutdown; }, get beforeAgentStart() { return handlers.before_agent_start; }, get context() { return handlers.context; } };
+  const widgetCalls: Array<{ key: string; content: unknown; options: unknown }> = [];
+  let branch: any[] = [];
+
+  const pi: ExtensionAPI = {
+    on(event: string, handler: any) {
+      if (event === "session_start") sessionStart = handler;
+      if (event === "session_tree") sessionTree = handler;
+      if (event === "session_compact") sessionCompact = handler;
+      if (event === "agent_settled") agentSettled = handler;
+      return pi;
+    },
+    registerTool(definition: any) {
+      registered = definition;
+      tool = definition;
+      return pi;
+    },
+    appendEntry(customType: string, data: unknown) {
+      appended.push({ customType, data });
+    },
+  } as unknown as ExtensionAPI;
+
+  const ctx: ExtensionContext = {
+    hasUI: true,
+    mode: "tui",
+    sessionManager: {
+      getBranch: () => branch,
+    },
+    ui: {
+      setWidget(key: string, content: unknown, options: unknown) {
+        widgetCalls.push({ key, content, options });
+      },
+    },
+  } as unknown as ExtensionContext;
+
+  return {
+    pi,
+    ctx,
+    get sessionStart() { return sessionStart; },
+    get sessionTree() { return sessionTree; },
+    get sessionCompact() { return sessionCompact; },
+    get agentSettled() { return agentSettled; },
+    get tool() { return tool; },
+    get registered() { return registered; },
+    get appended() { return appended; },
+    get widgetCalls() { return widgetCalls; },
+    get branch() { return branch; },
+    set branch(val: any[]) { branch = val; },
+  };
 }

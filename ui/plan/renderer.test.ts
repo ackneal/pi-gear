@@ -11,17 +11,15 @@ function result(action: string, params: Record<string, unknown>, next = state) {
 }
 
 test("semantic status actions are silent while structural actions and show snapshot full details state", () => {
-  for (const action of ["start_step", "complete_step"]) {
-    assert.equal(formatPlanResult(result(action, { id: 2 }), { expanded: false, isPartial: false }, theme), "");
-  }
+  assert.equal(formatPlanResult(result("advance_step", { id: 2 }), { expanded: false, isPartial: false }, theme), "");
 
   const revisedOutcome = { ...state, steps: [state.steps[0]!, { ...state.steps[1]!, outcome: "Verify lifecycle" }] };
   const revisedDoneWhen = { ...state, steps: [state.steps[0]!, { ...state.steps[1]!, doneWhen: "Widget hides" }] };
-  for (const action of ["set_plan", "add_step", "remove_step", "show"]) {
+  for (const action of ["set_plan", "add_step", "show"]) {
     assert.match(formatPlanResult(result(action, {}, revisedOutcome), { expanded: false, isPartial: false }, theme), /Verify lifecycle/);
   }
-  const outcomeSnapshot = formatPlanResult(result("revise_step", { id: 2, outcome: "Verify lifecycle" }, revisedOutcome), { expanded: false, isPartial: false }, theme);
-  const doneWhenSnapshot = formatPlanResult(result("revise_step", { id: 2, doneWhen: "Widget hides" }, revisedDoneWhen), { expanded: true, isPartial: false }, theme);
+  const outcomeSnapshot = formatPlanResult(result("update_step", { id: 2, outcome: "Verify lifecycle" }, revisedOutcome), { expanded: false, isPartial: false }, theme);
+  const doneWhenSnapshot = formatPlanResult(result("update_step", { id: 2, doneWhen: "Widget hides" }, revisedDoneWhen), { expanded: true, isPartial: false }, theme);
   assert.match(outcomeSnapshot, /Verify lifecycle/);
   assert.doesNotMatch(outcomeSnapshot, /Test lifecycle/);
   assert.match(doneWhenSnapshot, /Done when: Widget hides/);
