@@ -61,14 +61,69 @@ test("step reducers assign pending status, advance steps, and update steps", () 
   const completed = applyAction(advanced2, { action: "advance_step" }).state!;
   assert.equal(completed.steps[2]?.status, "done");
 
+  // Advance step with duplicate finding: succeeds as a no-op for finding, does not duplicate
+  const dupFindingAdvance = applyAction(advanced, { action: "advance_step", finding: "Step 1 passed" });
+  assert.equal(dupFindingAdvance.error, undefined);
+  assert.equal(dupFindingAdvance.state!.steps[1]?.status, "done");
+  assert.equal(dupFindingAdvance.state!.steps[2]?.status, "in_progress");
+  assert.deepEqual(dupFindingAdvance.state!.findings, ["Step 1 passed"]);
+
+  // add_finding with duplicate finding succeeds idempotently without duplicating
+  const dupFindingAdd = applyAction(advanced, { action: "add_finding", finding: "Step 1 passed" });
+  assert.equal(dupFindingAdd.error, undefined);
+  assert.match(dupFindingAdd.feedback ?? "", /already recorded/);
+  assert.deepEqual(dupFindingAdd.state!.findings, ["Step 1 passed"]);
+
+  // Reopen completed step via update_step
+  const reopened = applyAction(completed, { action: "update_step", id: 1, status: "in_progress" }).state!;
+  assert.equal(reopened.steps[0]?.status, "in_progress");
+  assert.equal(reopened.steps[2]?.status, "done");
+
+  // Multiple steps in progress: update step 2 to in_progress as well
+  const multiActive = applyAction(reopened, { action: "update_step", id: 2, status: "in_progress" }).state!;
+  assert.equal(multiActive.steps[0]?.status, "in_progress");
+  assert.equal(multiActive.steps[1]?.status, "in_progress");
+
+  // advance_step without id fails when multiple steps are in progress
+  const multiFail = applyAction(multiActive, { action: "advance_step" });
+  assert.match(multiFail.error ?? "", /Multiple steps are in progress; provide an id/);
+  assert.equal(multiFail.state, multiActive);
+
+  // advance_step with id completes only the targeted step
+  const multiResolved = applyAction(multiActive, { action: "advance_step", id: 1 }).state!;
+  assert.equal(multiResolved.steps[0]?.status, "done");
+  assert.equal(multiResolved.steps[1]?.status, "in_progress");
+
+  // advance_step with nextId starts specific pending step
+  const stepReset = applyAction(multiResolved, { action: "update_step", id: 3, status: "pending" }).state!;
+  const nextTargeted = applyAction(stepReset, { action: "advance_step", id: 2, nextId: 3 }).state!;
+  assert.equal(nextTargeted.steps[1]?.status, "done");
+  assert.equal(nextTargeted.steps[2]?.status, "in_progress");
+
+  // Finding capacity limit: cannot add 11th distinct finding, but duplicate finding passes at capacity
+  let fullFindingsState = advanced;
+  for (let i = 2; i <= 10; i++) {
+    fullFindingsState = applyAction(fullFindingsState, { action: "add_finding", finding: `Finding ${i}` }).state!;
+  }
+  assert.equal(fullFindingsState.findings.length, 10);
+  const eleventhFinding = applyAction(fullFindingsState, { action: "add_finding", finding: "Finding 11" });
+  assert.match(eleventhFinding.error ?? "", /at most 10 findings/);
+  assert.equal(eleventhFinding.state, fullFindingsState);
+  const dupAtCapacity = applyAction(fullFindingsState, { action: "add_finding", finding: "Step 1 passed" });
+  assert.equal(dupAtCapacity.error, undefined);
+  assert.equal(dupAtCapacity.state!.findings.length, 10);
+
   // Error cases
   const failures = [
-    [advanced, { action: "advance_step", finding: "Step 1 passed" } as const, /Finding already exists/],
     [completed, { action: "advance_step" } as const, /All steps are complete/],
     [completed, { action: "update_step", id: 99, status: "pending" as const }, /Step #99 not found/],
+    [completed, { action: "update_step", id: 1 } as const, /at least one of/],
+    [advanced, { action: "advance_step", id: 99 } as const, /Step #99 not found/],
+    [advanced, { action: "advance_step", id: 1 } as const, /Step #1 is not in progress/],
+    [advanced, { action: "advance_step", nextId: 99 } as const, /Step #99 not found/],
   ] as const;
   for (const [state, params, error] of failures) {
-    const result = applyAction(state, params);
+    const result = applyAction(state, params as never);
     assert.match(result.error ?? "", error);
     assert.equal(result.state, state);
   }
@@ -94,7 +149,8 @@ test("provider schema is flat, describes outcome and doneWhen, and exposes 7 act
   assert.equal(schema.properties?.steps?.items?.properties?.outcome?.description, "A coherent result, not an individual edit or command.");
   assert.equal(schema.properties?.doneWhen?.description, "Observable completion condition.");
   assert.equal(schema.properties?.steps?.items?.properties?.doneWhen?.description, "Observable completion condition.");
-  assert.equal(schema.properties?.id?.description, "Step ID to complete (for advance_step) or update (for update_step). Defaults to the active in-progress step for advance_step.");
+  assert.equal(schema.properties?.id?.description, "Step ID to complete (for advance_step) or update (for update_step). Defaults to the active in-progress step for advance_step; only needed if multiple steps are in progress.");
+  assert.equal(schema.properties?.nextId?.description, "Specific next step ID to start (for advance_step). Defaults to the next pending step. Only needed for non-linear workflows.");
   for (const oldField of ["todos", "todo", "text"]) assert.equal(Object.hasOwn(schema.properties ?? {}, oldField), false);
 
   await harness.tool!.execute("call", plan, undefined, undefined, harness.ctx);
@@ -246,6 +302,16 @@ test("reconstruction accepts only the newest valid version 2 snapshot and drops 
   ];
   harness.sessionStart!({} as never, harness.ctx);
   assert.equal((await harness.tool!.execute("call", { action: "show" }, undefined, undefined, harness.ctx)).details?.state, null);
+
+  const historicalLegacyAction = {
+    tool: "task_state",
+    action: "complete_step",
+    params: { id: 1 },
+    ...snapshotTaskState(active),
+  };
+  harness.branch = [toolResult("task_state", historicalLegacyAction)];
+  harness.sessionStart!({} as never, harness.ctx);
+  assert.equal((await harness.tool!.execute("call", { action: "show" }, undefined, undefined, harness.ctx)).details?.state?.goal, "Ship state core");
 });
 
 test("compaction persists only changed version 2 snapshots on the active branch", () => {

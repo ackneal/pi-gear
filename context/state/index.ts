@@ -54,15 +54,21 @@ const StepStatusSchema = Type.Union([
 
 /** Provider-facing schema is flat because some providers reject top-level unions. */
 export const TaskStateParams = strict({
-  action: Type.String({ enum: ACTIONS }),
+  action: Type.String({
+    enum: ACTIONS,
+    description: "Action to perform: advance_step (progress active step and start next), update_step (modify or reopen a step), set_plan, add_step, add_finding, show, clear.",
+  }),
   goal: Type.Optional(text(TASK_STATE_LIMITS.goal)),
   steps: Type.Optional(Type.Array(PlanStepInput, { minItems: 1, maxItems: TASK_STATE_LIMITS.steps })),
   constraints: Type.Optional(Type.Array(text(TASK_STATE_LIMITS.constraint), { maxItems: TASK_STATE_LIMITS.constraints })),
   id: Type.Optional(Type.Integer({
     minimum: 1,
-    description: "Step ID to complete (for advance_step) or update (for update_step). Defaults to the active in-progress step for advance_step.",
+    description: "Step ID to complete (for advance_step) or update (for update_step). Defaults to the active in-progress step for advance_step; only needed if multiple steps are in progress.",
   })),
-  nextId: Type.Optional(Type.Integer({ minimum: 1, description: "Next step to start. Defaults to the next pending step." })),
+  nextId: Type.Optional(Type.Integer({
+    minimum: 1,
+    description: "Specific next step ID to start (for advance_step). Defaults to the next pending step. Only needed for non-linear workflows.",
+  })),
   outcome: Type.Optional(outcome()),
   doneWhen: Type.Optional(doneWhen()),
   status: Type.Optional(StepStatusSchema),
@@ -109,7 +115,7 @@ export const TASK_STATE_ENTRY = "pi-gear.task-state";
 export function isTaskStateDetails(value: unknown): value is TaskStateDetails {
   return typeof value === "object" && value !== null
     && (value as { tool?: unknown }).tool === "task_state"
-    && isTaskStateAction((value as { action?: unknown }).action)
+    && typeof (value as { action?: unknown }).action === "string"
     && isTaskStateSnapshot(value);
 }
 
@@ -177,7 +183,7 @@ export function setupTaskState(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "task_state",
     label: "Plan",
-    description: "Maintain the current task's working plan: goal, outcome steps, constraints, and findings. Actions: set_plan {goal, steps: [{outcome, doneWhen}], constraints?}, advance_step {finding?, id?, nextId?}, update_step {id, outcome?, doneWhen?, status?}, add_step {outcome, doneWhen}, add_finding {finding}, show, clear.",
+    description: "Maintain the task plan: goal, steps, constraints, and findings. Primary workflow: set_plan to initialize, advance_step() to progress sequentially through steps (marking current done and starting next), update_step to modify or reopen steps, add_finding to record facts, show to view, clear to reset.",
     parameters: TaskStateParams,
     renderCall,
     renderResult,
@@ -314,6 +320,18 @@ function describeParamError(rawParams: unknown): string | undefined {
     }
   }
 
+  if (action === "advance_step") {
+    if (raw.id !== undefined && (typeof raw.id !== "number" || raw.id < 1 || !Number.isInteger(raw.id))) {
+      return "advance_step 'id' must be an integer >= 1.";
+    }
+    if (raw.nextId !== undefined && (typeof raw.nextId !== "number" || raw.nextId < 1 || !Number.isInteger(raw.nextId))) {
+      return "advance_step 'nextId' must be an integer >= 1.";
+    }
+    if (raw.finding !== undefined && typeof raw.finding !== "string") {
+      return "advance_step 'finding' must be a string.";
+    }
+  }
+
   if (action === "add_finding") {
     if (typeof raw.finding !== "string") {
       return "add_finding requires 'finding' (string).";
@@ -397,6 +415,10 @@ function applyAddStep(current: TaskState, state: TaskState, params: AddStepParam
 }
 
 function applyUpdateStep(current: TaskState, state: TaskState, params: UpdateStepParams): ActionResult {
+  if (params.outcome === undefined && params.doneWhen === undefined && params.status === undefined) {
+    return { state: current, error: "update_step requires at least one of 'outcome', 'doneWhen', or 'status'." };
+  }
+
   if (
     (params.outcome !== undefined && !validText(params.outcome, TASK_STATE_LIMITS.stepOutcome))
     || (params.doneWhen !== undefined && !validText(params.doneWhen, TASK_STATE_LIMITS.doneWhen))
@@ -420,10 +442,8 @@ function applyAdvanceStep(current: TaskState, state: TaskState, params: AdvanceS
   if (params.finding !== undefined && !validText(params.finding, TASK_STATE_LIMITS.finding)) {
     return { state: current, error: "Text values cannot be blank or exceed their limit." };
   }
-  if (params.finding !== undefined && state.findings.includes(params.finding)) {
-    return { state: current, error: "Finding already exists." };
-  }
-  if (params.finding !== undefined && state.findings.length >= TASK_STATE_LIMITS.findings) {
+  const isDuplicateFinding = params.finding !== undefined && state.findings.includes(params.finding);
+  if (params.finding !== undefined && !isDuplicateFinding && state.findings.length >= TASK_STATE_LIMITS.findings) {
     return { state: current, error: `A task state can have at most ${TASK_STATE_LIMITS.findings} findings.` };
   }
 
@@ -442,11 +462,11 @@ function applyAdvanceStep(current: TaskState, state: TaskState, params: AdvanceS
     }
 
     nextStep.status = "in_progress";
-    if (params.finding !== undefined) state.findings.push(params.finding);
+    if (params.finding !== undefined && !isDuplicateFinding) state.findings.push(params.finding);
 
     const feedback = [
       formatStepFeedback(`Step #${nextStep.id} in progress`, nextStep),
-      ...(params.finding !== undefined ? [`Finding added\n${params.finding}`] : []),
+      ...(params.finding !== undefined && !isDuplicateFinding ? [`Finding added\n${params.finding}`] : []),
     ].join("\n");
     return { state, feedback };
   }
@@ -478,12 +498,12 @@ function applyAdvanceStep(current: TaskState, state: TaskState, params: AdvanceS
   }
 
   stepToComplete!.status = "done";
-  if (params.finding !== undefined) state.findings.push(params.finding);
   if (nextStep !== undefined) nextStep.status = "in_progress";
+  if (params.finding !== undefined && !isDuplicateFinding) state.findings.push(params.finding);
 
   const feedback = [
     `Step #${stepToComplete!.id} complete`,
-    ...(params.finding !== undefined ? [`Finding added\n${params.finding}`] : []),
+    ...(params.finding !== undefined && !isDuplicateFinding ? [`Finding added\n${params.finding}`] : []),
     ...(nextStep !== undefined ? [formatStepFeedback(`Step #${nextStep.id} in progress`, nextStep)] : []),
   ].join("\n");
   return { state, feedback };
@@ -494,9 +514,9 @@ function applyAddFinding(current: TaskState, state: TaskState, params: AddFindin
     return { state: current, error: "Text values cannot be blank or exceed their limit." };
   }
   if (state.findings.includes(params.finding)) {
-    return { state: current, error: "Finding already exists." };
+    return { state, feedback: `Finding already recorded\n${params.finding}` };
   }
-  if (state.findings.length === TASK_STATE_LIMITS.findings) {
+  if (state.findings.length >= TASK_STATE_LIMITS.findings) {
     return { state: current, error: `A task state can have at most ${TASK_STATE_LIMITS.findings} findings.` };
   }
   state.findings.push(params.finding);
