@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { composePrompt } from "./index.ts";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { composePrompt, setupPromptComposer } from "./index.ts";
 
 const base = "Pi base\n<user_append>keep</user_append>\n<other_extension>keep</other_extension>";
 
@@ -22,10 +23,36 @@ test("composes only selected pi-gear capability sections", () => {
     assert.equal(prompt.includes("Worker:\n"), current.worker, current.name);
     assert.equal(prompt.includes("Subagents:\n"), current.subagents, current.name);
     assert.doesNotMatch(prompt, /<task_state_snapshot>/, current.name);
+    assert.doesNotMatch(prompt, /Working memory:/, current.name);
     assert.match(prompt, /<user_append>keep<\/user_append>/, current.name);
     assert.match(prompt, /<other_extension>keep<\/other_extension>/, current.name);
   }
   assert.equal(composePrompt("Pi base  ", undefined), "Pi base  ");
+});
+
+test("keeps system prompt static without dynamic working memory to preserve prompt cache", () => {
+  const prompt = composePrompt(base, ["task_state"]);
+  assert.match(prompt, /Plan:\nUse task_state for non-trivial work/);
+  assert.doesNotMatch(prompt, /Working memory:/);
+  assert.doesNotMatch(prompt, /<task_state_snapshot>/);
+});
+
+test("setupPromptComposer composes static prompt on before_agent_start", () => {
+  let handler: ((event: { systemPrompt: string; systemPromptOptions: { selectedTools?: string[] } }) => { systemPrompt: string }) | undefined;
+  const pi = {
+    on(event: string, fn: typeof handler) {
+      if (event === "before_agent_start") handler = fn;
+    },
+  } as unknown as ExtensionAPI;
+
+  setupPromptComposer(pi);
+  assert.ok(handler);
+  const prompt = handler({
+    systemPrompt: base,
+    systemPromptOptions: { selectedTools: ["task_state"] },
+  });
+  assert.match(prompt.systemPrompt, /Plan:\nUse task_state for non-trivial work/);
+  assert.doesNotMatch(prompt.systemPrompt, /Working memory:/);
 });
 
 test("orders Plan before Research before Worker before Subagents and replaces only its idempotent block", () => {
@@ -55,7 +82,7 @@ test("plan guidance is concise and completion-oriented", () => {
 });
 
 test("delegation guidance preserves research terms and explains asynchronous subagent control", () => {
-  const prompt = composePrompt(base, ["researcher", "worker"]);
+  const prompt = composePrompt(base, ["researcher", "worker", "subagents"]);
   assert.match(prompt, /Preserve exact identifiers and quoted terms in delegated questions/);
   assert.match(prompt, /Ask one bounded question; require a conclusion, evidence, and uncertainty/);
   assert.match(prompt, /For non-trivial work, use workers to speed up two or more independent ready tasks with disjoint files/);

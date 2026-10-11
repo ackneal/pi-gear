@@ -4,7 +4,14 @@ import { Value } from "typebox/value";
 import { PlanWidgetController, type PlanUiChange } from "../../ui/plan/controller.ts";
 import { renderCall, renderResult } from "../../ui/plan/renderer.ts";
 import { cloneTaskState, isTaskStateSnapshot, nextPlanStepId, snapshotTaskState } from "./core.ts";
-import { TASK_STATE_LIMITS, type PlanStep, type TaskState, type TaskStateAction, type TaskStateDetails } from "./types.ts";
+import {
+  TASK_STATE_LIMITS,
+  type PlanStep,
+  type StepStatus,
+  type TaskState,
+  type TaskStateAction,
+  type TaskStateDetails,
+} from "./types.ts";
 
 const text = (maxLength: number) => Type.String({ minLength: 1, maxLength });
 const outcome = () => Type.String({
@@ -17,9 +24,19 @@ const doneWhen = () => Type.String({
   maxLength: TASK_STATE_LIMITS.doneWhen,
   description: "Observable completion condition.",
 });
-const ACTIONS = ["set_plan", "add_step", "revise_step", "remove_step", "start_step", "complete_step", "add_constraint", "remove_constraint", "add_finding", "remove_finding", "show", "clear"] as const;
+const ACTIONS = [
+  "set_plan",
+  "advance_step",
+  "update_step",
+  "add_step",
+  "add_finding",
+  "show",
+  "clear",
+] as const;
+
 const strict = <T extends TProperties>(properties: T) =>
   Type.Object(properties, { additionalProperties: false });
+
 const PlanStepInput = strict({
   outcome: outcome(),
   doneWhen: doneWhen(),
@@ -29,30 +46,67 @@ const RuntimePlanStepInput = strict({
   doneWhen: Type.String(),
 });
 
+const StepStatusSchema = Type.Union([
+  Type.Literal("pending"),
+  Type.Literal("in_progress"),
+  Type.Literal("done"),
+]);
+
 /** Provider-facing schema is flat because some providers reject top-level unions. */
 export const TaskStateParams = strict({
-  action: Type.String({ enum: ACTIONS }),
+  action: Type.String({
+    enum: ACTIONS,
+    description: "Action to perform: advance_step (progress active step and start next), update_step (modify or reopen a step), set_plan, add_step, add_finding, show, clear.",
+  }),
   goal: Type.Optional(text(TASK_STATE_LIMITS.goal)),
   steps: Type.Optional(Type.Array(PlanStepInput, { minItems: 1, maxItems: TASK_STATE_LIMITS.steps })),
-  step: Type.Optional(PlanStepInput),
-  id: Type.Optional(Type.Integer({ minimum: 1 })),
+  constraints: Type.Optional(Type.Array(text(TASK_STATE_LIMITS.constraint), {
+    maxItems: TASK_STATE_LIMITS.constraints,
+    description: "Replaces constraints on set_plan; omitted constraints and existing findings are preserved. Use clear for a fresh task.",
+  })),
+  id: Type.Optional(Type.Integer({
+    minimum: 1,
+    description: "Step ID to complete (for advance_step) or update (for update_step). Defaults to the active in-progress step for advance_step; only needed if multiple steps are in progress.",
+  })),
+  nextId: Type.Optional(Type.Integer({
+    minimum: 1,
+    description: "Specific pending step ID to start (for advance_step). Defaults to the first pending step in plan order, even when other steps remain in progress. Use for non-linear workflows.",
+  })),
   outcome: Type.Optional(outcome()),
   doneWhen: Type.Optional(doneWhen()),
-  constraint: Type.Optional(text(TASK_STATE_LIMITS.constraint)),
+  status: Type.Optional(StepStatusSchema),
   finding: Type.Optional(text(TASK_STATE_LIMITS.finding)),
 });
 
 const RuntimeTaskStateParams = Type.Union([
-  strict({ action: Type.Literal("set_plan"), goal: Type.String(), steps: Type.Array(RuntimePlanStepInput) }),
-  strict({ action: Type.Literal("add_step"), step: RuntimePlanStepInput }),
-  strict({ action: Type.Literal("revise_step"), id: Type.Integer({ minimum: 1 }), outcome: Type.Optional(Type.String()), doneWhen: Type.Optional(Type.String()) }),
-  strict({ action: Type.Literal("remove_step"), id: Type.Integer({ minimum: 1 }) }),
-  strict({ action: Type.Literal("start_step"), id: Type.Integer({ minimum: 1 }) }),
-  strict({ action: Type.Literal("complete_step"), id: Type.Integer({ minimum: 1 }) }),
-  strict({ action: Type.Literal("add_constraint"), constraint: Type.String() }),
-  strict({ action: Type.Literal("remove_constraint"), constraint: Type.String() }),
-  strict({ action: Type.Literal("add_finding"), finding: Type.String() }),
-  strict({ action: Type.Literal("remove_finding"), finding: Type.String() }),
+  strict({
+    action: Type.Literal("set_plan"),
+    goal: Type.String(),
+    steps: Type.Array(RuntimePlanStepInput),
+    constraints: Type.Optional(Type.Array(Type.String())),
+  }),
+  strict({
+    action: Type.Literal("advance_step"),
+    id: Type.Optional(Type.Integer({ minimum: 1 })),
+    nextId: Type.Optional(Type.Integer({ minimum: 1 })),
+    finding: Type.Optional(Type.String()),
+  }),
+  strict({
+    action: Type.Literal("update_step"),
+    id: Type.Integer({ minimum: 1 }),
+    outcome: Type.Optional(Type.String()),
+    doneWhen: Type.Optional(Type.String()),
+    status: Type.Optional(StepStatusSchema),
+  }),
+  strict({
+    action: Type.Literal("add_step"),
+    outcome: Type.String(),
+    doneWhen: Type.String(),
+  }),
+  strict({
+    action: Type.Literal("add_finding"),
+    finding: Type.String(),
+  }),
   strict({ action: Type.Literal("show") }),
   strict({ action: Type.Literal("clear") }),
 ]);
@@ -64,7 +118,7 @@ export const TASK_STATE_ENTRY = "pi-gear.task-state";
 export function isTaskStateDetails(value: unknown): value is TaskStateDetails {
   return typeof value === "object" && value !== null
     && (value as { tool?: unknown }).tool === "task_state"
-    && isTaskStateAction((value as { action?: unknown }).action)
+    && typeof (value as { action?: unknown }).action === "string"
     && isTaskStateSnapshot(value);
 }
 
@@ -106,11 +160,9 @@ export function setupTaskState(pi: ExtensionAPI): void {
 
     widget.reconstruct(ctx, state);
   };
-
   const persistIfChanged = (ctx: ExtensionContext): void => {
     const current = snapshotTaskState(state);
     const latest = newestTaskStateEntry(ctx.sessionManager.getBranch());
-
     if (!sameSnapshot(current, latest)) {
       pi.appendEntry(TASK_STATE_ENTRY, current);
     }
@@ -134,14 +186,17 @@ export function setupTaskState(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "task_state",
     label: "Plan",
-    description: "Maintain the current task's working plan: goal, outcome steps, constraints, and decision-relevant findings. Clear abandons or resets the active state.",
+    description: "Maintain the task plan: goal, steps, constraints, and findings. Use set_plan to initialize or replace goal and steps while preserving findings and omitted constraints; clear first for a fresh task. Use advance_step to complete an active step and start the first pending step in plan order, preserving other active steps (id required when multiple are active; nextId selects a specific pending step). Use update_step to modify or reopen a step, add_step to append a pending step, add_finding to record facts, show to view, clear to reset.",
     parameters: TaskStateParams,
     renderCall,
     renderResult,
     renderShell: "self",
     async execute(_id, rawParams, _signal, _onUpdate, ctx) {
       const params = parseTaskStateParams(rawParams);
-      if (params === undefined) return invalidResult(rawParams, state);
+      if (params === undefined) {
+        const reason = describeParamError(rawParams);
+        return invalidResult(rawParams, state, reason);
+      }
 
       const previous = cloneTaskState(state);
       const result = applyAction(state, params);
@@ -154,67 +209,156 @@ export function setupTaskState(pi: ExtensionAPI): void {
         ...snapshotTaskState(state),
       };
 
-      if (result.error === undefined) {
-        widget.update(ctx, previous, state, planUiChange(params));
+      if (result.error !== undefined) {
+        return {
+          content: [{ type: "text" as const, text: result.error }],
+          details,
+          isError: true,
+        };
       }
 
-      return result.error === undefined
-        ? { content: [{ type: "text", text: formatSuccess(params.action, result.feedback, state) }], details }
-        : { content: [{ type: "text", text: result.error }], details, isError: true };
+      widget.update(ctx, previous, state, { action: params.action });
+
+      return {
+        content: [{ type: "text" as const, text: formatSuccess(params.action, result.feedback!, state) }],
+        details,
+      };
     },
   });
 }
 
-function planUiChange(params: TaskStateParams): PlanUiChange {
-  return { action: params.action };
-}
-
 type SetPlanParams = Extract<TaskStateParams, { action: "set_plan" }>;
+type AdvanceStepParams = Extract<TaskStateParams, { action: "advance_step" }>;
+type UpdateStepParams = Extract<TaskStateParams, { action: "update_step" }>;
 type AddStepParams = Extract<TaskStateParams, { action: "add_step" }>;
-type ReviseStepParams = Extract<TaskStateParams, { action: "revise_step" }>;
-type RemoveStepParams = Extract<TaskStateParams, { action: "remove_step" }>;
-type StartStepParams = Extract<TaskStateParams, { action: "start_step" }>;
-type CompleteStepParams = Extract<TaskStateParams, { action: "complete_step" }>;
-type CollectionParams = Extract<
-  TaskStateParams,
-  { action: "add_constraint" | "remove_constraint" | "add_finding" | "remove_finding" }
->;
+type AddFindingParams = Extract<TaskStateParams, { action: "add_finding" }>;
 
-type ActionResult =
-  | { state: TaskState | undefined; feedback: string; error?: undefined }
-  | { state: TaskState | undefined; feedback?: undefined; error: string };
+type ActionResult = {
+  state: TaskState | undefined;
+  feedback?: string;
+  error?: string;
+};
 
 export function applyAction(current: TaskState | undefined, params: TaskStateParams): ActionResult {
-  if (params.action === "set_plan") return applySetPlan(current, params);
-  if (params.action === "show") return { state: current, feedback: "Plan" };
-  if (params.action === "clear") return { state: undefined, feedback: "Plan cleared" };
-  if (current === undefined) return { state: current, error: "Set a plan before changing task state." };
+  if (parseTaskStateParams(params) === undefined) {
+    const reason = describeParamError(params);
+    return { state: current, error: reason ? `Invalid task_state parameters: ${reason}` : "Invalid task_state parameters." };
+  }
 
-  const state = cloneTaskState(current)!;
-  if (params.action === "add_step") return applyAddStep(current, state, params);
-  if (params.action === "revise_step") return applyReviseStep(current, state, params);
-  if (params.action === "remove_step") return applyRemoveStep(current, state, params);
-  if (params.action === "start_step") return applyStartStep(current, state, params);
-  if (params.action === "complete_step") return applyCompleteStep(current, state, params);
-  return applyCollection(current, state, params);
+  if (params.action === "set_plan") {
+    return applySetPlan(current, params);
+  }
+
+  if (params.action === "show") {
+    return { state: current, feedback: current ? "Plan" : "Task state is empty." };
+  }
+
+  if (params.action === "clear") {
+    return { state: undefined, feedback: "Task state cleared." };
+  }
+
+  if (current === undefined) {
+    return { state: undefined, error: "Task state is empty. Call set_plan first." };
+  }
+
+  const state = cloneTaskState(current);
+
+  switch (params.action) {
+    case "advance_step":
+      return applyAdvanceStep(current, state!, params);
+    case "update_step":
+      return applyUpdateStep(current, state!, params);
+    case "add_step":
+      return applyAddStep(current, state!, params);
+    case "add_finding":
+      return applyAddFinding(current, state!, params);
+  }
 }
 
-function invalidResult(rawParams: unknown, state: TaskState | undefined) {
-  const raw = typeof rawParams === "object" && rawParams !== null && !Array.isArray(rawParams)
-    ? rawParams as Record<string, unknown>
+function invalidResult(
+  raw: unknown,
+  state: TaskState | undefined,
+  reason: string | undefined,
+): { content: [{ type: "text"; text: string }]; details: TaskStateDetails; isError: true } {
+  const params = typeof raw === "object" && raw !== null && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
     : undefined;
-  const action = isTaskStateAction(raw?.action) ? raw.action : "show";
+  const action = isTaskStateAction(params?.action) ? params.action : "show";
   const details: TaskStateDetails = {
     tool: "task_state",
     action,
-    params: raw === undefined ? {} : structuredClone(raw),
+    params: raw === undefined || raw === null ? {} : structuredClone(raw) as Record<string, unknown>,
     ...snapshotTaskState(state),
   };
-  return { content: [{ type: "text" as const, text: "Invalid task_state parameters." }], details, isError: true };
+  const text = reason
+    ? `Invalid task_state parameters: ${reason}`
+    : "Invalid task_state parameters.";
+  return { content: [{ type: "text" as const, text }], details, isError: true };
+}
+
+function describeParamError(rawParams: unknown): string | undefined {
+  if (typeof rawParams !== "object" || rawParams === null || Array.isArray(rawParams)) {
+    return "expected an object with an 'action' property.";
+  }
+
+  const raw = rawParams as Record<string, unknown>;
+  const action = raw.action;
+  if (typeof action !== "string" || !isTaskStateAction(action)) {
+    return `unknown action '${String(action)}'. Valid actions are: ${ACTIONS.join(", ")}.`;
+  }
+
+  if (action === "set_plan") {
+    if (typeof raw.goal !== "string" || !Array.isArray(raw.steps)) {
+      return "set_plan requires 'goal' (string) and 'steps' (array of { outcome, doneWhen }).";
+    }
+  }
+
+  if (action === "add_step") {
+    if (typeof raw.outcome !== "string" || typeof raw.doneWhen !== "string") {
+      return "add_step requires 'outcome' and 'doneWhen'.";
+    }
+  }
+
+  if (action === "update_step") {
+    if (typeof raw.id !== "number" || raw.id < 1 || !Number.isInteger(raw.id)) {
+      return "update_step requires 'id' (integer >= 1).";
+    }
+    if (raw.outcome === undefined && raw.doneWhen === undefined && raw.status === undefined) {
+      return "update_step requires at least one of 'outcome', 'doneWhen', or 'status'.";
+    }
+  }
+
+  if (action === "advance_step") {
+    if (raw.id !== undefined && (typeof raw.id !== "number" || raw.id < 1 || !Number.isInteger(raw.id))) {
+      return "advance_step 'id' must be an integer >= 1.";
+    }
+    if (raw.nextId !== undefined && (typeof raw.nextId !== "number" || raw.nextId < 1 || !Number.isInteger(raw.nextId))) {
+      return "advance_step 'nextId' must be an integer >= 1.";
+    }
+    if (raw.finding !== undefined && typeof raw.finding !== "string") {
+      return "advance_step 'finding' must be a string.";
+    }
+  }
+
+  if (action === "add_finding") {
+    if (typeof raw.finding !== "string") {
+      return "add_finding requires 'finding' (string).";
+    }
+  }
+
+  return undefined;
 }
 
 function parseTaskStateParams(value: unknown): TaskStateParams | undefined {
-  return Value.Check(RuntimeTaskStateParams, value) ? value : undefined;
+  if (!Value.Check(RuntimeTaskStateParams, value)) return undefined;
+
+  if (value.action === "update_step") {
+    if (value.outcome === undefined && value.doneWhen === undefined && value.status === undefined) {
+      return undefined;
+    }
+  }
+
+  return value as TaskStateParams;
 }
 
 function applySetPlan(current: TaskState | undefined, params: SetPlanParams): ActionResult {
@@ -230,6 +374,20 @@ function applySetPlan(current: TaskState | undefined, params: SetPlanParams): Ac
     return { state: current, error: "Text values cannot be blank or exceed their limit." };
   }
 
+  if (params.constraints !== undefined) {
+    if (params.constraints.length > TASK_STATE_LIMITS.constraints) {
+      return { state: current, error: `A task state can have at most ${TASK_STATE_LIMITS.constraints} constraints.` };
+    }
+    const invalidConstraint = params.constraints.some((c) => !validText(c, TASK_STATE_LIMITS.constraint));
+    if (invalidConstraint) {
+      return { state: current, error: "Constraint text cannot be blank or exceed its limit." };
+    }
+  }
+
+  const constraints = params.constraints !== undefined
+    ? [...params.constraints]
+    : [...(current?.constraints ?? [])];
+
   return {
     state: {
       goal: params.goal,
@@ -239,35 +397,32 @@ function applySetPlan(current: TaskState | undefined, params: SetPlanParams): Ac
         doneWhen: step.doneWhen,
         status: "pending",
       })),
-      constraints: current === undefined || isComplete(current) ? [] : [...current.constraints],
-      findings: current === undefined || isComplete(current) ? [] : [...current.findings],
+      constraints,
+      findings: [...(current?.findings ?? [])],
     },
     feedback: "Plan set",
   };
 }
 
 function applyAddStep(current: TaskState, state: TaskState, params: AddStepParams): ActionResult {
-  if (!validText(params.step.outcome, TASK_STATE_LIMITS.stepOutcome) || !validText(params.step.doneWhen, TASK_STATE_LIMITS.doneWhen)) {
+  if (!validText(params.outcome, TASK_STATE_LIMITS.stepOutcome) || !validText(params.doneWhen, TASK_STATE_LIMITS.doneWhen)) {
     return { state: current, error: "Text values cannot be blank or exceed their limit." };
   }
-  if (state.steps.length === TASK_STATE_LIMITS.steps) {
+  if (state.steps.length >= TASK_STATE_LIMITS.steps) {
     return { state: current, error: "A task state can have at most 10 steps." };
   }
 
   const step: PlanStep = {
     id: nextPlanStepId(state),
-    outcome: params.step.outcome,
-    doneWhen: params.step.doneWhen,
+    outcome: params.outcome,
+    doneWhen: params.doneWhen,
     status: "pending",
   };
   state.steps.push(step);
   return { state, feedback: formatStepFeedback(`Step #${step.id} added`, step) };
 }
 
-function applyReviseStep(current: TaskState, state: TaskState, params: ReviseStepParams): ActionResult {
-  if (params.outcome === undefined && params.doneWhen === undefined) {
-    return { state: current, error: "Provide outcome or doneWhen to revise a step." };
-  }
+function applyUpdateStep(current: TaskState, state: TaskState, params: UpdateStepParams): ActionResult {
   if (
     (params.outcome !== undefined && !validText(params.outcome, TASK_STATE_LIMITS.stepOutcome))
     || (params.doneWhen !== undefined && !validText(params.doneWhen, TASK_STATE_LIMITS.doneWhen))
@@ -277,76 +432,101 @@ function applyReviseStep(current: TaskState, state: TaskState, params: ReviseSte
 
   const step = state.steps.find((item) => item.id === params.id);
   if (step === undefined) return { state: current, error: `Step #${params.id} not found.` };
-  if (step.status === "done") {
-    return { state: current, error: `Step #${params.id} is complete; use start_step to reopen it before revising it.` };
-  }
 
   if (params.outcome !== undefined) step.outcome = params.outcome;
   if (params.doneWhen !== undefined) step.doneWhen = params.doneWhen;
-  return { state, feedback: formatStepFeedback(`Step #${step.id} revised`, step) };
+  if (params.status !== undefined) step.status = params.status;
+
+  return { state, feedback: formatStepFeedback(`Step #${step.id} updated`, step) };
 }
 
-function applyRemoveStep(current: TaskState, state: TaskState, params: RemoveStepParams): ActionResult {
-  const index = state.steps.findIndex((step) => step.id === params.id);
-  if (index < 0) return { state: current, error: `Step #${params.id} not found.` };
-  if (state.steps.length === 1) {
-    return { state: current, error: "A task state must have at least 1 step; clear it instead." };
-  }
+function applyAdvanceStep(current: TaskState, state: TaskState, params: AdvanceStepParams): ActionResult {
+  const inProgress = state.steps.filter((item) => item.status === "in_progress");
 
-  state.steps.splice(index, 1);
-  return { state, feedback: `Step #${params.id} removed` };
-}
-
-function applyStartStep(current: TaskState, state: TaskState, params: StartStepParams): ActionResult {
-  const step = state.steps.find((item) => item.id === params.id);
-  if (step === undefined) return { state: current, error: `Step #${params.id} not found.` };
-  if (step.status === "in_progress") return { state: current, error: `Step #${params.id} is already in progress.` };
-
-  const reopened = step.status === "done";
-  step.status = "in_progress";
-  return {
-    state,
-    feedback: formatStepFeedback(`Step #${step.id} ${reopened ? "reopened" : "in progress"}`, step),
-  };
-}
-
-function applyCompleteStep(current: TaskState, state: TaskState, params: CompleteStepParams): ActionResult {
-  const step = state.steps.find((item) => item.id === params.id);
-  if (step === undefined) return { state: current, error: `Step #${params.id} not found.` };
-  if (step.status === "pending") return { state: current, error: `Start step #${params.id} before completing it.` };
-  if (step.status === "done") return { state: current, error: `Step #${params.id} is already complete.` };
-
-  step.status = "done";
-  return { state, feedback: `Step #${step.id} complete` };
-}
-
-function applyCollection(current: TaskState, state: TaskState, params: CollectionParams): ActionResult {
-  const constraintAction = params.action === "add_constraint" || params.action === "remove_constraint";
-  const field = constraintAction ? "constraints" : "findings";
-  const value = constraintAction ? params.constraint : params.finding;
-  const limit = field === "constraints" ? TASK_STATE_LIMITS.constraint : TASK_STATE_LIMITS.finding;
-
-  if (!validText(value, limit)) {
+  if (params.finding !== undefined && !validText(params.finding, TASK_STATE_LIMITS.finding)) {
     return { state: current, error: "Text values cannot be blank or exceed their limit." };
   }
-
-  const values = state[field];
-  const adding = params.action.startsWith("add_");
-  const index = values.indexOf(value);
-  const label = field === "constraints" ? "Constraint" : "Finding";
-
-  if (adding && index >= 0) return { state: current, error: `${label} already exists.` };
-  if (adding && values.length === TASK_STATE_LIMITS[field]) {
-    return { state: current, error: `A task state can have at most ${TASK_STATE_LIMITS[field]} ${field}.` };
+  const isDuplicateFinding = params.finding !== undefined && state.findings.includes(params.finding);
+  if (params.finding !== undefined && !isDuplicateFinding && state.findings.length >= TASK_STATE_LIMITS.findings) {
+    return { state: current, error: `A task state can have at most ${TASK_STATE_LIMITS.findings} findings.` };
   }
-  if (!adding && index < 0) return { state: current, error: `${label} not found.` };
 
-  if (adding) values.push(value);
-  else values.splice(index, 1);
-  return { state, feedback: `${label} ${adding ? "added" : "removed"}\n${value}` };
+  if (inProgress.length === 0 && params.id === undefined) {
+    const nextStep = params.nextId !== undefined
+      ? state.steps.find((item) => item.id === params.nextId)
+      : state.steps.find((item) => item.status === "pending");
+    if (params.nextId !== undefined && nextStep === undefined) {
+      return { state: current, error: `Step #${params.nextId} not found.` };
+    }
+    if (params.nextId !== undefined && nextStep?.status !== "pending") {
+      return { state: current, error: `Step #${params.nextId} is not pending.` };
+    }
+    if (nextStep === undefined) {
+      return { state: current, error: "All steps are complete; no pending step to start." };
+    }
+
+    nextStep.status = "in_progress";
+    if (params.finding !== undefined && !isDuplicateFinding) state.findings.push(params.finding);
+
+    const feedback = [
+      formatStepFeedback(`Step #${nextStep.id} in progress`, nextStep),
+      ...(params.finding !== undefined && !isDuplicateFinding ? [`Finding added\n${params.finding}`] : []),
+    ].join("\n");
+    return { state, feedback };
+  }
+
+  const stepToComplete = params.id !== undefined
+    ? state.steps.find((item) => item.id === params.id)
+    : inProgress.length === 1 ? inProgress[0] : undefined;
+  if (params.id !== undefined && stepToComplete === undefined) {
+    return { state: current, error: `Step #${params.id} not found.` };
+  }
+  if (params.id !== undefined && stepToComplete?.status !== "in_progress") {
+    return { state: current, error: `Step #${params.id} is not in progress.` };
+  }
+  if (params.id === undefined && inProgress.length > 1) {
+    return { state: current, error: "Multiple steps are in progress; provide an id." };
+  }
+
+  const nextStep = params.nextId !== undefined
+    ? state.steps.find((item) => item.id === params.nextId)
+    : state.steps.find((item) => item.status === "pending");
+  if (params.nextId !== undefined && nextStep === undefined) {
+    return { state: current, error: `Step #${params.nextId} not found.` };
+  }
+  if (params.nextId !== undefined && nextStep?.status !== "pending") {
+    return { state: current, error: `Step #${params.nextId} is not pending.` };
+  }
+
+  stepToComplete!.status = "done";
+  if (nextStep !== undefined) nextStep.status = "in_progress";
+  if (params.finding !== undefined && !isDuplicateFinding) state.findings.push(params.finding);
+
+  const feedback = [
+    `Step #${stepToComplete!.id} complete`,
+    ...(params.finding !== undefined && !isDuplicateFinding ? [`Finding added\n${params.finding}`] : []),
+    ...(nextStep !== undefined ? [formatStepFeedback(`Step #${nextStep.id} in progress`, nextStep)] : []),
+  ].join("\n");
+  return { state, feedback };
+}
+
+function applyAddFinding(current: TaskState, state: TaskState, params: AddFindingParams): ActionResult {
+  if (!validText(params.finding, TASK_STATE_LIMITS.finding)) {
+    return { state: current, error: "Text values cannot be blank or exceed their limit." };
+  }
+  if (state.findings.includes(params.finding)) {
+    return { state: current, feedback: `Finding already recorded\n${params.finding}` };
+  }
+  if (state.findings.length >= TASK_STATE_LIMITS.findings) {
+    return { state: current, error: `A task state can have at most ${TASK_STATE_LIMITS.findings} findings.` };
+  }
+  state.findings.push(params.finding);
+  return { state, feedback: `Finding added\n${params.finding}` };
 }
 
 function formatSuccess(action: TaskStateAction, feedback: string, state: TaskState | undefined): string {
+  if (state === undefined) return feedback;
+
   return action === "set_plan" || action === "show"
     ? `${feedback}\n${formatTaskState(state)}`
     : feedback;
