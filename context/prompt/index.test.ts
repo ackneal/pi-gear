@@ -32,7 +32,9 @@ test("composes only selected pi-gear capability sections", () => {
 
 test("keeps system prompt static without dynamic working memory to preserve prompt cache", () => {
   const prompt = composePrompt(base, ["task_state"]);
-  assert.match(prompt, /Plan:\nUse task_state for non-trivial work/);
+  assert.match(prompt, /Plan:\nUse task_state for multi-step tasks that require tracking progress\./);
+  assert.equal(composePrompt(base, ["task_state"]), prompt);
+  assert.equal(composePrompt(prompt, ["task_state"]), prompt);
   assert.doesNotMatch(prompt, /Working memory:/);
   assert.doesNotMatch(prompt, /<task_state_snapshot>/);
 });
@@ -51,7 +53,7 @@ test("setupPromptComposer composes static prompt on before_agent_start", () => {
     systemPrompt: base,
     systemPromptOptions: { selectedTools: ["task_state"] },
   });
-  assert.match(prompt.systemPrompt, /Plan:\nUse task_state for non-trivial work/);
+  assert.match(prompt.systemPrompt, /Plan:\nUse task_state for multi-step tasks that require tracking progress\./);
   assert.doesNotMatch(prompt.systemPrompt, /Working memory:/);
 });
 
@@ -73,10 +75,8 @@ test("orders Plan before Research before Worker before Subagents and replaces on
 
 test("plan guidance is concise and completion-oriented", () => {
   const prompt = composePrompt(base, ["task_state"]);
-  assert.match(prompt, /Use task_state for non-trivial work/);
-  assert.match(prompt, /Complete outcome steps only when their doneWhen is satisfied/);
-  assert.match(prompt, /prefer the smallest useful check before dependent work proceeds/);
-  assert.match(prompt, /Replan when evidence changes/);
+  assert.equal(prompt, `${base}\n\n<pi_gear_context>\nPlan:\nUse task_state for multi-step tasks that require tracking progress. Mark a step complete only after its doneWhen condition is met. Update the plan only when the remaining steps are no longer valid.\n</pi_gear_context>`);
+  assert.doesNotMatch(prompt, /set_plan|advance_step|non-trivial|smallest useful check|Replan when evidence changes/);
   assert.doesNotMatch(prompt, /authoritative|recover/);
   assert.doesNotMatch(prompt, /continu|stop|blocker|final response/i);
 });
