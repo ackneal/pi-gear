@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { COMPLETION_DURATION_MS, type PlanScheduler, PlanWidgetController, TRANSITION_DURATION_MS } from "./controller.ts";
+import { applyAction, type TaskStateParams } from "../../context/state/index.ts";
+import type { TaskState } from "../../context/state/types.ts";
 import { visibleWidth } from "./display.ts";
 import { PLAN_WIDGET_ID } from "./widget.ts";
 
@@ -101,4 +103,40 @@ test("reconstruction is steady, shutdown cancels timers, and widget lines fit CJ
   assert.deepEqual(calls.at(-1), [PLAN_WIDGET_ID, undefined, { placement: "aboveEditor" }]);
   controller.reconstruct(ctx as never, state(["done", "done", "done", "done"]));
   assert.deepEqual(calls.at(-1), [PLAN_WIDGET_ID, undefined, { placement: "aboveEditor" }]);
+});
+
+test("all seven actions produce consistent widget transitions and settle to authoritative state", () => {
+  const before = state();
+  const parallel = { ...before, steps: before.steps.map((step, index) => ({ ...step, id: [9, 2, 1, 4][index]!, status: index === 1 || index === 2 ? "in_progress" as const : "pending" as const })) };
+  const cases: Array<{ name: string; before?: TaskState; params: TaskStateParams; immediate: string; settled: string; timers: number; statuses?: TaskState["steps"] }> = [
+    { name: "create", params: { action: "set_plan", goal: before.goal, steps: before.steps.map(({ outcome, doneWhen }) => ({ outcome, doneWhen })) }, immediate: "＋ Plan created · 4 steps", settled: "Plan · ✓0/4 · ○ #1 Step 1", timers: 1 },
+    { name: "replace", before, params: { action: "set_plan", goal: before.goal, steps: before.steps.map(({ outcome, doneWhen }) => ({ outcome, doneWhen })) }, immediate: "↻ Plan revised · ✓0/4", settled: "Plan · ✓0/4 · ○ #1 Step 1", timers: 1 },
+    { name: "advance", before, params: { action: "advance_step", id: 2 }, immediate: "✓ #2 completed · ✓1/4 → ● #1 started · Step 1", settled: "Plan · ✓1/4 · ● #1 Step 1", timers: 1 },
+    { name: "update status", before, params: { action: "update_step", id: 3, status: "in_progress" }, immediate: "● #3 started · Integrate context", settled: "Plan · ✓0/4 · ● #2 Step 2", timers: 1 },
+    { name: "update text", before, params: { action: "update_step", id: 2, outcome: "Revised" }, immediate: "↻ Plan revised · ✓0/4", settled: "Plan · ✓0/4 · ● #2 Revised", timers: 1 },
+    { name: "add step", before, params: { action: "add_step", outcome: "Ship", doneWhen: "Released" }, immediate: "↻ Plan revised · ✓0/5", settled: "Plan · ✓0/5 · ● #2 Step 2", timers: 1 },
+    { name: "new finding", before, params: { action: "add_finding", finding: "Useful" }, immediate: "Plan · ✓0/4 · ● #2 Step 2", settled: "Plan · ✓0/4 · ● #2 Step 2", timers: 0 },
+    { name: "duplicate finding", before: { ...before, findings: ["Useful"] }, params: { action: "add_finding", finding: "Useful" }, immediate: "Plan · ✓0/4 · ● #2 Step 2", settled: "Plan · ✓0/4 · ● #2 Step 2", timers: 0 },
+    { name: "show", before, params: { action: "show" }, immediate: "Plan · ✓0/4 · ● #2 Step 2", settled: "Plan · ✓0/4 · ● #2 Step 2", timers: 0 },
+    { name: "clear", before, params: { action: "clear" }, immediate: "", settled: "", timers: 0 },
+    { name: "parallel advance by list order", before: parallel, params: { action: "advance_step", id: 2 }, immediate: "✓ #2 completed · ✓1/4 → ● #9 started · Step 1", settled: "Plan · ✓1/4 · ● #9 Step 1", timers: 1, statuses: parallel.steps.map((step) => ({ ...step, status: step.id === 2 ? "done" : step.id === 9 ? "in_progress" : step.status })) },
+    { name: "parallel advance explicit next", before: parallel, params: { action: "advance_step", id: 2, nextId: 4 }, immediate: "✓ #2 completed · ✓1/4 → ● #4 started · Step 4", settled: "Plan · ✓1/4 · ● #1 Integrate context", timers: 1, statuses: parallel.steps.map((step) => ({ ...step, status: step.id === 2 ? "done" : step.id === 4 ? "in_progress" : step.status })) },
+  ];
+  for (const row of cases) {
+    const timers = new ManualScheduler();
+    const { calls, ctx, line } = harness();
+    const controller = new PlanWidgetController(timers);
+    const applied = applyAction(row.before, row.params);
+    assert.equal(applied.error, undefined, row.name);
+    controller.reconstruct(ctx as never, row.before);
+
+    controller.update(ctx as never, row.before, applied.state, { action: row.params.action });
+
+    assert.equal(line(calls.length - 1), row.immediate, row.name);
+    assert.equal(timers.callbacks.length, row.timers, row.name);
+    if (row.statuses) assert.deepEqual(applied.state?.steps, row.statuses, row.name);
+    if (row.timers) timers.run(0);
+    assert.equal(line(calls.length - 1), row.settled, row.name);
+    if (row.params.action === "clear") assert.equal(calls.at(-1)?.[1], undefined, row.name);
+  }
 });

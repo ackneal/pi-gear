@@ -60,14 +60,17 @@ export const TaskStateParams = strict({
   }),
   goal: Type.Optional(text(TASK_STATE_LIMITS.goal)),
   steps: Type.Optional(Type.Array(PlanStepInput, { minItems: 1, maxItems: TASK_STATE_LIMITS.steps })),
-  constraints: Type.Optional(Type.Array(text(TASK_STATE_LIMITS.constraint), { maxItems: TASK_STATE_LIMITS.constraints })),
+  constraints: Type.Optional(Type.Array(text(TASK_STATE_LIMITS.constraint), {
+    maxItems: TASK_STATE_LIMITS.constraints,
+    description: "Replaces constraints on set_plan; omitted constraints and existing findings are preserved. Use clear for a fresh task.",
+  })),
   id: Type.Optional(Type.Integer({
     minimum: 1,
     description: "Step ID to complete (for advance_step) or update (for update_step). Defaults to the active in-progress step for advance_step; only needed if multiple steps are in progress.",
   })),
   nextId: Type.Optional(Type.Integer({
     minimum: 1,
-    description: "Specific next step ID to start (for advance_step). Defaults to the next pending step. Only needed for non-linear workflows.",
+    description: "Specific pending step ID to start (for advance_step). Defaults to the first pending step in plan order, even when other steps remain in progress. Use for non-linear workflows.",
   })),
   outcome: Type.Optional(outcome()),
   doneWhen: Type.Optional(doneWhen()),
@@ -183,7 +186,7 @@ export function setupTaskState(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "task_state",
     label: "Plan",
-    description: "Maintain the task plan: goal, steps, constraints, and findings. Primary workflow: set_plan to initialize, advance_step() to progress sequentially through steps (marking current done and starting next), update_step to modify or reopen steps, add_finding to record facts, show to view, clear to reset.",
+    description: "Maintain the task plan: goal, steps, constraints, and findings. Use set_plan to initialize or replace goal and steps while preserving findings and omitted constraints; clear first for a fresh task. Use advance_step to complete an active step and start the first pending step in plan order, preserving other active steps (id required when multiple are active; nextId selects a specific pending step). Use update_step to modify or reopen a step, add_step to append a pending step, add_finding to record facts, show to view, clear to reset.",
     parameters: TaskStateParams,
     renderCall,
     renderResult,
@@ -237,6 +240,11 @@ type ActionResult = {
 };
 
 export function applyAction(current: TaskState | undefined, params: TaskStateParams): ActionResult {
+  if (parseTaskStateParams(params) === undefined) {
+    const reason = describeParamError(params);
+    return { state: current, error: reason ? `Invalid task_state parameters: ${reason}` : "Invalid task_state parameters." };
+  }
+
   if (params.action === "set_plan") {
     return applySetPlan(current, params);
   }
@@ -378,7 +386,7 @@ function applySetPlan(current: TaskState | undefined, params: SetPlanParams): Ac
 
   const constraints = params.constraints !== undefined
     ? [...params.constraints]
-    : current === undefined || isComplete(current) ? [] : [...current.constraints];
+    : [...(current?.constraints ?? [])];
 
   return {
     state: {
@@ -390,7 +398,7 @@ function applySetPlan(current: TaskState | undefined, params: SetPlanParams): Ac
         status: "pending",
       })),
       constraints,
-      findings: current === undefined || isComplete(current) ? [] : [...current.findings],
+      findings: [...(current?.findings ?? [])],
     },
     feedback: "Plan set",
   };
@@ -400,7 +408,7 @@ function applyAddStep(current: TaskState, state: TaskState, params: AddStepParam
   if (!validText(params.outcome, TASK_STATE_LIMITS.stepOutcome) || !validText(params.doneWhen, TASK_STATE_LIMITS.doneWhen)) {
     return { state: current, error: "Text values cannot be blank or exceed their limit." };
   }
-  if (state.steps.length === TASK_STATE_LIMITS.steps) {
+  if (state.steps.length >= TASK_STATE_LIMITS.steps) {
     return { state: current, error: "A task state can have at most 10 steps." };
   }
 
@@ -415,10 +423,6 @@ function applyAddStep(current: TaskState, state: TaskState, params: AddStepParam
 }
 
 function applyUpdateStep(current: TaskState, state: TaskState, params: UpdateStepParams): ActionResult {
-  if (params.outcome === undefined && params.doneWhen === undefined && params.status === undefined) {
-    return { state: current, error: "update_step requires at least one of 'outcome', 'doneWhen', or 'status'." };
-  }
-
   if (
     (params.outcome !== undefined && !validText(params.outcome, TASK_STATE_LIMITS.stepOutcome))
     || (params.doneWhen !== undefined && !validText(params.doneWhen, TASK_STATE_LIMITS.doneWhen))
@@ -480,9 +484,6 @@ function applyAdvanceStep(current: TaskState, state: TaskState, params: AdvanceS
   if (params.id !== undefined && stepToComplete?.status !== "in_progress") {
     return { state: current, error: `Step #${params.id} is not in progress.` };
   }
-  if (params.id === undefined && inProgress.length === 0) {
-    return { state: current, error: "No step is in progress." };
-  }
   if (params.id === undefined && inProgress.length > 1) {
     return { state: current, error: "Multiple steps are in progress; provide an id." };
   }
@@ -514,7 +515,7 @@ function applyAddFinding(current: TaskState, state: TaskState, params: AddFindin
     return { state: current, error: "Text values cannot be blank or exceed their limit." };
   }
   if (state.findings.includes(params.finding)) {
-    return { state, feedback: `Finding already recorded\n${params.finding}` };
+    return { state: current, feedback: `Finding already recorded\n${params.finding}` };
   }
   if (state.findings.length >= TASK_STATE_LIMITS.findings) {
     return { state: current, error: `A task state can have at most ${TASK_STATE_LIMITS.findings} findings.` };

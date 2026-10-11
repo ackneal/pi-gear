@@ -59,12 +59,15 @@ function isSnapshot(details: TaskStateDetails | undefined): boolean {
     || details?.action === "show";
 }
 
-function successful(details: TaskStateDetails | undefined, expanded: boolean, theme: PlanTheme): string {
+function successful(result: AgentToolResult<TaskStateDetails>, expanded: boolean, theme: PlanTheme): string {
+  const details = result.details;
   if (!details) return "";
   if (isSnapshot(details)) return formatPlanSnapshot(details.state ?? undefined, expanded, theme);
   const params = record(details.params);
   switch (details.action) {
-    case "add_finding": return typeof params?.finding === "string" ? formatPlanChange("Finding", params.finding, theme) : "";
+    case "add_finding": return typeof params?.finding === "string"
+      ? formatPlanChange(contentText(result) === "Finding already recorded" ? "Finding already recorded" : "Finding", params.finding, theme)
+      : "";
     case "clear": return theme.fg("muted", "Plan cleared");
     default: return "";
   }
@@ -72,7 +75,7 @@ function successful(details: TaskStateDetails | undefined, expanded: boolean, th
 
 export function renderCall(_args: Record<string, unknown>, _theme: PlanTheme, context: RenderContext): Text { return textComponent("", context); }
 export function formatPlanResult(result: AgentToolResult<TaskStateDetails>, options: ToolRenderResultOptions, theme: PlanTheme, isError: boolean = false): string {
-  return isError ? `${theme.fg("error", "✗")} ${theme.bold(theme.fg("toolTitle", "Plan"))}${theme.fg("error", ` · ${contentText(result)}`)}` : successful(result.details, options.expanded, theme);
+  return isError ? `${theme.fg("error", "✗")} ${theme.bold(theme.fg("toolTitle", "Plan"))}${theme.fg("error", ` · ${contentText(result)}`)}` : successful(result, options.expanded, theme);
 }
 export function renderResult(result: AgentToolResult<TaskStateDetails>, options: ToolRenderResultOptions, theme: PlanTheme, context: RenderContext): Text | PlanSnapshotComponent {
   if (!context.isError && isSnapshot(result.details)) {

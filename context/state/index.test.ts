@@ -123,7 +123,7 @@ test("step reducers assign pending status, advance steps, and update steps", () 
     [advanced, { action: "advance_step", nextId: 99 } as const, /Step #99 not found/],
   ] as const;
   for (const [state, params, error] of failures) {
-    const result = applyAction(state, params as never);
+    const result = applyAction(state, params);
     assert.match(result.error ?? "", error);
     assert.equal(result.state, state);
   }
@@ -150,7 +150,7 @@ test("provider schema is flat, describes outcome and doneWhen, and exposes 7 act
   assert.equal(schema.properties?.doneWhen?.description, "Observable completion condition.");
   assert.equal(schema.properties?.steps?.items?.properties?.doneWhen?.description, "Observable completion condition.");
   assert.equal(schema.properties?.id?.description, "Step ID to complete (for advance_step) or update (for update_step). Defaults to the active in-progress step for advance_step; only needed if multiple steps are in progress.");
-  assert.equal(schema.properties?.nextId?.description, "Specific next step ID to start (for advance_step). Defaults to the next pending step. Only needed for non-linear workflows.");
+  assert.equal(schema.properties?.nextId?.description, "Specific pending step ID to start (for advance_step). Defaults to the first pending step in plan order, even when other steps remain in progress. Use for non-linear workflows.");
   for (const oldField of ["todos", "todo", "text"]) assert.equal(Object.hasOwn(schema.properties ?? {}, oldField), false);
 
   await harness.tool!.execute("call", plan, undefined, undefined, harness.ctx);
@@ -256,7 +256,7 @@ test("completion deactivates only after settlement and persists one versioned nu
   assert.equal(harness.appended.length, 1);
 });
 
-test("replanning preserves active knowledge but completed plans start fresh", () => {
+test("replanning preserves knowledge for active and completed plans", () => {
   const active = applyAction(undefined, { ...plan, constraints: ["Keep scope narrow"] }).state!;
   const informed = applyAction(active, { action: "add_finding", finding: "Keep evidence" }).state!;
   const replanned = applyAction(informed, { action: "set_plan", goal: "Follow up", steps: [{ outcome: "Continue", doneWhen: "Done" }] }).state!;
@@ -268,8 +268,8 @@ test("replanning preserves active knowledge but completed plans start fresh", ()
   const advanced1 = applyAction(started, { action: "advance_step" }).state!;
   const fullyComplete = applyAction(advanced1, { action: "advance_step" }).state!;
   const fresh = applyAction(fullyComplete, { action: "set_plan", goal: "New task", steps: [{ outcome: "Start", doneWhen: "Done" }] }).state!;
-  assert.deepEqual(fresh.constraints, []);
-  assert.deepEqual(fresh.findings, []);
+  assert.deepEqual(fresh.constraints, ["Keep scope narrow"]);
+  assert.deepEqual(fresh.findings, ["Keep evidence"]);
 });
 
 test("reconstruction accepts only the newest valid version 2 snapshot and drops version 1 state", async () => {

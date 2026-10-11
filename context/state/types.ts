@@ -43,6 +43,6 @@ export type TaskStateAction =
 
 export interface TaskStateDetails extends TaskStateSnapshot {
   tool: "task_state";
-  action: TaskStateAction | string;
+  action: string;
   params: Record<string, unknown>;
 }
