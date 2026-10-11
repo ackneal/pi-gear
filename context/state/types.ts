@@ -34,20 +34,15 @@ export interface TaskStateSnapshot {
 
 export type TaskStateAction =
   | "set_plan"
+  | "advance_step"
+  | "update_step"
   | "add_step"
-  | "revise_step"
-  | "remove_step"
-  | "start_step"
-  | "complete_step"
-  | "add_constraint"
-  | "remove_constraint"
   | "add_finding"
-  | "remove_finding"
   | "show"
   | "clear";
 
 export interface TaskStateDetails extends TaskStateSnapshot {
   tool: "task_state";
-  action: TaskStateAction;
+  action: string;
   params: Record<string, unknown>;
 }

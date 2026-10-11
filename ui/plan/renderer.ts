@@ -2,7 +2,7 @@ import type { AgentToolResult, ToolRenderResultOptions } from "@earendil-works/p
 import { Text } from "@earendil-works/pi-tui";
 import type { TaskState, TaskStateDetails } from "../../context/state/types.ts";
 import { sanitizeDisplayText } from "./display.ts";
-import { formatPlanChange, formatPlanRemoval, formatPlanSnapshot, formatPlanSnapshotLines, type PlanTheme } from "./format.ts";
+import { formatPlanChange, formatPlanSnapshot, formatPlanSnapshotLines, type PlanTheme } from "./format.ts";
 
 type RenderContext = { args?: unknown; lastComponent?: unknown; isError?: boolean };
 
@@ -55,20 +55,19 @@ export class PlanSnapshotComponent {
 function isSnapshot(details: TaskStateDetails | undefined): boolean {
   return details?.action === "set_plan"
     || details?.action === "add_step"
-    || details?.action === "revise_step"
-    || details?.action === "remove_step"
+    || details?.action === "update_step"
     || details?.action === "show";
 }
 
-function successful(details: TaskStateDetails | undefined, expanded: boolean, theme: PlanTheme): string {
+function successful(result: AgentToolResult<TaskStateDetails>, expanded: boolean, theme: PlanTheme): string {
+  const details = result.details;
   if (!details) return "";
   if (isSnapshot(details)) return formatPlanSnapshot(details.state ?? undefined, expanded, theme);
   const params = record(details.params);
   switch (details.action) {
-    case "add_finding": return typeof params?.finding === "string" ? formatPlanChange("Finding", params.finding, theme) : "";
-    case "remove_finding": return typeof params?.finding === "string" ? formatPlanRemoval("Finding", params.finding, theme) : "";
-    case "add_constraint": return typeof params?.constraint === "string" ? formatPlanChange("Constraint", params.constraint, theme) : "";
-    case "remove_constraint": return typeof params?.constraint === "string" ? formatPlanRemoval("Constraint", params.constraint, theme) : "";
+    case "add_finding": return typeof params?.finding === "string"
+      ? formatPlanChange(contentText(result) === "Finding already recorded" ? "Finding already recorded" : "Finding", params.finding, theme)
+      : "";
     case "clear": return theme.fg("muted", "Plan cleared");
     default: return "";
   }
@@ -76,7 +75,7 @@ function successful(details: TaskStateDetails | undefined, expanded: boolean, th
 
 export function renderCall(_args: Record<string, unknown>, _theme: PlanTheme, context: RenderContext): Text { return textComponent("", context); }
 export function formatPlanResult(result: AgentToolResult<TaskStateDetails>, options: ToolRenderResultOptions, theme: PlanTheme, isError: boolean = false): string {
-  return isError ? `${theme.fg("error", "✗")} ${theme.bold(theme.fg("toolTitle", "Plan"))}${theme.fg("error", ` · ${contentText(result)}`)}` : successful(result.details, options.expanded, theme);
+  return isError ? `${theme.fg("error", "✗")} ${theme.bold(theme.fg("toolTitle", "Plan"))}${theme.fg("error", ` · ${contentText(result)}`)}` : successful(result, options.expanded, theme);
 }
 export function renderResult(result: AgentToolResult<TaskStateDetails>, options: ToolRenderResultOptions, theme: PlanTheme, context: RenderContext): Text | PlanSnapshotComponent {
   if (!context.isError && isSnapshot(result.details)) {

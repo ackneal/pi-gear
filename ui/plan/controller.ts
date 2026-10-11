@@ -121,14 +121,13 @@ export class PlanWidgetController {
   }
 
   private isStatusTransition(change: PlanUiChange): boolean {
-    return change.action === "start_step" || change.action === "complete_step";
+    return change.action === "advance_step" || change.action === "update_step";
   }
 
   private isStructural(change: PlanUiChange): boolean {
     return change.action === "set_plan"
       || change.action === "add_step"
-      || change.action === "revise_step"
-      || change.action === "remove_step";
+      || change.action === "update_step";
   }
 
   private hasStatusChange(previous: TaskState | undefined, state: TaskState): boolean {
