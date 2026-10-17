@@ -95,7 +95,7 @@ test("setupSubagents registers asynchronous subagent and control tools", async (
 
   setupSubagents(mockPi);
 
-  assert.deepEqual([...tools.keys()], ["researcher", "worker", "subagent_observe", "subagent_cancel"]);
+  assert.deepEqual([...tools.keys()], ["researcher", "worker", "reviewer", "subagent_observe", "subagent_cancel"]);
 
   assert.match(tools.get("researcher")?.description ?? "", /Start focused read-only research/);
   assert.match(tools.get("researcher")?.description ?? "", /Returns immediately with a runId/);

@@ -6,21 +6,23 @@ import { composePrompt, setupPromptComposer } from "./index.ts";
 const base = "Pi base\n<user_append>keep</user_append>\n<other_extension>keep</other_extension>";
 
 test("composes only selected pi-gear capability sections", () => {
-  const cases: Array<{ name: string; tools: string[] | undefined; plan: boolean; research: boolean; worker: boolean; subagents: boolean }> = [
-    { name: "undefined", tools: undefined, plan: false, research: false, worker: false, subagents: false },
-    { name: "none", tools: [], plan: false, research: false, worker: false, subagents: false },
-    { name: "task_state", tools: ["task_state"], plan: true, research: false, worker: false, subagents: false },
-    { name: "research", tools: ["researcher"], plan: false, research: true, worker: false, subagents: true },
-    { name: "worker", tools: ["worker"], plan: false, research: false, worker: true, subagents: true },
-    { name: "both research and plan", tools: ["researcher", "task_state"], plan: true, research: true, worker: false, subagents: true },
-    { name: "all three", tools: ["researcher", "task_state", "worker"], plan: true, research: true, worker: true, subagents: true },
-    { name: "unrelated tool", tools: ["bash"], plan: false, research: false, worker: false, subagents: false },
+  const cases: Array<{ name: string; tools: string[] | undefined; plan: boolean; research: boolean; worker: boolean; review: boolean; subagents: boolean }> = [
+    { name: "undefined", tools: undefined, plan: false, research: false, worker: false, review: false, subagents: false },
+    { name: "none", tools: [], plan: false, research: false, worker: false, review: false, subagents: false },
+    { name: "task_state", tools: ["task_state"], plan: true, research: false, worker: false, review: false, subagents: false },
+    { name: "research", tools: ["researcher"], plan: false, research: true, worker: false, review: false, subagents: true },
+    { name: "worker", tools: ["worker"], plan: false, research: false, worker: true, review: false, subagents: true },
+    { name: "reviewer", tools: ["reviewer"], plan: false, research: false, worker: false, review: true, subagents: true },
+    { name: "both research and plan", tools: ["researcher", "task_state"], plan: true, research: true, worker: false, review: false, subagents: true },
+    { name: "all four", tools: ["researcher", "task_state", "worker", "reviewer"], plan: true, research: true, worker: true, review: true, subagents: true },
+    { name: "unrelated tool", tools: ["bash"], plan: false, research: false, worker: false, review: false, subagents: false },
   ];
   for (const current of cases) {
     const prompt = composePrompt(base, current.tools);
     assert.equal(prompt.includes("Plan:\n"), current.plan, current.name);
     assert.equal(prompt.includes("Research:\n"), current.research, current.name);
     assert.equal(prompt.includes("Worker:\n"), current.worker, current.name);
+    assert.equal(prompt.includes("Review:\n"), current.review, current.name);
     assert.equal(prompt.includes("Subagents:\n"), current.subagents, current.name);
     assert.doesNotMatch(prompt, /<task_state_snapshot>/, current.name);
     assert.doesNotMatch(prompt, /Working memory:/, current.name);
@@ -57,15 +59,17 @@ test("setupPromptComposer composes static prompt on before_agent_start", () => {
   assert.doesNotMatch(prompt.systemPrompt, /Working memory:/);
 });
 
-test("orders Plan before Research before Worker before Subagents and replaces only its idempotent block", () => {
-  const prompt = composePrompt(base, ["worker", "researcher", "task_state"]);
+test("orders Plan before Research before Worker before Review before Subagents and replaces only its idempotent block", () => {
+  const prompt = composePrompt(base, ["reviewer", "worker", "researcher", "task_state"]);
   assert.ok(prompt.indexOf("Plan:\n") < prompt.indexOf("Research:\n"));
   assert.ok(prompt.indexOf("Research:\n") < prompt.indexOf("Worker:\n"));
-  assert.ok(prompt.indexOf("Worker:\n") < prompt.indexOf("Subagents:\n"));
+  assert.ok(prompt.indexOf("Worker:\n") < prompt.indexOf("Review:\n"));
+  assert.ok(prompt.indexOf("Review:\n") < prompt.indexOf("Subagents:\n"));
   assert.equal((prompt.match(/<pi_gear_context>/g) ?? []).length, 1);
   const replaced = composePrompt(prompt, ["worker", "researcher"]);
   assert.equal((replaced.match(/<pi_gear_context>/g) ?? []).length, 1);
   assert.doesNotMatch(replaced, /Plan:\n/);
+  assert.doesNotMatch(replaced, /Review:\n/);
   assert.match(replaced, /Research:\n/);
   assert.match(replaced, /Worker:\n/);
   assert.match(replaced, /Subagents:\n/);
@@ -82,13 +86,16 @@ test("plan guidance is concise and completion-oriented", () => {
 });
 
 test("delegation guidance preserves research terms and explains asynchronous subagent control", () => {
-  const prompt = composePrompt(base, ["researcher", "worker", "subagents"]);
+  const prompt = composePrompt(base, ["researcher", "worker", "reviewer", "subagents"]);
   assert.match(prompt, /Preserve exact identifiers and quoted terms in delegated questions/);
   assert.match(prompt, /Ask one bounded question; require a conclusion, evidence, and uncertainty/);
   assert.match(prompt, /For non-trivial work, use workers to speed up two or more independent ready tasks with disjoint files/);
   assert.match(prompt, /Do not parallelize dependencies or overlapping edits/);
   assert.match(prompt, /Workers should satisfy focused completion checks/);
   assert.match(prompt, /Keep integration and final verification in the main agent/);
+  assert.match(prompt, /Use reviewer for independent read-only review when requested or after non-trivial code changes pass focused checks/);
+  assert.match(prompt, /Pass the change scope, requirements or intent in context, and applicable coding or review skill paths in skills/);
+  assert.match(prompt, /Reviewer does not modify files; evaluate findings, fix confirmed issues, and re-verify in the main agent/);
   assert.match(prompt, /Subagents do not inherit the parent agent's skills; provide the absolute path of any skill needed for the delegated task/);
   assert.match(prompt, /Do independent work before observing\. Use bounded subagent_observe calls and avoid repeated polling/);
   assert.doesNotMatch(prompt, /resolve background runs before|before completing/i);

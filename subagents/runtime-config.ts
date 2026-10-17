@@ -5,7 +5,7 @@ import { getAgentDir, withFileMutationQueue } from "@earendil-works/pi-coding-ag
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 
-export type RuntimeSubagentId = "researcher" | "worker";
+export type RuntimeSubagentId = "researcher" | "worker" | "reviewer";
 
 const ThinkingLevelSchema = Type.Union([
   Type.Literal("off"),
@@ -32,6 +32,7 @@ const RuntimeConfigSchema = Type.Object({
   subagents: Type.Optional(Type.Object({
     researcher: Type.Optional(RuntimeSubagentSettingSchema),
     worker: Type.Optional(RuntimeSubagentSettingSchema),
+    reviewer: Type.Optional(RuntimeSubagentSettingSchema),
   }, { additionalProperties: false })),
 }, { additionalProperties: false });
 

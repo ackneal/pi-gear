@@ -7,7 +7,7 @@ import {
 } from "./runtime-config.ts";
 import type { SubagentDispatch } from "./runtime/types.ts";
 
-export const SUBAGENTS = ["researcher", "worker"] as const;
+export const SUBAGENTS = ["researcher", "worker", "reviewer"] as const;
 
 export type SubagentId = RuntimeSubagentId;
 
