@@ -1,6 +1,6 @@
 # pi-gear
 
-**pi-gear is a [Pi coding-agent](https://github.com/earendil-works/pi-coding-agent) extension that adds macOS-sandboxed Bash, filesystem and network policy, task planning, researcher and worker subagents, and Language Server Protocol (LSP) tools.**
+**pi-gear is a [Pi coding-agent](https://github.com/earendil-works/pi-coding-agent) extension that adds macOS-sandboxed Bash, filesystem and network policy, task planning, researcher, worker, and reviewer subagents, and Language Server Protocol (LSP) tools.**
 
 ## What pi-gear adds to Pi
 
@@ -8,7 +8,7 @@
 - **Filesystem policy** for Pi's `read`, `edit`, and `write` tools, including path normalization and symlink-aware checks.
 - **Network policy and approvals** for sandboxed Bash.
 - **Task state and Plan UI** through the `task_state` tool.
-- **Read-only research and worker subagents** with configurable model defaults.
+- **Read-only research, worker, and reviewer subagents** with configurable model defaults.
 - **LSP tools** for diagnostics, definitions, and references.
 - **Loop guard** advisory check-ins during long agent runs.
 
@@ -151,6 +151,7 @@ Each extension may belong to only one server. `languageIds` must map every confi
 - **`navigation`** — resolves definitions or references with 1-based positions.
 - **`researcher`** — delegates focused read-only research to an isolated Pi child process.
 - **`worker`** — delegates bounded implementation work to a child process.
+- **`reviewer`** — delegates focused read-only code review to a child process.
 
 Mouse-wheel scrolling in subagent detail overlays requires `pi --tui-mode fullscreen`; regular mode scrolls the terminal's main transcript instead.
 

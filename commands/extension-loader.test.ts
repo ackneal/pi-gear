@@ -3,11 +3,13 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { childArgs } from "../subagents/runtime/process.ts";
 import { researcherProfile } from "../subagents/agents/researcher/profile.ts";
+import { reviewerProfile } from "../subagents/agents/reviewer/profile.ts";
 import { workerProfile } from "../subagents/agents/worker/profile.ts";
 
 for (const { profile, extension, expectedServers } of [
   { profile: researcherProfile, extension: new URL("../subagents/agents/researcher/extension.ts", import.meta.url), expectedServers: ["exa", "gh_grep"] },
   { profile: workerProfile, extension: new URL("../index.ts", import.meta.url), expectedServers: [] },
+  { profile: reviewerProfile, extension: new URL("../index.ts", import.meta.url), expectedServers: [] },
 ]) {
   test(`${profile.id} child loads one shared runtime without recursive subagents`, async () => {
     const previous = process.env.PI_GEAR_CHILD;
@@ -31,6 +33,7 @@ for (const { profile, extension, expectedServers } of [
       assert.equal(runtime.commands.size, 0);
       assert.equal(runtime.tools.has("researcher"), false);
       assert.equal(runtime.tools.has("worker"), false);
+      assert.equal(runtime.tools.has("reviewer"), false);
       for (const loaded of result.extensions) {
         if (loaded.path !== entry) assert.equal(loaded.handlers.size, 0);
       }

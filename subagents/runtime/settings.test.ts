@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { RuntimeSubagentSetting } from "../runtime-config.ts";
+import type { RuntimeSubagentId, RuntimeSubagentSetting } from "../runtime-config.ts";
 import { setupSubagentSettings, type RuntimeSettingsStore } from "../settings.ts";
 
-function harness(saved: Partial<Record<"researcher" | "worker", RuntimeSubagentSetting>> = {}) {
+function harness(saved: Partial<Record<RuntimeSubagentId, RuntimeSubagentSetting>> = {}) {
   const defaults = { ...saved };
   const handlers: Record<string, (event: unknown, ctx: ExtensionContext) => void | Promise<void>> = {};
   const pi = {
