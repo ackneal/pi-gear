@@ -7,7 +7,7 @@ import type { TaskState, TaskStateDetails } from "../../context/state/types.ts";
 import { formatPlanResult, PlanSnapshotComponent, renderResult } from "./renderer.ts";
 import { visibleWidth } from "./display.ts";
 
-const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
+const theme = { bg: (_color: string, text: string) => text, fg: (_color: string, text: string) => text, bold: (text: string) => text };
 const state = { goal: "Ship the Plan UI", steps: [{ id: 1, outcome: "Build renderer", doneWhen: "Snapshots are readable", status: "done" as const }, { id: 2, outcome: "Test lifecycle", doneWhen: "Timers are deterministic", status: "in_progress" as const }], constraints: [], findings: [] };
 
 function result(action: string, params: Record<string, unknown>, next: TaskState | null = state, feedback = "Canonical state remains available to the model."): AgentToolResult<TaskStateDetails> {
@@ -71,10 +71,35 @@ test("all seven actions render their authoritative results, including idempotent
     const component = renderResult(response, options, theme, {});
     assert.equal(component instanceof PlanSnapshotComponent, row.snapshot, row.name);
     assert.equal(component instanceof Text, !row.snapshot, row.name);
-    assert.equal(component.render(76).join("\n").trim(), row.expected, row.name);
+    assert.equal(component.render(76).map((line) => line.trimEnd().replace(/^ /, "")).join("\n").trim(), row.expected, row.name);
     if (row.params.action === "add_finding") {
       const finding = row.params.finding;
       assert.equal(applied.state?.findings.filter((entry) => entry === finding).length, 1, row.name);
     }
+  }
+});
+
+test("transcript padding, native background, reuse and empty calls", async () => {
+  const { configureOutputPadding } = await import("../tools/padding.ts");
+  const { renderCall } = await import("./renderer.ts");
+  for (const outputPad of [0, 1]) {
+    configureOutputPadding({ getSettings: () => ({ outputPad }) } as Parameters<typeof configureOutputPadding>[0]);
+    for (const action of ["show", "add_finding", "clear", "error"]) {
+      const painted: string[] = [];
+      const nativeTheme = { ...theme, bg: (token: string, text: string) => { painted.push(token); return text; } };
+      const response = result(action, { finding: "Finding text" });
+      const options = { expanded: false, isPartial: false };
+      const context = { isError: action === "error" };
+      const component = renderResult(response, options, nativeTheme, context);
+      const lines = component.render(32);
+      assert.ok(lines.every((line) => visibleWidth(line) === 32));
+      assert.equal(lines[0]?.startsWith(" "), outputPad === 1);
+      assert.ok(painted.length > 0);
+      assert.ok(painted.every((token) => token === "customMessageBg"));
+      assert.equal(renderResult(response, { ...options, expanded: true }, nativeTheme, { ...context, lastComponent: component }), component);
+      assert.ok(component.render(12).every((line) => visibleWidth(line) === 12));
+    }
+    assert.deepEqual(renderCall({}, theme, {}).render(32), []);
+    assert.deepEqual(renderResult(result("advance_step", {}), { expanded: false, isPartial: false }, theme, {}).render(32), []);
   }
 });

@@ -1,8 +1,25 @@
 import type { AgentToolResult, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { Text, type Component } from "@earendil-works/pi-tui";
+import { padOutput } from "../tools/padding.ts";
 import type { TaskState, TaskStateDetails } from "../../context/state/types.ts";
 import { sanitizeDisplayText } from "./display.ts";
 import { formatPlanChange, formatPlanSnapshot, formatPlanSnapshotLines, type PlanTheme } from "./format.ts";
+
+type TranscriptTheme = PlanTheme & { bg(color: "customMessageBg", text: string): string };
+
+const backgrounds = new WeakMap<Component, TranscriptTheme>();
+
+function transcript<T extends Component>(component: T, theme: TranscriptTheme): T {
+  if (!backgrounds.has(component)) {
+    padOutput(component);
+    const render = component.render.bind(component);
+    component.render = (width) => render(width).map((line) =>
+      new Text(line, 0, 0, (text) => backgrounds.get(component)!.bg("customMessageBg", text)).render(width)[0] ?? "",
+    );
+  }
+  backgrounds.set(component, theme);
+  return component;
+}
 
 type RenderContext = { args?: unknown; lastComponent?: unknown; isError?: boolean };
 
@@ -15,7 +32,7 @@ function record(value: unknown): Record<string, unknown> | undefined {
 function textComponent(text: string, context: RenderContext): Text {
   const component = context.lastComponent instanceof Text
     ? context.lastComponent
-    : new Text("");
+    : new Text("", 0, 0);
   component.setText(text);
   return component;
 }
@@ -73,15 +90,15 @@ function successful(result: AgentToolResult<TaskStateDetails>, expanded: boolean
   }
 }
 
-export function renderCall(_args: Record<string, unknown>, _theme: PlanTheme, context: RenderContext): Text { return textComponent("", context); }
+export function renderCall(_args: Record<string, unknown>, _theme: TranscriptTheme, context: RenderContext): Text { return textComponent("", context); }
 export function formatPlanResult(result: AgentToolResult<TaskStateDetails>, options: ToolRenderResultOptions, theme: PlanTheme, isError: boolean = false): string {
   return isError ? `${theme.fg("error", "✗")} ${theme.bold(theme.fg("toolTitle", "Plan"))}${theme.fg("error", ` · ${contentText(result)}`)}` : successful(result, options.expanded, theme);
 }
-export function renderResult(result: AgentToolResult<TaskStateDetails>, options: ToolRenderResultOptions, theme: PlanTheme, context: RenderContext): Text | PlanSnapshotComponent {
+export function renderResult(result: AgentToolResult<TaskStateDetails>, options: ToolRenderResultOptions, theme: TranscriptTheme, context: RenderContext): Text | PlanSnapshotComponent {
   if (!context.isError && isSnapshot(result.details)) {
     const component = context.lastComponent instanceof PlanSnapshotComponent ? context.lastComponent : new PlanSnapshotComponent(result.details?.state ?? undefined, options.expanded, theme);
     component.update(result.details?.state ?? undefined, options.expanded, theme);
-    return component;
+    return transcript(component, theme);
   }
-  return textComponent(formatPlanResult(result, options, theme, Boolean(context.isError)), context);
+  return transcript(textComponent(formatPlanResult(result, options, theme, Boolean(context.isError)), context), theme);
 }

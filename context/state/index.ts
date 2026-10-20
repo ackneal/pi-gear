@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type, type Static, type TProperties } from "typebox";
 import { Value } from "typebox/value";
+import { configureOutputPadding } from "../../ui/tools/padding.ts";
 import { PlanWidgetController, type PlanUiChange } from "../../ui/plan/controller.ts";
 import { renderCall, renderResult } from "../../ui/plan/renderer.ts";
 import { cloneTaskState, isTaskStateSnapshot, nextPlanStepId, snapshotTaskState } from "./core.ts";
@@ -134,6 +135,8 @@ export function formatTaskState(state: TaskState | undefined): string {
 }
 
 export function setupTaskState(pi: ExtensionAPI): void {
+  configureOutputPadding(pi);
+
   let state: TaskState | undefined;
   const widget = new PlanWidgetController();
   const reconstruct = (ctx: ExtensionContext): void => {
