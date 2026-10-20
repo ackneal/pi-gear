@@ -13,7 +13,8 @@ export type Theme = {
       | "accent"
       | "border"
       | "dim"
-      | "warning",
+      | "warning"
+      | "success",
     text: string,
   ): string;
   bold(text: string): string;
@@ -21,7 +22,7 @@ export type Theme = {
 export type SubagentRendererProfile = { id: string; label: string; presentation?: SubagentPresentation };
 
 export const STALLED_THRESHOLD_MS = 15_000;
-export const STATUS_ICON = { running: "●", success: "✓", error: "✗", aborted: "✗" } as const;
+export const STATUS_ICON = { running: "◌", success: "●", error: "✗", aborted: "✗" } as const;
 
 export function titleCase(value: string): string {
   return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -122,11 +123,23 @@ function metadata(run: SubagentRun | undefined, profile: SubagentRendererProfile
   return [toolStr, ...(usageStr ? [usageStr] : []), durStr].join(" · ");
 }
 
-export function collapsed(run: SubagentRun | undefined, profile: SubagentRendererProfile, theme: Theme, icon: string = STATUS_ICON[run?.status ?? "running"], now = Date.now()): string {
+export function collapsed(run: SubagentRun | undefined, profile: SubagentRendererProfile, theme: Theme, icon: string = STATUS_ICON[run?.status ?? "running"], now = Date.now(), task?: string, showActivity = true): string {
   const status = run?.status ?? "running";
-  const title = theme.bold(theme.fg("toolTitle", `${titleCase(profile.label) || titleCase(profile.id) || "Subagent"} Task`));
-  const iconColor = status === "error" || status === "aborted" ? "error" : status === "success" ? "toolOutput" : "muted";
+  const title = theme.bold(theme.fg("toolTitle", `Agent(${profile.id || profileLabel(profile)}${task ? `: ${compact(task)}` : ""})`));
+  const iconColor = status === "error" || status === "aborted" ? "error" : status === "success" ? "success" : "muted";
   const idle = idleDuration(run, now);
   const idleSuffix = status === "running" && idle >= STALLED_THRESHOLD_MS ? ` · idle ${formatDuration(idle)}` : "";
-  return ` ${theme.fg(iconColor, icon)} ${title}${theme.fg("muted", ` · ${compact(activity(run, profile))}`)}\n${theme.fg("muted", `   ↳ ${metadata(run, profile, now)}${idleSuffix}`)}`;
+  return `${theme.fg(iconColor, icon)} ${title}${showActivity ? theme.fg("muted", ` · ${compact(activity(run, profile))}`) : ""}\n  ${theme.fg("dim", "└")} ${theme.fg("muted", `${metadata(run, profile, now)}${idleSuffix}`)}`;
+}
+
+export function expandedDetails(run: SubagentRun | undefined, theme: Theme): string {
+  if (!run) return "";
+
+  const lines: string[] = [];
+  const result = usefulText(run.result);
+  if (result) lines.push(...result.split("\n").map((line) => theme.fg("text", line)));
+
+  const error = usefulText(run.error);
+  if (error) lines.push(...error.split("\n").map((line) => theme.fg("error", line)));
+  return lines.length ? `\n\n${lines.join("\n")}` : "";
 }

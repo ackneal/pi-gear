@@ -438,7 +438,7 @@ test("Test 8: subscription cleanup removes listeners", () => {
   assert.equal(calls, 1);
 });
 
-test("Test 9: main transcript formatting / rendering remains completely unchanged", () => {
+test("Test 9: main transcript uses compact task header and summary", () => {
   const run: SubagentRun = {
     status: "success",
     startedAt: 0,
@@ -464,7 +464,7 @@ test("Test 9: main transcript formatting / rendering remains completely unchange
   };
 
   const collapsedOutput = collapsed(run, researcherProfile, testTheme, "✓", 1_000);
-  assert.match(collapsedOutput, /Researcher Task/);
+  assert.match(collapsedOutput, /Agent\(researcher\)/);
   assert.match(collapsedOutput, /Research complete/);
   assert.match(collapsedOutput, /2\/2 tools · 1s/);
 });

@@ -1,9 +1,10 @@
+import { padOutput } from "../tools/padding.ts";
 import type { AgentToolResult, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { SubagentProfile, SubagentRun } from "../../subagents/runtime/types.ts";
 import { SubagentResultComponent } from "./component.ts";
 import { getSubagentEntry, hydrateSubagentHistory, subscribeSubagent } from "./detail/index.ts";
-import { collapsed, type SubagentRendererProfile, type Theme } from "./format.ts";
+import { collapsed, expandedDetails, type SubagentRendererProfile, type Theme } from "./format.ts";
 
 type ToolRenderContext = {
   invalidate: () => void;
@@ -45,8 +46,19 @@ export function renderSubagentResult(
     );
   }
 
-  const format = (run: SubagentRun | undefined, _currentOptions: ToolRenderResultOptions, icon?: string) =>
-    collapsed(run, profile, theme, icon);
+  const primary = context.args?.question ?? context.args?.task ?? context.args?.scope;
+  const task = typeof primary === "string" ? primary : context.toolCallId ? getSubagentEntry(context.toolCallId)?.task : undefined;
+  const argumentsText = context.args
+    ? Object.entries(context.args).map(([key, value]) => {
+      const text = typeof value === "string" ? value : JSON.stringify(value);
+      return ["task", "question", "scope"].includes(key) ? text : `${key}: ${text}`;
+    }).join("\n")
+    : task;
+  const format = (run: SubagentRun | undefined, currentOptions: ToolRenderResultOptions, icon?: string) =>
+    currentOptions.expanded
+      ? collapsed(run, profile, theme, icon, Date.now(), undefined, false).split("\n")[0] +
+        (argumentsText ? `\n${argumentsText.split("\n").map((line) => theme.fg("muted", line)).join("\n")}` : "") + expandedDetails(run, theme)
+      : collapsed(run, profile, theme, icon, Date.now(), task);
   const component =
     context.lastComponent instanceof SubagentResultComponent
       ? context.lastComponent
@@ -58,5 +70,5 @@ export function renderSubagentResult(
   if (liveToolCallId && run?.status === "running") {
     component.bindLive(liveToolCallId, (listener) => subscribeSubagent(liveToolCallId, listener));
   }
-  return component;
+  return padOutput(component);
 }

@@ -1,5 +1,5 @@
 import type { ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { Text, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { SubagentRun } from "../../subagents/runtime/types.ts";
 import { Spinner } from "./spinner.ts";
 
@@ -12,6 +12,7 @@ export class SubagentResultComponent extends Text {
   private options: ToolRenderResultOptions | undefined;
   private readonly redraw: () => void;
   private format: (run: SubagentRun | undefined, options: ToolRenderResultOptions, icon?: string) => string;
+  private formattedText = "";
   private live = false;
   private liveToolCallId: string | undefined;
   private unsubscribe: (() => void) | undefined;
@@ -45,6 +46,15 @@ export class SubagentResultComponent extends Text {
     this.syncSpinner();
   }
 
+  override render(width: number): string[] {
+    if (!this.options?.expanded) return super.render(width);
+
+    const indent = " ".repeat(Math.min(2, Math.max(0, width - 1)));
+    return this.formattedText.split("\n").flatMap((line, index) =>
+      index === 0 ? wrapTextWithAnsi(line, Math.max(1, width))
+        : wrapTextWithAnsi(line.replace(/\t/g, "   "), Math.max(1, width - indent.length)).map((part) => indent + part));
+  }
+
   dispose(): void {
     this.releaseLiveSubscription();
     this.spinner.dispose();
@@ -72,6 +82,7 @@ export class SubagentResultComponent extends Text {
   private updateText(): void {
     if (!this.options) return;
     const icon = this.run?.status === "running" && this.options.isPartial && !this.live ? this.spinner.frame : undefined;
-    this.setText(this.format(this.run, this.options, icon));
+    this.formattedText = this.format(this.run, this.options, icon);
+    this.setText(this.formattedText);
   }
 }

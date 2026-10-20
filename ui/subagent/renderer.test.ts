@@ -180,3 +180,20 @@ test("collapsed metadata renders tool fraction and usage accurately", () => {
   assert.match(collapsedUsage, /2\/2 tools · ↑1.2k ↓450 · \$0\.002 · 2s/);
 });
 
+
+test("expanded indentation preserves every body line without slicing content", async () => {
+  const { SubagentResultComponent } = await import("./component.ts");
+  const body = ["a", "abcd", "  original indent", "", "last"];
+  const format = () => ["header", ...body].join("\n");
+  const component = new SubagentResultComponent(() => {}, format);
+  try {
+    component.update(undefined, { expanded: true, isPartial: false }, format);
+    assert.deepEqual(component.render(40), ["header", ...body.map((line) => `  ${line}`)]);
+    for (const width of [1, 2, 3, 8]) {
+      const lines = component.render(width);
+      assert.equal(lines.join("").replace(/\s/g, ""), ["header", ...body].join("").replace(/\s/g, ""));
+    }
+  } finally {
+    component.dispose();
+  }
+});
