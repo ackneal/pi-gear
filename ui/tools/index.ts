@@ -116,7 +116,7 @@ function summary(text: string, theme: Theme, color: "muted" | "error" = "muted")
 }
 
 function outputLines(text: string): string[] {
-  return stripVTControlCharacters(text).split("\n").map((line) => line.trim()).filter(Boolean);
+  return stripVTControlCharacters(text).split(/\r\n|[\r\n]/).map((line) => line.trim()).filter(Boolean);
 }
 
 /** Collapsed errors keep one line; the full message stays available when expanded. */

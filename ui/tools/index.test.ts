@@ -37,6 +37,21 @@ test("read can expand after a collapsed result", () => {
   assert.match(renderedText(expanded), /first[\s\S]*second/);
 });
 
+test("collapsed bash selects one final nonempty line from progress output", () => {
+  const cases = [
+    { text: "first\nlast\n\n", expected: "last" },
+    { text: "first\r\nlast\r\n", expected: "last" },
+    { text: "Rebasing (1/4)\rRebasing (2/4)\rSuccessfully rebased.\r\n", expected: "Successfully rebased." },
+    { text: "progress\r\u001b[32mCompleted\u001b[0m\r  \n", expected: "Completed" },
+    { text: "\r\n  \r", expected: undefined },
+  ];
+  for (const { text, expected } of cases) {
+    const result = executionResult({})({ content: [{ type: "text", text }], details: undefined },
+      { expanded: false, isPartial: false }, theme, context({ command: "demo" }));
+    assert.deepEqual(renderedLines(result, 100), expected ? [`  └ ${expected}`] : [], JSON.stringify(text));
+  }
+});
+
 test("collapsed final bash result clears native streaming interval", () => {
   const interval = setInterval(() => {}, 1000);
   const state: Record<string, unknown> = { interval, startedAt: Date.now() };
