@@ -887,7 +887,7 @@ test("Test 22: left/right navigate between subagent windows (re-subscribing)", (
   assert.match(out, /Researcher/);
 });
 
-test("Test 19: thinking block collapses to the + Thought label and expands with ✦ bullets (like main)", () => {
+test("Test 19: thinking block uses the shared label and preserves original expanded bullets", () => {
   const entry: SubagentViewEntry = {
     toolCallId: "call_think",
     task: "Task",
@@ -904,11 +904,12 @@ test("Test 19: thinking block collapses to the + Thought label and expands with 
   };
 
   const collapsedLines = formatDetailContent(entry, testTheme, 80, 5_000, false, false).join("\n");
-  assert.match(collapsedLines, /\+ Thought/);
+  assert.match(collapsedLines, /✦ Thought/);
   assert.doesNotMatch(collapsedLines, /\u2726 First thought/);
 
   const expandedLines = formatDetailContent(entry, testTheme, 80, 5_000, false, true).join("\n");
-  assert.match(expandedLines, /\u2726 First thought here/);
+  assert.match(expandedLines, /First thought here/);
+  assert.doesNotMatch(expandedLines, /\u2726 First thought here/);
   assert.match(expandedLines, /\u2726 Another thought/);
   assert.match(expandedLines, /\u2726 Third/);
 });
