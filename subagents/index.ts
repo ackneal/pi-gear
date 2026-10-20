@@ -16,6 +16,13 @@ import {
   runResearcher,
 } from "./agents/researcher/index.ts";
 import {
+  formatReviewerInput,
+  REVIEWER_TOOL_NAME,
+  reviewerParameters,
+  reviewerProfile,
+  runReviewer,
+} from "./agents/reviewer/index.ts";
+import {
   formatWorkerInput,
   WORKER_TOOL_NAME,
   workerParameters,
@@ -135,11 +142,48 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
   });
 
   pi.registerTool({
+    name: REVIEWER_TOOL_NAME,
+    label: reviewerProfile.label,
+    description: "Start focused read-only code review. Pass the changes or focus area as scope, with optional context and skills. Returns immediately with a runId; use subagent_observe for progress or completion.",
+    parameters: reviewerParameters,
+    executionMode: "parallel",
+    async execute(toolCallId, { scope, context, skills }, signal, _onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
+      const task = formatReviewerInput({ scope, context, skills });
+      const dispatch = settings.resolve("reviewer", ctx);
+      if (toolCallId) recordSubagentLiveStart(toolCallId, reviewerProfile, task);
+
+      return backgroundResult(background.start({
+        profile: reviewerProfile,
+        task,
+        dispatch,
+        ...(signal ? { parentSignal: signal } : {}),
+        run: (childSignal, update) => {
+          const endpoint = workspace?.endpoint(ctx.cwd);
+          return runReviewer(task, {
+            cwd: ctx.cwd,
+            dispatch,
+            workspaceSearch: endpoint !== undefined,
+            ...(endpoint ? { env: { PI_GEAR_FFF_SOCKET: endpoint } } : {}),
+            signal: childSignal,
+            onUpdate: (next) => {
+              if (update(next)) recordUpdate(toolCallId, next);
+            },
+          });
+        },
+      }));
+    },
+    renderCall: renderSubagentCall,
+    renderResult: (toolResult: AgentToolResult<any>, options, theme, context) =>
+      renderSubagentResult(reviewerProfile, toolResult as AgentToolResult<SubagentRun>, options, theme, context as any),
+    renderShell: "self",
+  });
+
+  pi.registerTool({
     name: "subagent_observe",
     label: "Observe subagent",
     description: "Wait until the run finishes, goes quiet for a few seconds, or the timeout elapses (default 30s). A timeout ends only this observation; the subagent keeps running. Prefer one long wait over repeated polling; omit afterRevision unless resuming from a known revision.",
     parameters: Type.Object({
-      runId: Type.String({ description: "Run identifier returned by researcher or worker." }),
+      runId: Type.String({ description: "Run identifier returned by researcher, worker, or reviewer." }),
       afterRevision: Type.Integer({ minimum: 0, description: "Last observed revision. Returns when a newer revision is available." }),
       timeoutSeconds: Type.Optional(Type.Number({ minimum: 0, description: "Maximum seconds to wait. Defaults to 30; values above 60 are clamped." })),
     }),
@@ -156,7 +200,7 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
     name: "subagent_cancel",
     label: "Cancel subagent",
     description: "Cancel one subagent and wait for its process to terminate. Other runs and the main agent continue; repeated cancellation returns the same terminal state.",
-    parameters: Type.Object({ runId: Type.String({ description: "Run identifier returned by researcher or worker." }) }),
+    parameters: Type.Object({ runId: Type.String({ description: "Run identifier returned by researcher, worker, or reviewer." }) }),
     async execute(_toolCallId, { runId }): Promise<AgentToolResult<CompactSubagentOutput>> {
       return subagentControlResult(await background.cancel(runId));
     },

@@ -33,7 +33,7 @@ export function renderSubagentResult(
     : result.details;
 
   if (context.toolCallId && details && context.args) {
-    const primary = context.args.question ?? context.args.task;
+    const primary = context.args.question ?? context.args.task ?? context.args.scope;
     const task = typeof primary === "string" && primary.trim()
       ? primary
       : JSON.stringify(context.args);
