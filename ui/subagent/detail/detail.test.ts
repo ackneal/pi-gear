@@ -934,16 +934,16 @@ test("Test 20: native MCP tool calls render server/tool headers", () => {
 });
 
 for (const { name, pattern, label } of [
-  { name: "find", pattern: "*.ts", label: "FIND" },
-  { name: "grep", pattern: "needle", label: "GREP" },
+  { name: "find", pattern: "*.ts", label: "Find" },
+  { name: "grep", pattern: "needle", label: "Grep" },
 ]) {
-  test(`workspace tool ${name} uses its shared uppercase renderer`, () => {
+  test(`workspace tool ${name} uses its shared compact renderer`, () => {
     const definition = getCustomToolDefinition(name, process.cwd());
     assert.ok(definition?.renderCall);
     const component = definition.renderCall({ pattern, path: "." }, testTheme as never, { cwd: process.cwd(), expanded: false } as never);
     assert.ok(component);
     const output = component.render(80).join("\n");
-    assert.ok(output.includes(`+ ${label}`), output);
+    assert.ok(output.includes(`● ${label}(`), output);
     assert.ok(output.includes(pattern), output);
     assert.doesNotMatch(output, /MCP\(/);
   });
