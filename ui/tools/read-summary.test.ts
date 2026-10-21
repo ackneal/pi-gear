@@ -13,6 +13,8 @@ test("read summaries count file lines rather than continuation notices", () => {
   } as unknown as ExtensionAPI, "/workspace");
   const twelve = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n");
   const cases = [
+    { name: "empty file", text: "", expected: 0 },
+    { name: "blank lines are content", text: "\n", expected: 2 },
     { name: "plain content", text: twelve, expected: 12 },
     { name: "user limit footer", text: `${twelve}\n\n[202 more lines in file. Use offset=13 to continue.]`, expected: 12 },
     { name: "actual trailing blank line", text: "first\n\n\n[2 more lines in file. Use offset=3 to continue.]", expected: 2 },

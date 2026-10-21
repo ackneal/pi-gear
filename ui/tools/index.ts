@@ -110,7 +110,7 @@ function readLineCount(result: AnyResult, text: string): number {
   const outputLines = result.details?.truncation?.outputLines;
   if (typeof outputLines === "number") return outputLines;
   const content = text.replace(/\n\n\[\d+ more lines? in file\. Use offset=\d+ to continue\.\]$/, "");
-  return content.split("\n").length;
+  return content === "" ? 0 : content.split("\n").length;
 }
 
 function headerText(status: ToolStatus, label: string, target: string, theme: Theme): string {
