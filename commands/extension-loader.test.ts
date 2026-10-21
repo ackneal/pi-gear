@@ -34,6 +34,7 @@ for (const { profile, extension, expectedServers } of [
       assert.equal(runtime.tools.has("researcher"), false);
       assert.equal(runtime.tools.has("worker"), false);
       assert.equal(runtime.tools.has("reviewer"), false);
+      assert.equal(runtime.tools.has("request_command"), false);
       for (const loaded of result.extensions) {
         if (loaded.path !== entry) assert.equal(loaded.handlers.size, 0);
       }
@@ -46,14 +47,22 @@ for (const { profile, extension, expectedServers } of [
 }
 
 test("Pi's extension loader loads gear with its package aliases", async () => {
-  const root = fileURLToPath(new URL("../", import.meta.url));
-  const entry = fileURLToPath(new URL("../index.ts", import.meta.url));
-  const loaderUrl = new URL("./core/extensions/loader.js", import.meta.resolve("@earendil-works/pi-coding-agent"));
-  const { loadExtensions } = await import(loaderUrl.href);
-  const result = await loadExtensions([entry], root);
+  const previous = process.env.PI_GEAR_CHILD;
+  delete process.env.PI_GEAR_CHILD;
+  try {
+    const root = fileURLToPath(new URL("../", import.meta.url));
+    const entry = fileURLToPath(new URL("../index.ts", import.meta.url));
+    const loaderUrl = new URL("./core/extensions/loader.js", import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const { loadExtensions } = await import(loaderUrl.href);
+    const result = await loadExtensions([entry], root);
 
-  assert.deepEqual(result.errors, []);
-  assert.equal(result.extensions.length, 1);
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.extensions.length, 1);
+    assert.equal(result.extensions[0].tools.has("request_command"), true);
+  } finally {
+    if (previous === undefined) delete process.env.PI_GEAR_CHILD;
+    else process.env.PI_GEAR_CHILD = previous;
+  }
 });
 
 test("Pi's extension loader registers researcher native MCP servers", async () => {
