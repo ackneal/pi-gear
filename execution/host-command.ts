@@ -15,8 +15,8 @@ const MAX_TIMEOUT_SECONDS = 2_147_483_647 / 1000;
 
 export const requestCommandParameters = Type.Object(
   {
-    command: Type.String({ description: "Shell command for the user to review and run on the host." }),
-    reason: Type.Optional(Type.String({ description: "Why this command needs to run on the host environment." })),
+    command: Type.String({ description: "Shell command to execute after the user reviews and authorizes it." }),
+    reason: Type.Optional(Type.String({ description: "What the command does and why user authorization is needed." })),
     timeout: Type.Optional(Type.Number({
       description: "Timeout in seconds (optional, no default timeout).",
       exclusiveMinimum: 0,
@@ -62,9 +62,12 @@ export function setupHostCommand(pi: ExtensionAPI, options: HostCommandOptions =
     name: REQUEST_COMMAND_TOOL_NAME,
     label: "Command",
     description:
-      "Request interactive user approval to run a shell command directly on the host environment outside the sandbox.",
+      "Request approval to run a shell command on the host. The user can approve, edit, or cancel; approved commands return execution output.",
     promptSnippet:
-      "Request user confirmation to run a command on the host when sandbox restrictions block a necessary operation.",
+      "Request user authorization for shell commands instead of asking the user to run them manually.",
+    promptGuidelines: [
+      "Use request_command when a command requires user authorization. State why approval is needed; never bypass a user denial or policy restriction.",
+    ],
     exposure: "model-only",
     parameters: requestCommandParameters,
     renderShell: "self",
