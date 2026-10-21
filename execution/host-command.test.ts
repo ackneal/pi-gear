@@ -116,7 +116,7 @@ test("request_command approval, editing, cancellation, and UI requirement", asyn
   for (const row of cases) {
     const executedCalls: Array<{ cwd: string; input: { command: string; timeout?: number } }> = [];
     const selectCalls: Array<{ title: string; options: string[]; timeout: number | undefined }> = [];
-    const editorCalls: Array<{ title: string; prefill: string | undefined }> = [];
+    let editorCalls = 0;
 
     const { tool } = createRegisteredHostTool({
       createBashTool: ((cwd: string) => ({
@@ -137,13 +137,14 @@ test("request_command approval, editing, cancellation, and UI requirement", asyn
     const ctx = {
       cwd: "/workspace/project",
       hasUI: row.hasUI,
+      mode: "tui",
       ui: {
         select: async (title: string, options: string[], opts?: { timeout?: number }) => {
           selectCalls.push({ title, options, timeout: opts?.timeout });
           return row.choice;
         },
-        editor: async (title: string, prefill?: string) => {
-          editorCalls.push({ title, prefill });
+        custom: async () => {
+          editorCalls++;
           return row.edited;
         },
       },
@@ -175,11 +176,7 @@ test("request_command approval, editing, cancellation, and UI requirement", asyn
       assert.equal(selectCalls.length, 0, row.name);
     }
 
-    if (row.choice === "Edit" && row.hasUI) {
-      assert.deepEqual(editorCalls, [{ title: "Edit command", prefill: row.params.command }], row.name);
-    } else {
-      assert.equal(editorCalls.length, 0, row.name);
-    }
+    assert.equal(editorCalls, row.choice === "Edit" && row.hasUI ? 1 : 0, row.name);
   }
 });
 
@@ -216,8 +213,8 @@ test("request_command serializes prompts through confirmationQueue and respects 
     })) as never,
   });
 
-  assert.equal(handlers.session_start, undefined);
-  assert.equal(handlers.session_shutdown, undefined);
+  assert.equal(typeof handlers.session_start, "function");
+  assert.equal(typeof handlers.session_shutdown, "function");
 
   const ctx = {
     cwd: "/workspace",
@@ -327,7 +324,7 @@ test("request_command lifecycle preserves edited command, native output and real
         },
       })) as never,
     });
-    const ctx = { cwd: "/workspace", hasUI: true, ui: { select: async () => "Edit", editor: async () => " edited " } } as unknown as ExtensionToolContext;
+    const ctx = { cwd: "/workspace", hasUI: true, mode: "tui", ui: { select: async () => "Edit", custom: async () => " edited " } } as unknown as ExtensionToolContext;
     const result = await tool.execute("id", { command: "original" }, undefined, (value) => updates.push(value), ctx);
     assert.deepEqual(updates.map((value) => value.details.status), ["Waiting approval", "Running", "Running"]);
     assert.equal(result.details.command, "edited");
@@ -369,7 +366,7 @@ test("request_command preserves edited command and error metadata for restored r
         throw new Error(aborted ? "Command aborted" : "Command timed out after 1 seconds");
       },
     })) as never });
-    const ctx = { cwd: "/workspace", hasUI: true, ui: { select: async () => "Edit", editor: async () => "edited" } } as unknown as ExtensionToolContext;
+    const ctx = { cwd: "/workspace", hasUI: true, mode: "tui", ui: { select: async () => "Edit", custom: async () => "edited" } } as unknown as ExtensionToolContext;
     const result = await tool.execute("id", { command: "original" }, controller.signal, undefined, ctx);
     assert.equal(result.isError, true);
     assert.equal(result.details.command, "edited");
@@ -395,9 +392,9 @@ test("request_command never executes when aborted before or during approval or w
       async execute() { executed = true; return { content: [], details: undefined }; },
     })) as never });
     if (stage === "before") controller.abort();
-    const ctx = { cwd: "/workspace", hasUI: true, ui: {
+    const ctx = { cwd: "/workspace", hasUI: true, mode: "tui", ui: {
       select: async () => { prompted = true; if (stage === "approval") controller.abort(); return stage === "editor" ? "Edit" : "Run"; },
-      editor: async () => { controller.abort(); return "edited"; },
+      custom: async () => { controller.abort(); return "edited"; },
     } } as unknown as ExtensionToolContext;
     const pending = tool.execute("id", { command: "original" }, controller.signal, (value) => updates.push(value), ctx);
     const cancelled = pending.then((result) => {

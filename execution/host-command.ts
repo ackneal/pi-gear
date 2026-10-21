@@ -1,5 +1,6 @@
 import {
   createBashToolDefinition,
+  ExtensionEditorComponent,
   type BashToolDetails,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
@@ -10,11 +11,17 @@ import { CONFIRMATION_TIMEOUT_MS, ConfirmationQueue } from "./confirmation-queue
 
 export const REQUEST_COMMAND_TOOL_NAME = "request_command";
 
+const MAX_TIMEOUT_SECONDS = 2_147_483_647 / 1000;
+
 export const requestCommandParameters = Type.Object(
   {
     command: Type.String({ description: "Shell command for the user to review and run on the host." }),
     reason: Type.Optional(Type.String({ description: "Why this command needs to run on the host environment." })),
-    timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional)." })),
+    timeout: Type.Optional(Type.Number({
+      description: "Timeout in seconds (optional, no default timeout).",
+      exclusiveMinimum: 0,
+      maximum: MAX_TIMEOUT_SECONDS,
+    })),
   },
   { additionalProperties: false },
 );
@@ -40,13 +47,16 @@ export function setupHostCommand(pi: ExtensionAPI, options: HostCommandOptions =
     label: "Command",
   });
 
-  if (ownsQueue) {
-    const resetQueue = (): void => {
-      confirmationQueue.reset();
-    };
-    pi.on("session_start", resetQueue);
-    pi.on("session_shutdown", resetQueue);
-  }
+  let session = new AbortController();
+  const endSession = (): void => {
+    session.abort();
+    if (ownsQueue) confirmationQueue.reset();
+  };
+  pi.on("session_start", () => {
+    endSession();
+    session = new AbortController();
+  });
+  pi.on("session_shutdown", endSession);
 
   pi.registerTool<typeof requestCommandParameters, CommandDetails>({
     name: REQUEST_COMMAND_TOOL_NAME,
@@ -86,42 +96,65 @@ export function setupHostCommand(pi: ExtensionAPI, options: HostCommandOptions =
         throw new Error("Host command execution requires interactive UI confirmation.");
       }
 
+      const cwd = ctx.cwd;
+      const executionSignal = signal ? AbortSignal.any([signal, session.signal]) : session.signal;
       let command = params.command;
       const publish = (status: CommandDetails["status"]): void => {
         onUpdate?.({ content: [], details: { command, status } });
       };
       const checkAbort = (): void => {
-        if (signal?.aborted) {
+        if (executionSignal.aborted) {
           publish("Cancelled");
           throw new Error("Command aborted before execution.");
         }
       };
 
       try {
+        if (params.timeout !== undefined && (!Number.isFinite(params.timeout) || params.timeout <= 0 || params.timeout > MAX_TIMEOUT_SECONDS)) {
+          throw new Error(`Invalid timeout: must be a finite number of seconds greater than 0 and at most ${MAX_TIMEOUT_SECONDS}`);
+        }
         checkAbort();
         publish("Waiting approval");
         const reason = params.reason?.trim();
-        const directory = ctx.cwd !== process.cwd() ? ctx.cwd : undefined;
+        const directory = cwd !== process.cwd() ? cwd : undefined;
         const promptTitle = ["Run command?", reason, [directory, `$ ${command}`].filter(Boolean).join("\n")].filter(Boolean).join("\n\n");
 
-        const approved = await confirmationQueue.confirm(async () => {
+        const approved = await confirmationQueue.confirm(async (approvalSignal) => {
           checkAbort();
           const choice = await ctx.ui.select(
             promptTitle,
             ["Run", "Edit", "Cancel"],
-            { timeout: CONFIRMATION_TIMEOUT_MS },
+            { timeout: CONFIRMATION_TIMEOUT_MS, signal: approvalSignal },
           );
           checkAbort();
           if (choice === "Run") return true;
           if (choice === "Edit") {
-            const edited = await ctx.ui.editor("Edit command", command);
+            // The RPC editor cannot be dismissed on abort or session changes.
+            if (ctx.mode !== "tui") throw new Error("Editing commands requires terminal UI. Request a revised command instead.");
+            const edited = await ctx.ui.custom<string | undefined>((tui, _theme, keybindings, done) => {
+              const abort = (): void => done(undefined);
+              const editor = new ExtensionEditorComponent(tui, keybindings, "Edit command", command, done, abort);
+              const handleInput = editor.handleInput.bind(editor);
+              editor.handleInput = (data) => {
+                if (keybindings.matches(data, "app.editor.external")) {
+                  ctx.ui.notify("External editors are unavailable during command approval.", "warning");
+                  return;
+                }
+                handleInput(data);
+              };
+              approvalSignal.addEventListener("abort", abort, { once: true });
+              if (approvalSignal.aborted) abort();
+              return Object.assign(editor, {
+                dispose: () => approvalSignal.removeEventListener("abort", abort),
+              });
+            });
             checkAbort();
             if (edited === undefined || edited.trim() === "") return false;
             command = edited.trim();
             return true;
           }
           return false;
-        });
+        }, executionSignal);
 
         checkAbort();
         if (!approved) {
@@ -132,21 +165,21 @@ export function setupHostCommand(pi: ExtensionAPI, options: HostCommandOptions =
           };
         }
 
-        const hostBash = createBashTool(ctx.cwd);
+        const hostBash = createBashTool(cwd);
         publish("Running");
         checkAbort();
         const result = await hostBash.execute(
           toolCallId,
           { command, ...(params.timeout !== undefined ? { timeout: params.timeout } : {}) },
-          signal,
+          executionSignal,
           (update) => onUpdate?.({ ...update, details: { ...update.details, command, status: "Running" } }),
-          ctx,
+          { ...ctx, cwd },
         );
         return { ...result, details: { ...result.details, command, status: result.isError ? "Failed" : "Completed" } };
       } catch (error) {
         return {
           content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
-          details: { command, status: signal?.aborted ? "Cancelled" : "Failed" },
+          details: { command, status: executionSignal.aborted ? "Cancelled" : "Failed" },
           isError: true,
         };
       }

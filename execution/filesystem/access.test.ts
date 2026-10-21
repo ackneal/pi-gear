@@ -72,10 +72,13 @@ test("filesystem requests notify approval and denial without changing authorizat
       const result = await access.request(outside, "read", "read", ctx);
 
       assert.deepEqual(result, { ...authorization, decision });
+      const options = confirmations[0]?.[2] as { timeout: number; signal: AbortSignal };
+      assert.ok(options.signal instanceof AbortSignal);
+      assert.equal(options.signal.aborted, false);
       assert.deepEqual(confirmations, [[
         "Outside workspace access",
         `Allow read access to ${authorization.path}?`,
-        { timeout: CONFIRMATION_TIMEOUT_MS },
+        { timeout: CONFIRMATION_TIMEOUT_MS, signal: options.signal },
       ]]);
       assert.deepEqual(notifications, [[
         `User ${status} outside-workspace access: read ${authorization.path}`,

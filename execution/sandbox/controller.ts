@@ -83,10 +83,10 @@ export class SandboxController {
     let approvals: SessionApprovals;
     approvals = new SessionApprovals({
       hasUI: ctx.hasUI,
-      confirm: (title, message) => this.confirmationQueue.confirm(() => ctx.ui.confirm(
+      confirm: (title, message) => this.confirmationQueue.confirm((signal) => ctx.ui.confirm(
         title,
         message,
-        { timeout: CONFIRMATION_TIMEOUT_MS },
+        { timeout: CONFIRMATION_TIMEOUT_MS, signal },
       )),
       notify: (message, level) => ctx.ui.notify(message, level),
     }, () => this.generation === generation && this.approvals === approvals);

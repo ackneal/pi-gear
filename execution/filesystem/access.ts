@@ -87,17 +87,18 @@ export class FilesystemAccess {
     operation: FilesystemOperation,
     label: string,
     ctx: ExtensionContext,
+    signal?: AbortSignal,
   ): Promise<FilesystemAuthorization> {
     const authorization = await this.authorize(path, operation);
     if (authorization.decision !== "ask") return authorization;
     if (await this.withinRuntimeTemp(authorization)) return { ...authorization, decision: "allow" };
     if (!ctx.hasUI) return authorization;
 
-    const allowed = await this.confirmationQueue.confirm(() => ctx.ui.confirm(
+    const allowed = await this.confirmationQueue.confirm((signal) => ctx.ui.confirm(
       "Outside workspace access",
       `Allow ${label} access to ${authorization.path}?`,
-      { timeout: CONFIRMATION_TIMEOUT_MS },
-    ));
+      { timeout: CONFIRMATION_TIMEOUT_MS, signal },
+    ), signal);
 
     ctx.ui.notify(
       `User ${allowed ? "approved" : "denied"} outside-workspace access: ${label} ${authorization.path}`,
