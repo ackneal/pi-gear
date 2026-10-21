@@ -106,6 +106,13 @@ function readRange(args: Record<string, unknown>): string {
   return limit === undefined ? `:${start}` : `:${start}-${start + limit - 1}`;
 }
 
+function readLineCount(result: AnyResult, text: string): number {
+  const outputLines = result.details?.truncation?.outputLines;
+  if (typeof outputLines === "number") return outputLines;
+  const content = text.replace(/\n\n\[\d+ more lines? in file\. Use offset=\d+ to continue\.\]$/, "");
+  return content.split("\n").length;
+}
+
 function headerText(status: ToolStatus, label: string, target: string, theme: Theme): string {
   return titleLine(status, titleCase(label), target, theme);
 }
@@ -314,7 +321,7 @@ function fileResult(kind: "read" | "edit" | "write", base: AnyDefinition) {
         return indentDetails(base.renderResult(result, options, theme, { ...context, lastComponent } as never), true);
       }
       const images = result.content.filter((item) => item.type === "image").length;
-      return summary(images > 0 ? count(images, "image") : count(text.split("\n").length, "line"), theme);
+      return summary(images > 0 ? count(images, "image") : count(readLineCount(result, text), "line"), theme);
     }
 
     if (kind === "edit") {
