@@ -520,6 +520,5 @@ export function getCustomToolDefinition(name: string, cwd: string = process.cwd(
 }
 
 export function setupFileToolUi(pi: ExtensionAPI): void {
-  configureOutputPadding(pi);
   pi.on("session_start", (_event, ctx) => registerFileToolUi(pi, ctx.cwd));
 }

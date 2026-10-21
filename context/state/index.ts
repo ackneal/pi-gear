@@ -135,8 +135,6 @@ export function formatTaskState(state: TaskState | undefined): string {
 }
 
 export function setupTaskState(pi: ExtensionAPI): void {
-  configureOutputPadding(pi);
-
   let state: TaskState | undefined;
   const widget = new PlanWidgetController();
   const reconstruct = (ctx: ExtensionContext): void => {
@@ -171,7 +169,10 @@ export function setupTaskState(pi: ExtensionAPI): void {
     }
   };
 
-  pi.on("session_start", (_event, ctx) => reconstruct(ctx));
+  pi.on("session_start", (_event, ctx) => {
+    configureOutputPadding(pi);
+    reconstruct(ctx);
+  });
   pi.on("session_tree", (_event, ctx) => reconstruct(ctx));
   pi.on("session_compact", (_event, ctx) => {
     // Compaction may remove the latest task_state tool result from the branch;

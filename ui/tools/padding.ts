@@ -1,11 +1,12 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
 
-let settings: (() => { outputPad?: number }) | undefined;
+let outputPad = 1;
 const padded = new WeakSet<Component>();
 
 export function configureOutputPadding(pi: Pick<ExtensionAPI, "getSettings">): void {
-  settings = () => pi.getSettings();
+  // Old transcript components can still render after the extension API expires.
+  outputPad = pi.getSettings().outputPad === 0 ? 0 : 1;
 }
 
 /** Keep the native component identity/type available to lastComponent consumers. */
@@ -15,7 +16,7 @@ export function padOutput<T extends Component>(component: T): T {
   const render = component.render.bind(component);
   component.render = (width) => {
     const available = Math.max(0, Math.floor(width));
-    const pad = Math.min(settings?.().outputPad === 0 ? 0 : 1, Math.max(0, Math.floor((available - 1) / 2)));
+    const pad = Math.min(outputPad, Math.max(0, Math.floor((available - 1) / 2)));
     const inner = Math.max(1, available - pad * 2);
     return render(inner).map((line) => truncateToWidth(" ".repeat(pad) + line, Math.max(0, available - pad), ""));
   };

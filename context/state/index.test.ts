@@ -370,6 +370,7 @@ function createHarness() {
   let branch: any[] = [];
 
   const pi: ExtensionAPI = {
+    getSettings: () => ({ outputPad: 1 }),
     on(event: string, handler: any) {
       if (event === "session_start") sessionStart = handler;
       if (event === "session_tree") sessionTree = handler;
