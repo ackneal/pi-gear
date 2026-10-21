@@ -3,7 +3,7 @@ import test from "node:test";
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { researcherProfile } from "../../subagents/agents/researcher/index.ts";
 import type { SubagentRun } from "../../subagents/runtime/types.ts";
-import { clearSubagentRegistry, formatDetailContent, getSubagentEntry, recordSubagentLiveStart, recordSubagentLiveUpdate } from "./detail/index.ts";
+import { clearSubagentRegistry, getSubagentEntry, recordSubagentLiveStart, recordSubagentLiveUpdate } from "./registry.ts";
 import { SubagentResultComponent } from "./component.ts";
 import { renderSubagentResult } from "./renderer.ts";
 import type { Theme } from "./format.ts";
@@ -17,7 +17,7 @@ function rendered(component: { render(width: number): string[] }): string {
 test("asynchronous transcript component follows live registry updates through completion", () => {
   clearSubagentRegistry();
   const initial: SubagentRun = { status: "running", startedAt: Date.now(), items: [] };
-  recordSubagentLiveStart("async-call", researcherProfile, "Inspect", initial);
+  recordSubagentLiveStart("async-call", "Inspect", initial);
   let invalidations = 0;
 
   const component = renderSubagentResult(
@@ -61,8 +61,8 @@ const historyCases = [
   },
 ];
 
-for (const { name, fields, expectedItems } of historyCases) {
-  test(`history hydration preserves details and safely formats ${name}`, (t) => {
+for (const { name, fields } of historyCases) {
+  test(`history rendering preserves details and safely formats ${name}`, (t) => {
     clearSubagentRegistry();
     t.after(() => clearSubagentRegistry());
     const details = { status: "success", startedAt: 1, result: "Done", ...fields } as unknown as SubagentRun;
@@ -79,11 +79,8 @@ for (const { name, fields, expectedItems } of historyCases) {
     assert.ok(component instanceof SubagentResultComponent);
     t.after(() => component.dispose());
 
-    const entry = getSubagentEntry(toolCallId);
-    assert.ok(entry, "history should be registered");
-    assert.doesNotThrow(() => formatDetailContent(entry, theme, 80));
-    assert.ok(Array.isArray(entry.run.items), "hydrated items must always be an array");
-    assert.deepEqual(entry.run.items, expectedItems);
+    assert.equal(getSubagentEntry(toolCallId), undefined);
+    assert.doesNotThrow(() => component.render(80));
     assert.deepEqual(details, originalDetails);
   });
 }
@@ -125,7 +122,7 @@ test("task headers and expanded results follow render options", (t) => {
     if (expanded) {
       assert.ok(!output.includes("question:"));
       assert.ok(!output.includes("Result:"));
-      assert.match(output, /files\s*\n\s*\n\s*Final detail/);
+      assert.match(output, /files[\s\S]*Activity[\s\S]*Read · success\s*\n\s*\n\s*Final detail/);
     }
     assert.equal(output.includes("Run failed"), Boolean(error));
   }
@@ -167,4 +164,32 @@ test("expanded arguments and answer wrap completely with inner indentation", (t)
       assert.equal(output.replace(/\s/g, "").includes(task.replace(/\s/g, "")), true);
     }
   }
+});
+
+test("cleared running history renders interrupted without recreating a live subscription", (t) => {
+  clearSubagentRegistry();
+  t.after(clearSubagentRegistry);
+  const details = {
+    runId: "old-run", status: "running", startedAt: 1,
+    items: [{ kind: "tool", name: "read", status: "running" }],
+  } as SubagentRun & { runId: string };
+  const result = { content: [], details } as AgentToolResult<SubagentRun>;
+  const original = structuredClone(result);
+  recordSubagentLiveStart("history", "Inspect", details);
+  clearSubagentRegistry();
+  let invalidations = 0;
+  const component = renderSubagentResult(researcherProfile, result,
+    { isPartial: false, expanded: true }, theme,
+    { toolCallId: "history", args: { task: "Inspect" }, invalidate() { invalidations++; } });
+  t.after(() => (component as SubagentResultComponent).dispose());
+  assert.match(rendered(component), /Read · interrupted/);
+  assert.equal(getSubagentEntry("history"), undefined);
+  recordSubagentLiveUpdate("history", { ...details, status: "success" });
+  assert.equal(getSubagentEntry("history"), undefined);
+  // A new explicit start must not notify a historical view.
+  recordSubagentLiveStart("history", "New task", details);
+  recordSubagentLiveUpdate("history", { ...details, status: "success" });
+  assert.equal(invalidations, 0);
+  assert.match(rendered(component), /Read · interrupted/);
+  assert.deepEqual(result, original);
 });

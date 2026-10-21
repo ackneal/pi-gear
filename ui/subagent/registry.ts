@@ -1,11 +1,8 @@
-import type { SubagentProfile, SubagentRun } from "../../../subagents/runtime/types.ts";
+import type { SubagentRun } from "../../subagents/runtime/types.ts";
 
 export interface SubagentViewEntry {
-  toolCallId: string;
   task: string;
-  profile: SubagentProfile;
   run: SubagentRun;
-  updatedAt: number;
 }
 
 const MAX_REGISTRY_ENTRIES = 50;
@@ -28,13 +25,13 @@ function evictIfNeeded(): void {
 }
 
 /** Starts a new live run. This is the only operation which affects retention order. */
-export function recordSubagentLiveStart(toolCallId: string, profile: SubagentProfile, task: string, initialRun?: SubagentRun): void {
+export function recordSubagentLiveStart(toolCallId: string, task: string, initialRun?: SubagentRun): void {
   if (!toolCallId) return;
   const now = Date.now();
   if (!registry.has(toolCallId)) evictIfNeeded();
   const existing = registry.get(toolCallId);
   const run = initialRun ?? existing?.run ?? { status: "running", startedAt: now, items: [] };
-  registry.set(toolCallId, { toolCallId, task, profile, run, updatedAt: now });
+  registry.set(toolCallId, { task, run });
   notify(toolCallId, run);
 }
 
@@ -43,19 +40,10 @@ export function recordSubagentLiveUpdate(toolCallId: string, run: SubagentRun): 
   const entry = registry.get(toolCallId);
   if (!entry) return;
   entry.run = run;
-  entry.updatedAt = Date.now();
   notify(toolCallId, run);
 }
 
-/** Adds transcript history without moving or replacing an existing entry. */
-export function hydrateSubagentHistory(toolCallId: string, profile: SubagentProfile, task: string, run: SubagentRun): void {
-  if (!toolCallId || !task || registry.has(toolCallId)) return;
-  evictIfNeeded();
-  registry.set(toolCallId, { toolCallId, profile, task, run, updatedAt: Date.now() });
-}
-
 export const getSubagentEntry = (toolCallId: string): SubagentViewEntry | undefined => toolCallId ? registry.get(toolCallId) : undefined;
-export const getAllSubagentEntries = (): SubagentViewEntry[] => Array.from(registry.values());
 
 export function subscribeSubagent(toolCallId: string, listener: (run: SubagentRun) => void): () => void {
   if (!toolCallId) return () => {};

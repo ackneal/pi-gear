@@ -1,12 +1,11 @@
-import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { resolve } from "node:path";
 import { Type } from "typebox";
 import {
-  openSubagentDetailOverlay,
   recordSubagentLiveStart,
   recordSubagentLiveUpdate,
-} from "../ui/subagent/detail/index.ts";
+} from "../ui/subagent/registry.ts";
 import { renderSubagentCall, renderSubagentResult } from "../ui/subagent/renderer.ts";
 import {
   formatResearcherInput,
@@ -39,7 +38,6 @@ import { setupSubagentSettings, type SubagentSettings } from "./settings.ts";
 
 export interface SubagentServices {
   settings: SubagentSettings;
-  inspect(ctx: ExtensionContext, toolCallId?: string): Promise<void>;
 }
 
 function backgroundResult(snapshot: BackgroundSnapshot): AgentToolResult<SubagentRun> {
@@ -73,7 +71,7 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
     async execute(toolCallId, { question, scope }, signal, _onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
       const task = formatResearcherInput({ question, scope });
       const dispatch = settings.resolve("researcher", ctx);
-      if (toolCallId) recordSubagentLiveStart(toolCallId, researcherProfile, task);
+      if (toolCallId) recordSubagentLiveStart(toolCallId, task);
 
       return backgroundResult(background.start({
         profile: researcherProfile,
@@ -89,7 +87,8 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
             ...(endpoint ? { env: { PI_GEAR_FFF_SOCKET: endpoint } } : {}),
             signal: childSignal,
             onUpdate: (next) => {
-              if (update(next)) recordUpdate(toolCallId, next);
+              update(next);
+              recordUpdate(toolCallId, next);
             },
           });
         },
@@ -110,7 +109,7 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
     async execute(toolCallId, { task: requestedTask, targetFiles, findings, verification }, signal, _onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
       const task = formatWorkerInput({ task: requestedTask, targetFiles, findings, verification });
       const dispatch = settings.resolve("worker", ctx);
-      if (toolCallId) recordSubagentLiveStart(toolCallId, workerProfile, task);
+      if (toolCallId) recordSubagentLiveStart(toolCallId, task);
 
       return backgroundResult(background.start({
         profile: workerProfile,
@@ -129,7 +128,8 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
             ...(endpoint ? { env: { PI_GEAR_FFF_SOCKET: endpoint } } : {}),
             signal: childSignal,
             onUpdate: (next) => {
-              if (update(next)) recordUpdate(toolCallId, next);
+              update(next);
+              recordUpdate(toolCallId, next);
             },
           });
         },
@@ -150,7 +150,7 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
     async execute(toolCallId, { scope, context, skills }, signal, _onUpdate, ctx): Promise<AgentToolResult<SubagentRun>> {
       const task = formatReviewerInput({ scope, context, skills });
       const dispatch = settings.resolve("reviewer", ctx);
-      if (toolCallId) recordSubagentLiveStart(toolCallId, reviewerProfile, task);
+      if (toolCallId) recordSubagentLiveStart(toolCallId, task);
 
       return backgroundResult(background.start({
         profile: reviewerProfile,
@@ -166,7 +166,8 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
             ...(endpoint ? { env: { PI_GEAR_FFF_SOCKET: endpoint } } : {}),
             signal: childSignal,
             onUpdate: (next) => {
-              if (update(next)) recordUpdate(toolCallId, next);
+              update(next);
+              recordUpdate(toolCallId, next);
             },
           });
         },
@@ -209,5 +210,5 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
     renderShell: "self",
   });
 
-  return { settings, inspect: (ctx, toolCallId) => openSubagentDetailOverlay(ctx, toolCallId) };
+  return { settings };
 }

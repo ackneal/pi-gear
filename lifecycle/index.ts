@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { clearSubagentRegistry } from "../ui/subagent/detail/registry.ts";
+import { clearSubagentRegistry } from "../ui/subagent/registry.ts";
 import { setupLoopGuard } from "./loop.ts";
 import { FffSidecar } from "./fff.ts";
 import type { FffClient } from "./fff-client.ts";
