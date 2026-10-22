@@ -7,7 +7,6 @@ import type { WorkspaceServices } from "../workspace/setup.ts";
 
 export const GEAR_COMMANDS = {
   doctor: "gear:doctor",
-  subagentInspect: "gear:subagent-inspect",
   subagentModel: "gear:subagent-model",
 } as const;
 
@@ -19,13 +18,6 @@ export interface GearCommandServices {
 }
 
 export function setupCommands(pi: ExtensionAPI, services: GearCommandServices): void {
-  pi.registerCommand(GEAR_COMMANDS.subagentInspect, {
-    description: "Inspect subagent detail panels",
-    handler: async (args, ctx) => {
-      await services.subagents.inspect(ctx, args.trim() || undefined);
-    },
-  });
-
   pi.registerCommand(GEAR_COMMANDS.subagentModel, {
     description: "Set the persistent model and thinking default for a subagent",
     handler: (args, ctx) => services.subagents.settings.configure(args, ctx),

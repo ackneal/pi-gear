@@ -1,9 +1,11 @@
+import { expandedActivity } from "./activity.ts";
+import { padOutput } from "../tools/padding.ts";
 import type { AgentToolResult, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import type { SubagentProfile, SubagentRun } from "../../subagents/runtime/types.ts";
+import type { SubagentRun } from "../../subagents/runtime/types.ts";
 import { SubagentResultComponent } from "./component.ts";
-import { getSubagentEntry, hydrateSubagentHistory, subscribeSubagent } from "./detail/index.ts";
-import { collapsed, type SubagentRendererProfile, type Theme } from "./format.ts";
+import { getSubagentEntry, subscribeSubagent } from "./registry.ts";
+import { collapsed, expandedDetails, type SubagentRendererProfile, type Theme } from "./format.ts";
 
 type ToolRenderContext = {
   invalidate: () => void;
@@ -32,31 +34,28 @@ export function renderSubagentResult(
     ? { ...result.details, items: [] }
     : result.details;
 
-  if (context.toolCallId && details && context.args) {
-    const primary = context.args.question ?? context.args.task ?? context.args.scope;
-    const task = typeof primary === "string" && primary.trim()
-      ? primary
-      : JSON.stringify(context.args);
-    hydrateSubagentHistory(
-      context.toolCallId,
-      profile as unknown as SubagentProfile,
-      task,
-      details,
-    );
-  }
-
-  const format = (run: SubagentRun | undefined, _currentOptions: ToolRenderResultOptions, icon?: string) =>
-    collapsed(run, profile, theme, icon);
+  const primary = context.args?.question ?? context.args?.task ?? context.args?.scope;
+  const task = typeof primary === "string" ? primary : context.toolCallId ? getSubagentEntry(context.toolCallId)?.task : undefined;
+  const format = (run: SubagentRun | undefined, currentOptions: ToolRenderResultOptions, icon?: string, width = 10000) =>
+    currentOptions.expanded
+      ? collapsed(run, profile, theme, icon, Date.now(), undefined, false).split("\n")[0] +
+        (task ? `\n${task.split("\n").map((line) => theme.fg("muted", line)).join("\n")}` : "") + expandedActivity(run, theme, width) + expandedDetails(run, theme)
+      : collapsed(run, profile, theme, icon, Date.now(), task);
   const component =
     context.lastComponent instanceof SubagentResultComponent
       ? context.lastComponent
       : new SubagentResultComponent(context.invalidate, format);
   const runId = (details as SubagentRun & { runId?: string } | undefined)?.runId;
-  const liveToolCallId = runId && context.toolCallId;
-  const run = liveToolCallId ? getSubagentEntry(liveToolCallId)?.run ?? details : details;
+  const liveEntry = runId && context.toolCallId ? getSubagentEntry(context.toolCallId) : undefined;
+  const liveToolCallId = liveEntry ? context.toolCallId : undefined;
+  const run = liveEntry?.run ?? (
+    !options.isPartial && runId && details?.status === "running"
+      ? { ...details, status: "aborted" as const }
+      : details
+  );
   component.update(run, options, format);
   if (liveToolCallId && run?.status === "running") {
     component.bindLive(liveToolCallId, (listener) => subscribeSubagent(liveToolCallId, listener));
   }
-  return component;
+  return padOutput(component);
 }

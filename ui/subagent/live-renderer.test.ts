@@ -3,7 +3,7 @@ import test from "node:test";
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { researcherProfile } from "../../subagents/agents/researcher/index.ts";
 import type { SubagentRun } from "../../subagents/runtime/types.ts";
-import { clearSubagentRegistry, formatDetailContent, getSubagentEntry, recordSubagentLiveStart, recordSubagentLiveUpdate } from "./detail/index.ts";
+import { clearSubagentRegistry, getSubagentEntry, recordSubagentLiveStart, recordSubagentLiveUpdate } from "./registry.ts";
 import { SubagentResultComponent } from "./component.ts";
 import { renderSubagentResult } from "./renderer.ts";
 import type { Theme } from "./format.ts";
@@ -17,7 +17,7 @@ function rendered(component: { render(width: number): string[] }): string {
 test("asynchronous transcript component follows live registry updates through completion", () => {
   clearSubagentRegistry();
   const initial: SubagentRun = { status: "running", startedAt: Date.now(), items: [] };
-  recordSubagentLiveStart("async-call", researcherProfile, "Inspect", initial);
+  recordSubagentLiveStart("async-call", "Inspect", initial);
   let invalidations = 0;
 
   const component = renderSubagentResult(
@@ -61,8 +61,8 @@ const historyCases = [
   },
 ];
 
-for (const { name, fields, expectedItems } of historyCases) {
-  test(`history hydration preserves details and safely formats ${name}`, (t) => {
+for (const { name, fields } of historyCases) {
+  test(`history rendering preserves details and safely formats ${name}`, (t) => {
     clearSubagentRegistry();
     t.after(() => clearSubagentRegistry());
     const details = { status: "success", startedAt: 1, result: "Done", ...fields } as unknown as SubagentRun;
@@ -79,11 +79,8 @@ for (const { name, fields, expectedItems } of historyCases) {
     assert.ok(component instanceof SubagentResultComponent);
     t.after(() => component.dispose());
 
-    const entry = getSubagentEntry(toolCallId);
-    assert.ok(entry, "history should be registered");
-    assert.doesNotThrow(() => formatDetailContent(entry, theme, 80));
-    assert.ok(Array.isArray(entry.run.items), "hydrated items must always be an array");
-    assert.deepEqual(entry.run.items, expectedItems);
+    assert.equal(getSubagentEntry(toolCallId), undefined);
+    assert.doesNotThrow(() => component.render(80));
     assert.deepEqual(details, originalDetails);
   });
 }
@@ -101,4 +98,98 @@ test("partial transcript rendering remains driven by normal partial results", ()
   assert.match(rendered(component), /Checking/);
   assert.ok(component instanceof SubagentResultComponent);
   component.dispose();
+});
+
+test("task headers and expanded results follow render options", (t) => {
+  for (const { expanded, status, error } of [
+    { expanded: false, status: "success", error: undefined },
+    { expanded: true, status: "success", error: undefined },
+    { expanded: true, status: "error", error: "Run failed" },
+  ] as const) {
+    const run: SubagentRun = {
+      status, ...(error ? { error } : {}), startedAt: 0, finishedAt: 1000,
+      items: [{ kind: "tool", name: "read", status: "success", result: "Tool detail" }],
+      result: "Final detail",
+    };
+    const component = renderSubagentResult(researcherProfile,
+      { content: [], details: run }, { isPartial: false, expanded }, theme,
+      { args: { question: "Inspect\n files" }, invalidate: () => {} });
+    t.after(() => (component as SubagentResultComponent).dispose());
+    const output = rendered(component);
+    assert.match(output, expanded ? /Agent\(researcher\)/ : /Agent\(researcher: Inspect files\)/);
+    assert.equal(output.includes("Tool detail"), false);
+    assert.equal(output.includes("Final detail"), expanded);
+    if (expanded) {
+      assert.ok(!output.includes("question:"));
+      assert.ok(!output.includes("Result:"));
+      assert.match(output, /files[\s\S]*Activity[\s\S]*Read · success\s*\n\s*\n\s*Final detail/);
+    }
+    assert.equal(output.includes("Run failed"), Boolean(error));
+  }
+});
+
+test("expanded task and answer use distinct theme roles", (t) => {
+  const colors: Array<{ color: string; text: string }> = [];
+  const previewTheme: Theme = {
+    fg: (color, text) => { colors.push({ color, text }); return text; },
+    bold: (text) => text,
+  };
+  const component = renderSubagentResult(researcherProfile,
+    { content: [], details: { status: "success", startedAt: 0, items: [], result: "Unique answer" } },
+    { expanded: true, isPartial: false }, previewTheme,
+    { args: { task: "Unique request" }, invalidate() {} });
+  t.after(() => (component as SubagentResultComponent).dispose());
+  const output = rendered(component);
+  assert.ok(colors.some(({ color, text }) => color === "muted" && text === "Unique request"));
+  assert.ok(colors.some(({ color, text }) => color === "text" && text === "Unique answer"));
+  assert.equal(output.split("Unique answer").length - 1, 1);
+});
+
+test("expanded arguments and answer wrap completely with inner indentation", (t) => {
+  for (const key of ["question", "task", "scope"]) {
+    for (const width of [24, 60]) {
+      const task = `${"original scope ".repeat(80)}\nTAIL_${key}`;
+      const run: SubagentRun = { status: "success", startedAt: 1, items: [{ kind: "thinking", text: "PRIVATE_ACTIVITY" }], result: `${"returned answer ".repeat(30)}\nANSWER_TAIL` };
+      const component = renderSubagentResult(researcherProfile, { content: [], details: run },
+        { isPartial: false, expanded: true }, theme, { args: { [key]: task }, invalidate() {} });
+      t.after(() => (component as SubagentResultComponent).dispose());
+      const lines = component.render(width);
+      const output = lines.join("\n");
+      assert.ok(output.includes(`TAIL_${key}`));
+      assert.ok(output.includes("ANSWER_TAIL"));
+      assert.ok(!output.includes("PRIVATE_ACTIVITY"));
+      assert.ok(!output.includes("…"));
+      assert.ok(lines.every((line) => line.length <= width));
+      assert.ok(lines.slice(1).every((line) => line.startsWith("   ")));
+      assert.equal(output.replace(/\s/g, "").includes(task.replace(/\s/g, "")), true);
+    }
+  }
+});
+
+test("cleared running history renders interrupted without recreating a live subscription", (t) => {
+  clearSubagentRegistry();
+  t.after(clearSubagentRegistry);
+  const details = {
+    runId: "old-run", status: "running", startedAt: 1,
+    items: [{ kind: "tool", name: "read", status: "running" }],
+  } as SubagentRun & { runId: string };
+  const result = { content: [], details } as AgentToolResult<SubagentRun>;
+  const original = structuredClone(result);
+  recordSubagentLiveStart("history", "Inspect", details);
+  clearSubagentRegistry();
+  let invalidations = 0;
+  const component = renderSubagentResult(researcherProfile, result,
+    { isPartial: false, expanded: true }, theme,
+    { toolCallId: "history", args: { task: "Inspect" }, invalidate() { invalidations++; } });
+  t.after(() => (component as SubagentResultComponent).dispose());
+  assert.match(rendered(component), /Read · interrupted/);
+  assert.equal(getSubagentEntry("history"), undefined);
+  recordSubagentLiveUpdate("history", { ...details, status: "success" });
+  assert.equal(getSubagentEntry("history"), undefined);
+  // A new explicit start must not notify a historical view.
+  recordSubagentLiveStart("history", "New task", details);
+  recordSubagentLiveUpdate("history", { ...details, status: "success" });
+  assert.equal(invalidations, 0);
+  assert.match(rendered(component), /Read · interrupted/);
+  assert.deepEqual(result, original);
 });

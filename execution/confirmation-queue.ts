@@ -2,29 +2,47 @@ export const CONFIRMATION_TIMEOUT_MS = 30_000;
 
 export class ConfirmationQueue {
   private tail: Promise<void> = Promise.resolve();
-  private generation = 0;
+  private session = new AbortController();
 
   reset(): void {
-    this.generation++;
+    const previous = this.session;
+    this.session = new AbortController();
+    previous.abort();
   }
 
-  async confirm(show: () => Promise<boolean>): Promise<boolean> {
-    const generation = this.generation;
-    const previous = this.tail;
-    let release!: () => void;
-    this.tail = new Promise<void>((resolve) => { release = resolve; });
+  confirm(show: (signal: AbortSignal) => Promise<boolean>, signal?: AbortSignal): Promise<boolean> {
+    const session = this.session.signal;
+    if (session.aborted || signal?.aborted) return Promise.resolve(false);
 
-    await previous.catch(() => undefined);
-    if (generation !== this.generation) {
-      release();
-      return false;
-    }
+    const controller = new AbortController();
+    let resolve!: (allowed: boolean) => void;
+    let reject!: (error: unknown) => void;
+    const result = new Promise<boolean>((accept, fail) => { resolve = accept; reject = fail; });
+    const cleanup = () => {
+      session.removeEventListener("abort", abort);
+      signal?.removeEventListener("abort", abort);
+    };
+    const abort = () => {
+      cleanup();
+      resolve(false);
+      controller.abort();
+    };
+    session.addEventListener("abort", abort, { once: true });
+    signal?.addEventListener("abort", abort, { once: true });
 
-    try {
-      const allowed = await show();
-      return generation === this.generation && allowed;
-    } finally {
-      release();
-    }
+    // Cancellation completes the request, not UI ownership. An editor without
+    // cancellation must settle before another callback may use the UI.
+    this.tail = this.tail.then(async () => {
+      try {
+        if (controller.signal.aborted) return;
+        const allowed = await show(controller.signal);
+        resolve(!controller.signal.aborted && allowed);
+      } catch (error) {
+        reject(error);
+      } finally {
+        cleanup();
+      }
+    });
+    return result;
   }
 }

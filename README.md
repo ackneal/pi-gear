@@ -144,7 +144,7 @@ Each extension may belong to only one server. `languageIds` must map every confi
 ## Commands and tools
 
 - **`/gear:doctor`** — reports sandbox state (enabled and available, enabled but unavailable, or disabled by configuration), filesystem/network behavior, subagent settings, and LSP availability.
-- **`/gear:subagent-inspect`** — inspects recorded subagent runs.
+- **`/gear:plan`** — shows the current task plan without starting a model turn.
 - **`/gear:subagent-model`** — sets persistent model and thinking defaults in `~/.pi/agent/pi-gear/runtime.json`.
 - **`task_state`** — manages a goal, outcome steps, constraints, and decision-relevant findings.
 - **`diagnostics`** — returns LSP diagnostics for changed files or the workspace.
@@ -153,7 +153,7 @@ Each extension may belong to only one server. `languageIds` must map every confi
 - **`worker`** — delegates bounded implementation work to a child process.
 - **`reviewer`** — delegates focused read-only code review to a child process.
 
-Mouse-wheel scrolling in subagent detail overlays requires `pi --tui-mode fullscreen`; regular mode scrolls the terminal's main transcript instead.
+Expanded Agent results show the task, all retained tool-call summaries, and then the answer. Activity omits raw tool output and thinking. Older activity is marked when the runtime retention limit drops entries.
 
 Successful Pi `edit` and `write` calls synchronize matching LSP files and report new or changed diagnostics automatically.
 

@@ -9,6 +9,7 @@ export interface SubagentRun {
   finishedAt?: number;
   lastActivityAt?: number;
   items: SubagentItem[];
+  itemsTruncated?: boolean;
   dispatch?: SubagentDispatch;
   result?: string;
   modelError?: string;

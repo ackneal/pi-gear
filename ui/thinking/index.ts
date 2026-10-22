@@ -1,16 +1,11 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /** Static label shown instead of thinking content when thinking blocks are hidden. */
-export const HIDDEN_THINKING_LABEL = "+ Thought";
+export const HIDDEN_THINKING_LABEL = "✦ Thought";
 
-/** Rewrites assistant thinking blocks: strips a leading "thinking:" prefix and normalizes the ✦ bullet. */
+/** Remove an explicit leading label without changing the Markdown body. */
 export function formatThinking(markdown: string): string {
-  const text = markdown.replace(/^\s*(?:thinking\s*:\s*)+/i, "").trim();
-  if (!text) return text;
-  return text.split(/\n{2,}/).map((block) => {
-    const value = block.replace(/^\s*(?:✦\s*)+/, "").trim();
-    return value ? `✦ ${value}` : "";
-  }).join("\n\n");
+  return markdown.replace(/^\s*(?:thinking[\t ]*:[\t ]*)+/i, "");
 }
 
 export function setupThinkingDisplay(pi: ExtensionAPI): void {

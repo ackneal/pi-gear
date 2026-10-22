@@ -1,12 +1,13 @@
+import { configureOutputPadding, indentDetails, paddedRenderer } from "./padding.ts";
 import {
   createBashToolDefinition,
   createEditToolDefinition,
   createReadToolDefinition,
   createWriteToolDefinition,
   getLanguageFromPath,
+  getMarkdownTheme,
+  keyText,
   highlightCode,
-  keyHint,
-  truncateToVisualLines,
   renderDiff,
   type AgentToolResult,
   type ExtensionAPI,
@@ -14,13 +15,13 @@ import {
   type ToolDefinition,
   type ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { homedir } from "node:os";
 import { stripVTControlCharacters } from "node:util";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
-import { Container, Spacer, Text, getCapabilities, getImageDimensions, imageFallback, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { Box, Markdown, Container, Spacer, Text, getCapabilities, getImageDimensions, imageFallback, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
 import type { NormalizedDiagnostic, SourceLocation } from "../../lsp/types.ts";
-
-const LABEL_WIDTH = 16;
+import { statusMark, summaryLine, titleCase, titleLine, toolStatus, type ToolStatus } from "./row.ts";
 
 type AnyDefinition = ToolDefinition<any, any, any>;
 type AnyContext = {
@@ -39,7 +40,7 @@ type AnyContext = {
 };
 type AnyResult = AgentToolResult<any>;
 
-type TextMode = "compact" | "detail" | "raw";
+type TextMode = "compact" | "detail";
 type TextBlock = { value: string; mode: TextMode; truncatedHint: string | undefined };
 
 class CompactText {
@@ -55,29 +56,16 @@ class CompactText {
     ];
     return component;
   }
-  static headerAndLines(header: string, raw: string, headerHint?: string): CompactText {
-    const component = new CompactText("");
-    component.blocks = [
-      { value: header, mode: "compact", truncatedHint: headerHint },
-      { value: raw, mode: "raw", truncatedHint: undefined },
-    ];
-    return component;
-  }
   render(width: number): string[] {
     const lineWidth = Math.max(1, width);
     return this.blocks.flatMap(({ value, mode, truncatedHint }) => {
       if (!value.trim()) return [];
-      // Raw: keep each original line intact (段行), but bound width so a runaway
-      // line can't exceed the terminal and crash the renderer.
-      if (mode === "raw") {
-        return value.split("\n").map((line) => truncateToWidth(line, lineWidth, "…"));
-      }
       return value.split("\n").flatMap((line) =>
         mode === "compact"
           ? truncateOneLine(line, lineWidth, truncatedHint)
           : line === ""
             ? [""]
-            : wrapTextWithAnsi(line, lineWidth),
+            : wrapTextWithAnsi(line, Math.max(1, lineWidth - 2)).map((part) => " ".repeat(Math.min(2, Math.max(0, lineWidth - 1))) + part),
       );
     });
   }
@@ -90,6 +78,7 @@ function truncateOneLine(line: string, lineWidth: number, hint?: string): string
   // room for it so the marker stays visible instead of being cut off.
   if (!hint) return [truncateToWidth(line, lineWidth, "…")];
   const hintWidth = visibleWidth(hint);
+  if (hintWidth >= lineWidth) return [truncateToWidth(line, lineWidth, "…")];
   return [truncateToWidth(line, Math.max(1, lineWidth - hintWidth), "…") + hint];
 }
 
@@ -117,13 +106,34 @@ function readRange(args: Record<string, unknown>): string {
   return limit === undefined ? `:${start}` : `:${start}-${start + limit - 1}`;
 }
 
-function headerText(marker: "+" | "-" | "✓", label: string, target: string, theme: Theme): string {
-  const markerColor = marker === "✓" ? "success" : "muted";
-  return `${theme.fg(markerColor, marker)} ${theme.fg("toolTitle", theme.bold(label.padEnd(LABEL_WIDTH)))}${theme.fg("text", target)}`;
+function readLineCount(result: AnyResult, text: string): number {
+  const outputLines = result.details?.truncation?.outputLines;
+  if (typeof outputLines === "number") return outputLines;
+  const content = text.replace(/\n\n\[\d+ more lines? in file\. Use offset=\d+ to continue\.\]$/, "");
+  return content === "" ? 0 : content.split("\n").length;
 }
 
-function header(marker: "+" | "-" | "✓", label: string, target: string, theme: Theme): CompactText {
-  return new CompactText(headerText(marker, label, target, theme));
+function headerText(status: ToolStatus, label: string, target: string, theme: Theme): string {
+  return titleLine(status, titleCase(label), target, theme);
+}
+
+function header(status: ToolStatus, label: string, target: string, theme: Theme): CompactText {
+  return new CompactText(headerText(status, label, target, theme));
+}
+
+function summary(text: string, theme: Theme, color: "muted" | "error" = "muted"): CompactText {
+  return new CompactText(summaryLine(text, theme, color));
+}
+
+function outputLines(text: string): string[] {
+  return stripVTControlCharacters(text).split(/\r\n|[\r\n]/).map((line) => line.trim()).filter(Boolean);
+}
+
+/** Collapsed errors keep one line; the full message stays available when expanded. */
+function errorResult(text: string, options: ToolRenderResultOptions, theme: Theme): CompactText {
+  if (!text.trim()) return empty();
+  if (options.expanded) return new CompactText(theme.fg("error", text), "detail");
+  return summary(outputLines(text)[0] ?? "", theme, "error");
 }
 
 function parseArgsObject(rawArgs: unknown): Record<string, unknown> {
@@ -137,11 +147,35 @@ function parseArgsObject(rawArgs: unknown): Record<string, unknown> {
   return {};
 }
 
+function skillPath(args: Record<string, unknown>): string | undefined {
+  const path = args.file_path ?? args.path ?? args.filepath;
+  return typeof path === "string" && basename(path) === "SKILL.md" ? path : undefined;
+}
+
+function skillBox(component: Component, theme: Theme, previous?: unknown): Box {
+  const box = previous instanceof Box ? previous : new Box(1, 0);
+  box.setBgFn((text) => theme.bg("customMessageBg", text));
+  box.clear();
+  box.addChild(component);
+  return box;
+}
+
 function fileCall(label: string) {
   return (rawArgs: unknown, theme: Theme, context: AnyContext) => {
     const args = parseArgsObject(rawArgs ?? context?.args);
+    const skill = label === "READ" ? skillPath(args) : undefined;
+    if (skill) {
+      const status = toolStatus(context);
+      const state = status === "success" ? "" : `${statusMark(status, theme)} `;
+      const label = theme.fg("customMessageLabel", theme.bold("[skill]"));
+      const name = state + theme.fg("customMessageText", `${basename(dirname(skill))}${readRange(args)}`);
+      const expandedStatus = state || readRange(args) ? ` ${name}` : "";
+      return skillBox(new Text(
+        "\n" + label + (context.expanded ? expandedStatus : ` ${name}${theme.fg("dim", ` (${keyText("app.tools.expand")} to expand)`)}\n`), 0, 0,
+      ), theme, context.lastComponent);
+    }
     const suffix = label === "READ" ? readRange(args) : "";
-    return header(context.expanded ? "-" : "+", label, ` ${displayPath(args.file_path ?? args.path ?? args.filepath, context.cwd)}${suffix}`, theme);
+    return header(toolStatus(context), label, `${displayPath(args.file_path ?? args.path ?? args.filepath, context.cwd)}${suffix}`, theme);
   };
 }
 
@@ -178,43 +212,38 @@ function lspCall(kind: "diagnostics" | "navigation") {
   return (rawArgs: unknown, theme: Theme, context: AnyContext) => {
     const label = kind === "diagnostics" ? "DIAGNOSTICS" : navigationLabel(rawArgs ?? context.args);
     if (!context.isPartial && !context.isError) return empty();
-    return header(context.expanded ? "-" : "+", label, "", theme);
+    return header(toolStatus(context), label, "", theme);
   };
 }
 
 function diagnosticsResult(result: AnyResult, options: ToolRenderResultOptions, theme: Theme, context: AnyContext) {
-  if (context.isError) {
-    const text = textResult(result);
-    return text ? new CompactText(theme.fg("error", text), "detail") : empty();
-  }
+  if (context.isError) return errorResult(textResult(result), options, theme);
 
   const diagnostics = Array.isArray(result.details?.diagnostics)
     ? result.details.diagnostics as NormalizedDiagnostic[]
     : [];
   const qualifier = parseArgsObject(context.args).scope === "workspace" ? "workspace" : "";
-  if (diagnostics.length === 0) return header("✓", "DIAGNOSTICS", qualifier ? ` ${qualifier}` : "", theme);
+  const title = headerText(toolStatus(context), "DIAGNOSTICS", qualifier, theme);
+  if (diagnostics.length === 0) return new CompactText(`${title}\n${summaryLine("no issues", theme)}`);
 
-  const summary = [qualifier, diagnosticsSummary(diagnostics)].filter(Boolean).join(" ");
-  const title = headerText(options.expanded ? "-" : "+", "DIAGNOSTICS", ` ${summary}`, theme);
-  if (!options.expanded) return new CompactText(title);
-  return CompactText.headerAndDetail(title, `\n${diagnostics.map(diagnosticLine).join("\n")}`);
+  const head = `${title}\n${summaryLine(diagnosticsSummary(diagnostics), theme)}`;
+  if (!options.expanded) return new CompactText(head);
+  return CompactText.headerAndDetail(head, `\n${diagnostics.map(diagnosticLine).join("\n")}`);
 }
 
 function navigationResult(result: AnyResult, options: ToolRenderResultOptions, theme: Theme, context: AnyContext) {
-  if (context.isError) {
-    const text = textResult(result);
-    return text ? new CompactText(theme.fg("error", text), "detail") : empty();
-  }
+  if (context.isError) return errorResult(textResult(result), options, theme);
 
   const label = navigationLabel(context.args);
   const locations = Array.isArray(result.details?.locations)
     ? result.details.locations as SourceLocation[]
     : [];
+  const status = headerText(toolStatus(context), label, "", theme);
   if (locations.length === 0) {
-    return header("✓", label, label === "DEFINITION" ? " no result" : " no results", theme);
+    return new CompactText(`${status}\n${summaryLine(label === "DEFINITION" ? "no result" : "no results", theme)}`);
   }
 
-  const title = headerText(options.expanded ? "-" : "+", label, ` ${count(locations.length, "location")}`, theme);
+  const title = `${status}\n${summaryLine(count(locations.length, "location"), theme)}`;
   if (!options.expanded) return new CompactText(title);
   const lines = locations.map(({ path, line, column }) => `${path}:${line}:${column}`).join("\n");
   return CompactText.headerAndDetail(title, `\n${lines}`);
@@ -229,53 +258,89 @@ function workspaceCall(kind: WorkspaceToolKind) {
     const path = displayPath(args.path ?? ".", context.cwd);
     const query = clean(args.pattern);
     const target = [path === "." ? undefined : path, query || undefined].filter(Boolean).join(" · ");
-    return header(context.expanded ? "-" : "+", label, target ? ` ${target}` : "", theme);
+    return header(toolStatus(context), label, target, theme);
   };
 }
 
-function workspaceResult(kind: WorkspaceToolKind) {
+function workspaceResult() {
   return (result: AnyResult, options: ToolRenderResultOptions, theme: Theme, context: AnyContext) => {
     const text = textResult(result);
-    if (context.isError) return text ? new CompactText(theme.fg("error", text), "detail") : empty();
-
-    if (!options.expanded || !text) return empty();
+    if (context.isError) return errorResult(text, options, theme);
+    if (!text) return empty();
+    if (!options.expanded) return summary(count(outputLines(text).length, "result"), theme);
     return new CompactText(theme.fg("toolOutput", `\n${text}`), "detail");
   };
 }
 
-export function workspaceToolRenderers(kind: WorkspaceToolKind): Pick<AnyDefinition, "renderShell" | "renderCall" | "renderResult"> {
-  return {
-    renderShell: "default",
-    renderCall: workspaceCall(kind),
-    renderResult: workspaceResult(kind),
-  };
+export function workspaceToolRenderers(
+  kind: WorkspaceToolKind,
+): Pick<AnyDefinition, "renderShell" | "renderCall" | "renderResult"> {
+  const callFn = workspaceCall(kind);
+  const resultFn = workspaceResult();
+
+  return { renderShell: "self", renderCall: paddedRenderer(callFn), renderResult: paddedRenderer(resultFn) };
 }
 
-export function lspToolRenderers(kind: "diagnostics" | "navigation"): Pick<AnyDefinition, "renderShell" | "renderCall" | "renderResult"> {
-  return {
-    renderShell: "default",
-    renderCall: lspCall(kind),
-    renderResult: kind === "diagnostics" ? diagnosticsResult : navigationResult,
-  };
+export function lspToolRenderers(
+  kind: "diagnostics" | "navigation",
+): Pick<AnyDefinition, "renderShell" | "renderCall" | "renderResult"> {
+  const callFn = lspCall(kind);
+  const resultFn = kind === "diagnostics" ? diagnosticsResult : navigationResult;
+
+  return { renderShell: "self", renderCall: paddedRenderer(callFn), renderResult: paddedRenderer(resultFn) };
 }
 
 function fileResult(kind: "read" | "edit" | "write", base: AnyDefinition) {
   return (result: AnyResult, options: ToolRenderResultOptions, theme: Theme, context: AnyContext) => {
-    if (kind === "read" && base.renderResult) {
-      return base.renderResult(result, options, theme, context as never);
+    const text = textResult(result);
+    if (context.isError) return errorResult(text, options, theme);
+
+    if (kind === "read") {
+      const args = parseArgsObject(context.args);
+      if (skillPath(args) && result.content.every((item) => item.type === "text")) {
+        if (!options.expanded) {
+          return result.details?.truncation?.truncated || /\[(?:Showing|Output truncated|\d+ more lines? in file\.)/.test(text)
+            ? summary("Partial skill · expand to view read limits", theme)
+            : empty();
+        }
+        const startsAtBeginning = args.offset == null || args.offset === 1;
+        const content = startsAtBeginning ? text.replace(/^---\r?\n(?:.*\r?\n)*?---(?:\r?\n|$)/, "") : text;
+        const path = skillPath(args)!;
+        const name = basename(dirname(path));
+        const expandedPath = path.startsWith("~/") ? resolve(homedir(), path.slice(2)) : path;
+        const directory = isAbsolute(expandedPath) ? dirname(expandedPath) : resolve(context.cwd, dirname(expandedPath));
+        const body = new Container();
+        body.addChild(new Markdown(`**${name}**\n\nReferences are relative to ${directory}.\n\n${content}`, 0, 0, getMarkdownTheme(), {
+          color: (value) => theme.fg("customMessageText", value),
+        }));
+        body.addChild(new Spacer(1));
+        return skillBox(body, theme, context.lastComponent);
+      }
+      if (options.expanded && base.renderResult) {
+        const lastComponent = context.lastComponent instanceof Text ? context.lastComponent : undefined;
+        return indentDetails(base.renderResult(result, options, theme, { ...context, lastComponent } as never), true);
+      }
+      const images = result.content.filter((item) => item.type === "image").length;
+      return summary(images > 0 ? count(images, "image") : count(readLineCount(result, text), "line"), theme);
     }
 
-    const text = textResult(result);
     if (kind === "edit") {
-      if (context.isError) return new CompactText(theme.fg("error", text), "detail");
-      if (!options.expanded || typeof result.details?.diff !== "string") return empty();
+      if (typeof result.details?.diff !== "string") return empty();
+      if (!options.expanded) return summary(diffStat(result.details.diff), theme);
       return new CompactText(renderDiff(result.details.diff, { filePath: displayPath((context.args as Record<string, unknown>).path, context.cwd) }), "detail");
     }
 
-    return context.isError && text
-      ? new CompactText(theme.fg("error", text), "detail")
-      : empty();
+    const content = parseArgsObject(context.args).content;
+    if (options.expanded || typeof content !== "string") return empty();
+    return summary(`Wrote ${count(content.split("\n").length, "line")}`, theme);
   };
+}
+
+function diffStat(diff: string): string {
+  const lines = diff.split("\n");
+  const added = lines.filter((line) => line.startsWith("+") && !line.startsWith("+++")).length;
+  const removed = lines.filter((line) => line.startsWith("-") && !line.startsWith("---")).length;
+  return `+${added} −${removed}`;
 }
 
 function formatWriteContent(args: Record<string, unknown>, theme: Theme, context: AnyContext): string {
@@ -293,9 +358,9 @@ function formatWriteContent(args: Record<string, unknown>, theme: Theme, context
 function writeCall(rawArgs: unknown, theme: Theme, context: AnyContext) {
   const args = parseArgsObject(rawArgs ?? context?.args);
   const title = headerText(
-    context.expanded ? "-" : "+",
+    toolStatus(context),
     "WRITE",
-    ` ${displayPath(args.file_path ?? args.path ?? args.filepath, context.cwd)}`,
+    displayPath(args.file_path ?? args.path ?? args.filepath, context.cwd),
     theme,
   );
   if (!context.expanded) return new CompactText(title);
@@ -304,91 +369,121 @@ function writeCall(rawArgs: unknown, theme: Theme, context: AnyContext) {
   return body ? CompactText.headerAndDetail(title, body) : new CompactText(title);
 }
 
-function executionCall(sandbox: boolean) {
+export function executionCall(labelOverride?: string) {
   return (rawArgs: unknown, theme: Theme, context: AnyContext) => {
+    const state = context?.state && typeof context.state === "object"
+      ? (context.state as Record<string, unknown>)
+      : undefined;
+    if (context?.executionStarted && state && state.startedAt === undefined) {
+      state.startedAt = Date.now();
+      state.endedAt = undefined;
+    }
     const args = parseArgsObject(rawArgs ?? context?.args);
-    const command = clean(args.command ?? args.cmd) || "...";
-    const label = sandbox ? "BASH(SANDBOX)" : "BASH";
-    const marker = context.expanded ? "-" : "+";
-    const head =
-      theme.fg("muted", `${marker} `) +
-      theme.fg(sandbox ? "success" : "toolTitle", theme.bold(label.padEnd(LABEL_WIDTH)));
+    const rawCommand = args.command ?? args.cmd;
+    const command = typeof rawCommand === "string" ? stripVTControlCharacters(rawCommand).replace(/\r\n?/g, "\n").replace(/\t/g, "  ") : "...";
+    const label = labelOverride ?? "BASH";
+    const status = toolStatus(context);
     if (!context.expanded) {
       return new CompactText(
-        head + theme.fg("text", ` ${command}`),
+        headerText(status, label, clean(command), theme),
         "compact",
         theme.fg("muted", "(truncated)"),
       );
     }
-    // Expanded: full command as raw line(s) (break only on newlines, no mid-token
-    // wrapping), with a trailing blank separating it from the result.
-    return CompactText.headerAndLines(head, `${theme.fg("text", command)}\n`);
+    return CompactText.headerAndDetail(headerText(status, label, "", theme), theme.fg("text", command));
   };
 }
 
-function executionResult(base: AnyDefinition) {
+export type BaseResultRenderer = {
+  renderResult?: ((result: any, options: ToolRenderResultOptions, theme: Theme, context: any) => Component) | undefined;
+};
+
+export function executionResult(base: BaseResultRenderer) {
   return (result: AnyResult, options: ToolRenderResultOptions, theme: Theme, context: AnyContext) => {
-    if (!options.expanded && !context.isError) return empty();
-    if (!base.renderResult) return empty();
-    return base.renderResult(result, options, theme, context as never);
+    if (!options.isPartial && context.state && typeof context.state === "object") {
+      const state = context.state as Record<string, unknown>;
+      if (state.interval !== undefined) {
+        clearInterval(state.interval as ReturnType<typeof setInterval>);
+        delete state.interval;
+      }
+      state.endedAt ??= Date.now();
+    }
+    if (options.expanded) {
+      return base.renderResult ? indentDetails(base.renderResult(result, options, theme, context as never), true) : empty();
+    }
+
+    // The native shell renderer reuses lastComponent as a Container on expansion.
+    const container = new Container();
+    const last = outputLines(textResult(result)).at(-1);
+    if (last) container.addChild(summary(last, theme, context.isError ? "error" : "muted"));
+    return container;
   };
+}
+
+export function executionToolRenderers(
+  base: BaseResultRenderer,
+  options: { label?: string } = {},
+): Pick<AnyDefinition, "renderShell" | "renderCall" | "renderResult"> {
+  const callFn = executionCall(options.label);
+  const resultFn = executionResult(base);
+
+  return { renderShell: "self", renderCall: paddedRenderer(callFn), renderResult: paddedRenderer(resultFn) };
 }
 
 type FileToolKind = "read" | "edit" | "write";
 
-function createFileToolDefinition(kind: FileToolKind, cwd: string): AnyDefinition {
-  if (kind === "read") {
-    const base = createReadToolDefinition(cwd);
-    return { ...base, renderShell: "default", renderCall: fileCall("READ"), renderResult: fileResult(kind, base) };
-  }
-  if (kind === "edit") {
-    const base = createEditToolDefinition(cwd);
-    return { ...base, renderShell: "default", renderCall: fileCall("EDIT"), renderResult: fileResult(kind, base) };
-  }
+function createFileToolDefinition(
+  kind: FileToolKind,
+  cwd: string,
+): AnyDefinition {
+  const base: AnyDefinition = kind === "read"
+    ? createReadToolDefinition(cwd)
+    : kind === "edit"
+      ? (createEditToolDefinition(cwd) as AnyDefinition)
+      : createWriteToolDefinition(cwd);
+  const callFn = kind === "write" ? writeCall : fileCall(kind.toUpperCase());
+  const resultFn = fileResult(kind, base);
+  const paddedCall = paddedRenderer(callFn);
+  const paddedResult = paddedRenderer(resultFn);
 
-  const base = createWriteToolDefinition(cwd);
-  return { ...base, renderShell: "default", renderCall: writeCall, renderResult: fileResult(kind, base) };
+  return {
+    ...base,
+    renderShell: "self",
+    renderCall: (args, theme, context) => kind === "read" && skillPath(parseArgsObject(args ?? context.args))
+      ? callFn(args, theme, context)
+      : paddedCall(args, theme, context),
+    renderResult: (result, options, theme, context) => kind === "read" && skillPath(parseArgsObject(context.args))
+      ? resultFn(result, options, theme, context)
+      : paddedResult(result, options, theme, context),
+  };
 }
 
-export function registerFileToolUi(pi: ExtensionAPI, cwd: string): void {
+export function registerFileToolUi(
+  pi: ExtensionAPI,
+  cwd: string,
+): void {
+  configureOutputPadding(pi);
   for (const kind of ["read", "edit", "write"] as const) {
     pi.registerTool(createFileToolDefinition(kind, cwd));
   }
 }
 
-function decorateSandboxBash(base: AnyDefinition): AnyDefinition {
+function decorateSandboxBash(
+  base: AnyDefinition,
+): AnyDefinition {
   return {
     ...base,
-    renderShell: "default",
-    renderCall: executionCall(true),
-    renderResult: executionResult(base),
+    ...executionToolRenderers(base),
     name: "bash",
     label: "bash (sandboxed)",
   };
 }
 
-export function createSandboxBashTool(cwd: string, operations: BashOperations): AnyDefinition {
+export function createSandboxBashTool(
+  cwd: string,
+  operations: BashOperations,
+): AnyDefinition {
   return decorateSandboxBash(createBashToolDefinition(cwd, { operations }));
-}
-
-/** Native-style MCP preview, bounded by visual rather than logical lines. */
-class McpPreview {
-  private text: string;
-  private theme: Theme;
-  constructor(text: string, theme: Theme) {
-    this.text = text;
-    this.theme = theme;
-  }
-  render(width: number): string[] {
-    const safeWidth = Math.max(1, width);
-    const { visualLines, skippedCount } = truncateToVisualLines(this.text, 5, safeWidth, 0, "start");
-    if (skippedCount > 0) {
-      const hint = `${this.theme.fg("muted", `... (${skippedCount} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${this.theme.fg("muted", ")")}`;
-      visualLines.push(truncateToWidth(hint, safeWidth, safeWidth < 3 ? "" : "..."));
-    }
-    return visualLines;
-  }
-  invalidate(): void {}
 }
 
 function createMcpDefinition(name: string, cwd: string): AnyDefinition {
@@ -399,12 +494,13 @@ function createMcpDefinition(name: string, cwd: string): AnyDefinition {
     ...base,
     name,
     label,
-    renderShell: "default",
+    renderShell: "self",
     renderCall: (rawArgs: unknown, theme: Theme, context: AnyContext) => {
       const args = rawArgs ?? context.args;
       const entries = args == null ? [] : typeof args === "object" && !Array.isArray(args)
         ? Object.entries(args) : [["args", args]];
-      let text = theme.fg("toolTitle", theme.bold(label));
+      const status = toolStatus(context);
+      let text = titleLine(status, label, "", theme);
       if (entries.length > 0) {
         if (context.expanded) {
           const lines = entries.map(([key, value]) => {
@@ -414,7 +510,7 @@ function createMcpDefinition(name: string, cwd: string): AnyDefinition {
           text += `\n${theme.fg("muted", lines.join("\n"))}`;
         } else {
           const pairs = entries.map(([key, value]) => `${key}=${JSON.stringify(value) ?? String(value)}`).join(" ");
-          text += ` ${theme.fg("muted", pairs.length > 100 ? `${pairs.slice(0, 97)}...` : pairs)}`;
+          text = titleLine(status, label, pairs.length > 100 ? `${pairs.slice(0, 97)}...` : pairs, theme);
         }
       }
       const component = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
@@ -430,7 +526,7 @@ function createMcpDefinition(name: string, cwd: string): AnyDefinition {
           // Node's stripper misses Pi's general OSC strings and colon-separated SGR parameters.
           .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\|\u009c)/g, "")
           .replace(/(?:\x1b\[|\u009b)\d{1,4}(?:[;:]\d{0,4})*m/g, ""))
-          .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\uFFF9-\uFFFB]/g, "").replace(/\r/g, ""))
+          .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\uFFF9-\uFFFB]/g, "").replace(/\r/g, "").replace(/\t/g, "   "))
         .join("\n");
       if (!getCapabilities().images || !context.showImages) {
         const images = result.content.filter((item) => item.type === "image").map((image) =>
@@ -439,16 +535,22 @@ function createMcpDefinition(name: string, cwd: string): AnyDefinition {
       }
       output = output.trim();
       if (!output) return component;
+
+      if (!options.expanded) {
+        const lines = outputLines(output);
+        const text = lines.length > 1 ? `${lines[0]} · ${count(lines.length, "line")}` : lines[0] ?? "";
+        component.addChild(summary(text, theme, context.isError ? "error" : "muted"));
+        if (result.details?.fullOutputPath) {
+          component.addChild(summary(`Full output: ${result.details.fullOutputPath}`, theme));
+        }
+        return component;
+      }
+
       const styled = output.replace(/\t/g, "   ").split("\n")
         .map((line) => theme.fg(context.isError ? "error" : "toolOutput", line)).join("\n");
-      component.addChild(new Spacer(1));
-      if (options.expanded) {
-        component.addChild(new Text(styled, 0, 0));
-      } else {
-        component.addChild(new McpPreview(styled, theme));
-        if (result.details?.fullOutputPath) {
-          component.addChild(new Text(theme.fg("muted", `Full output: ${result.details.fullOutputPath}`), 0, 0));
-        }
+      component.addChild(new Text(styled, 2, 0));
+      if (result.details?.fullOutputPath) {
+        component.addChild(new Text(theme.fg("muted", `Full output: ${result.details.fullOutputPath}`), 2, 0));
       }
       return component;
     },
@@ -466,8 +568,15 @@ export function getCustomToolDefinition(name: string, cwd: string = process.cwd(
     const base: AnyDefinition = createReadToolDefinition(cwd);
     return { ...base, name, ...workspaceToolRenderers(name) };
   }
+  if (name === "diagnostics" || name === "navigation") {
+    const base: AnyDefinition = createReadToolDefinition(cwd);
+    return { ...base, name, ...lspToolRenderers(name) };
+  }
   if (name.startsWith("mcp__")) {
-    return createMcpDefinition(name, cwd);
+    const definition = createMcpDefinition(name, cwd);
+    definition.renderCall = paddedRenderer(definition.renderCall!);
+    definition.renderResult = paddedRenderer(definition.renderResult!);
+    return definition;
   }
   return undefined;
 }

@@ -365,11 +365,18 @@ function createHarness() {
   let agentSettled: ((event: unknown, ctx: ExtensionContext) => void) | undefined;
   let tool: { execute: (...args: any[]) => Promise<any> } | undefined;
   let registered: any;
+  const commands = new Map<string, any>();
+  const renderers = new Map<string, any>();
+  const messages: any[] = [];
   const appended: Array<{ customType: string; data: unknown }> = [];
   const widgetCalls: Array<{ key: string; content: unknown; options: unknown }> = [];
   let branch: any[] = [];
 
   const pi: ExtensionAPI = {
+    getSettings: () => ({ outputPad: 1 }),
+    registerCommand(name: string, command: unknown) { commands.set(name, command); },
+    registerMessageRenderer(name: string, renderer: unknown) { renderers.set(name, renderer); },
+    sendMessage(message: unknown) { messages.push(message); },
     on(event: string, handler: any) {
       if (event === "session_start") sessionStart = handler;
       if (event === "session_tree") sessionTree = handler;
@@ -403,6 +410,9 @@ function createHarness() {
   return {
     pi,
     ctx,
+    commands,
+    renderers,
+    messages,
     get sessionStart() { return sessionStart; },
     get sessionTree() { return sessionTree; },
     get sessionCompact() { return sessionCompact; },
@@ -415,3 +425,53 @@ function createHarness() {
     set branch(val: any[]) { branch = val; },
   };
 }
+
+test("plan command registration and detached snapshots are independent of ambient child mode", async () => {
+  const previous = process.env.PI_GEAR_CHILD;
+  const cases = [
+    { child: false, populated: false },
+    { child: false, populated: true },
+    { child: true, populated: false },
+    { child: true, populated: true },
+  ];
+  try {
+    for (const { child, populated } of cases) {
+      if (child) process.env.PI_GEAR_CHILD = "1";
+      else delete process.env.PI_GEAR_CHILD;
+
+      const harness = createHarness();
+      setupTaskState(harness.pi);
+      harness.sessionStart!({}, harness.ctx);
+      if (populated) await harness.tool!.execute("set", plan, undefined, undefined, harness.ctx);
+      assert.equal(harness.commands.has("gear:plan"), !child);
+      assert.deepEqual(harness.widgetCalls, [{ key: "pi-gear.plan", content: undefined, options: undefined }]);
+      if (child) {
+        assert.deepEqual(harness.messages, []);
+        continue;
+      }
+
+      await harness.commands.get("gear:plan").handler("", harness.ctx);
+      const message = harness.messages[0];
+      const saved = structuredClone(message.details);
+      assert.equal(message.display, true);
+      assert.equal(message.customType, "pi-gear.plan");
+      assert.equal(message.details.state === null, !populated);
+      assert.deepEqual(harness.appended, []);
+
+      const theme = { bg: (_: string, text: string) => text, fg: (_: string, text: string) => text, bold: (text: string) => text };
+      for (const expanded of [false, true]) {
+        const component = harness.renderers.get(message.customType)(message, { expanded }, theme);
+        const before = component.render(100).join("\n");
+        assert.match(before, populated ? (expanded ? /Ship state core/ : /Implement state/) : /\[plan\] Empty/);
+        if (!populated) assert.doesNotMatch(before, /to expand/);
+        await harness.tool!.execute("clear", { action: "clear" }, undefined, undefined, harness.ctx);
+        assert.equal(component.render(100).join("\n"), before);
+        assert.deepEqual(message.details, saved);
+      }
+      assert.deepEqual(harness.widgetCalls, [{ key: "pi-gear.plan", content: undefined, options: undefined }]);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.PI_GEAR_CHILD;
+    else process.env.PI_GEAR_CHILD = previous;
+  }
+});

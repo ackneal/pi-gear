@@ -1,8 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type, type Static, type TProperties } from "typebox";
 import { Value } from "typebox/value";
-import { PlanWidgetController, type PlanUiChange } from "../../ui/plan/controller.ts";
-import { renderCall, renderResult } from "../../ui/plan/renderer.ts";
+import { configureOutputPadding } from "../../ui/tools/padding.ts";
+import { PlanSnapshotComponent, renderCall, renderResult } from "../../ui/plan/renderer.ts";
 import { cloneTaskState, isTaskStateSnapshot, nextPlanStepId, snapshotTaskState } from "./core.ts";
 import {
   TASK_STATE_LIMITS,
@@ -135,7 +135,6 @@ export function formatTaskState(state: TaskState | undefined): string {
 
 export function setupTaskState(pi: ExtensionAPI): void {
   let state: TaskState | undefined;
-  const widget = new PlanWidgetController();
   const reconstruct = (ctx: ExtensionContext): void => {
     state = undefined;
     const branch = ctx.sessionManager.getBranch();
@@ -157,8 +156,6 @@ export function setupTaskState(pi: ExtensionAPI): void {
         break;
       }
     }
-
-    widget.reconstruct(ctx, state);
   };
   const persistIfChanged = (ctx: ExtensionContext): void => {
     const current = snapshotTaskState(state);
@@ -168,7 +165,11 @@ export function setupTaskState(pi: ExtensionAPI): void {
     }
   };
 
-  pi.on("session_start", (_event, ctx) => reconstruct(ctx));
+  pi.on("session_start", (_event, ctx) => {
+    configureOutputPadding(pi);
+    if (ctx.hasUI && ctx.mode === "tui") ctx.ui.setWidget("pi-gear.plan", undefined);
+    reconstruct(ctx);
+  });
   pi.on("session_tree", (_event, ctx) => reconstruct(ctx));
   pi.on("session_compact", (_event, ctx) => {
     // Compaction may remove the latest task_state tool result from the branch;
@@ -182,7 +183,19 @@ export function setupTaskState(pi: ExtensionAPI): void {
     state = undefined;
     persistIfChanged(ctx);
   });
-  pi.on("session_shutdown", (_event, ctx) => widget.shutdown(ctx));
+  pi.registerMessageRenderer<ReturnType<typeof snapshotTaskState>>("pi-gear.plan", (message, options, theme) =>
+    new PlanSnapshotComponent(message.details?.state ?? undefined, options.expanded, theme));
+  if (process.env.PI_GEAR_CHILD !== "1") pi.registerCommand("gear:plan", {
+    description: "Show the current task plan",
+    handler: async () => {
+      pi.sendMessage({
+        customType: "pi-gear.plan",
+        content: "",
+        details: snapshotTaskState(state),
+        display: true,
+      }, { triggerTurn: false });
+    },
+  });
   pi.registerTool({
     name: "task_state",
     label: "Plan",
@@ -191,14 +204,13 @@ export function setupTaskState(pi: ExtensionAPI): void {
     renderCall,
     renderResult,
     renderShell: "self",
-    async execute(_id, rawParams, _signal, _onUpdate, ctx) {
+    async execute(_id, rawParams, _signal, _onUpdate, _ctx) {
       const params = parseTaskStateParams(rawParams);
       if (params === undefined) {
         const reason = describeParamError(rawParams);
         return invalidResult(rawParams, state, reason);
       }
 
-      const previous = cloneTaskState(state);
       const result = applyAction(state, params);
       state = result.state;
 
@@ -216,8 +228,6 @@ export function setupTaskState(pi: ExtensionAPI): void {
           isError: true,
         };
       }
-
-      widget.update(ctx, previous, state, { action: params.action });
 
       return {
         content: [{ type: "text" as const, text: formatSuccess(params.action, result.feedback!, state) }],

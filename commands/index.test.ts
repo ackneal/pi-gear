@@ -112,7 +112,6 @@ test("gear commands are centrally registered and delegate to their services", as
     execution: { sandbox: { status: () => sandboxStatus } },
     lsp: { statuses: async (cwd: string) => { calls.push(`lsp:${cwd}`); return []; } },
     subagents: {
-      inspect: async (_ctx: unknown, id?: string) => { calls.push(`inspect:${id ?? ""}`); },
       settings: {
         configure: async (args: string) => { calls.push(`model:${args}`); },
         resolve: () => ({}),
@@ -126,8 +125,8 @@ test("gear commands are centrally registered and delegate to their services", as
   setupCommands(pi, services);
 
   assert.deepEqual([...commands.keys()].sort(), Object.values(GEAR_COMMANDS).sort());
-  await commands.get(GEAR_COMMANDS.subagentInspect)?.handler(" call-1 ", ctx);
+  assert.equal(commands.has("gear:subagent-inspect"), false);
   await commands.get(GEAR_COMMANDS.subagentModel)?.handler("worker", ctx);
   await commands.get(GEAR_COMMANDS.doctor)?.handler("", ctx);
-  assert.deepEqual(calls, ["inspect:call-1", "model:worker", "lsp:/workspace", "doctor:Sandbox: enabled"]);
+  assert.deepEqual(calls, ["model:worker", "lsp:/workspace", "doctor:Sandbox: enabled"]);
 });

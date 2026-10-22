@@ -1,3 +1,5 @@
+import { configureOutputPadding } from "./padding.ts";
+configureOutputPadding({ getSettings: () => ({ outputPad: 0 }) });
 import assert from "node:assert/strict";
 import test from "node:test";
 import { initTheme } from "@earendil-works/pi-coding-agent";
@@ -19,10 +21,10 @@ function renderer(): Renderer {
 }
 
 for (const { name, args, expanded, expected } of [
-  { name: "empty arguments", args: {}, expanded: false, expected: "exa/web_search_exa" },
-  { name: "collapsed arguments", args: { query: "hello", limit: 3 }, expanded: false, expected: 'exa/web_search_exa query="hello" limit=3' },
-  { name: "expanded arguments", args: { query: "hello\nworld", limit: 3 }, expanded: true, expected: "exa/web_search_exa\n  query: hello\n    world\n  limit: 3" },
-  { name: "truncated arguments", args: { query: "x".repeat(150) }, expanded: false, expected: `exa/web_search_exa ${('query="' + 'x'.repeat(150) + '"').slice(0, 97)}...` },
+  { name: "empty arguments", args: {}, expanded: false, expected: "● exa/web_search_exa" },
+  { name: "collapsed arguments", args: { query: "hello", limit: 3 }, expanded: false, expected: '● exa/web_search_exa(query="hello" limit=3)' },
+  { name: "expanded arguments", args: { query: "hello\nworld", limit: 3 }, expanded: true, expected: "● exa/web_search_exa\n  query: hello\n    world\n  limit: 3" },
+  { name: "truncated arguments", args: { query: "x".repeat(150) }, expanded: false, expected: `● exa/web_search_exa(${('query="' + 'x'.repeat(150) + '"').slice(0, 97)}...)` },
 ]) {
   test(`MCP call uses native formatting: ${name}`, () => {
     const component = renderer().renderCall(args, theme, { expanded });
@@ -41,12 +43,13 @@ for (const { name, text, expanded, width, preview, hidden } of [
       { expanded }, theme, { isError: false, showImages: false },
     );
     const output = component.render(width).map((line) => line.trimEnd()).join("\n");
-    assert.ok(output.includes(preview), output);
-    if (hidden) {
-      assert.ok(output.includes(`... (${hidden} `), output);
-      assert.equal(output.split("\n").filter((line) => line && !line.startsWith("...")).length, 5);
+    if (expanded) {
+      assert.equal(output, text.split("\n").map((line) => `  ${line}`).join("\n"));
     } else {
-      assert.doesNotMatch(output, /more lines/);
+      assert.equal(component.render(width).length, 1);
+      assert.ok(output.startsWith("  └ "), output);
+      if (text.includes("\n")) assert.match(output, /one · 7 lines/);
+      else assert.match(output, /…/);
     }
   });
 }
@@ -92,10 +95,14 @@ for (const { name, texts, expected } of [
           { expanded }, recordingTheme, { isError, showImages: false },
         );
 
-        assert.deepEqual(styledLines, expected ? expected.split("\n").map((text) => ({
-          color: isError ? "error" : "toolOutput", text,
-        })) : []);
-        assert.equal(component.render(120).map((line) => line.trimEnd()).join("\n"), expected ? `\n${expected}` : "");
+        const lines = expected.split("\n").map((line) => line.trim()).filter(Boolean);
+        const preview = lines.length > 1 ? `${lines[0]} · ${lines.length} lines` : lines[0] ?? "";
+        assert.deepEqual(styledLines, !expected ? [] : expanded
+          ? expected.split("\n").map((text) => ({ color: isError ? "error" : "toolOutput", text }))
+          : [{ color: "dim", text: "└" }, { color: isError ? "error" : "muted", text: preview }]);
+        assert.equal(component.render(120).map((line) => line.trimEnd()).join("\n"), !expected ? "" : expanded
+          ? expected.split("\n").map((line) => line ? `  ${line}` : "").join("\n")
+          : `  └ ${preview}`);
       });
     }
   }
@@ -111,7 +118,7 @@ for (const { name, text, expected } of [
         { content: [{ type: "text", text }, { type: "image", data: "", mimeType: "image/png" }], details: {} },
         { expanded }, theme, { isError: false, showImages: false },
       );
-      assert.equal(component.render(120).map((line) => line.trimEnd()).join("\n"), `\n${expected}`);
+      assert.equal(component.render(120).map((line) => line.trimEnd()).join("\n"), expanded ? expected.split("\n").map((line) => `  ${line}`).join("\n") : `  └ ${text ? "caption · 2 lines" : expected}`);
     });
   }
 }

@@ -102,7 +102,13 @@ export function reduceSubagentEvent(
   }
 
   const retainedItems = items.slice(-MAX_RETAINED_ITEMS);
+  const next = {
+    ...run,
+    lastActivityAt: now,
+    items: retainedItems,
+    ...(items.length > MAX_RETAINED_ITEMS ? { itemsTruncated: true } : {}),
+  };
   return event.type === "result"
-    ? { ...run, lastActivityAt: now, items: retainedItems, result: truncateRetainedText(event.text) }
-    : { ...run, lastActivityAt: now, items: retainedItems };
+    ? { ...next, result: truncateRetainedText(event.text) }
+    : next;
 }

@@ -13,7 +13,7 @@ import { setupWorkspace } from "./workspace/setup.ts";
 export default async function gear(pi: ExtensionAPI): Promise<void> {
   const child = process.env.PI_GEAR_CHILD === "1";
   const config = await loadExtensionConfig();
-  const execution = setupExecution(pi, config);
+  const execution = setupExecution(pi, config, { child });
   const lifecycle = setupLifecycle(pi, { child });
   const workspace = setupWorkspace(pi, execution.filesystem, lifecycle.fff);
 

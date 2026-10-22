@@ -1,80 +1,134 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Text } from "@earendil-works/pi-tui";
-import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
+import { keyText, type AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { applyAction, type TaskStateParams } from "../../context/state/index.ts";
 import type { TaskState, TaskStateDetails } from "../../context/state/types.ts";
-import { formatPlanResult, PlanSnapshotComponent, renderResult } from "./renderer.ts";
+import { formatPlanResult, PlanSnapshotComponent, renderCall, renderResult } from "./renderer.ts";
 import { visibleWidth } from "./display.ts";
+import { configureOutputPadding } from "../tools/padding.ts";
 
-const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
-const state = { goal: "Ship the Plan UI", steps: [{ id: 1, outcome: "Build renderer", doneWhen: "Snapshots are readable", status: "done" as const }, { id: 2, outcome: "Test lifecycle", doneWhen: "Timers are deterministic", status: "in_progress" as const }], constraints: [], findings: [] };
+const theme = { bg: (_color: string, text: string) => text, fg: (_color: string, text: string) => text, bold: (text: string) => text };
+const state: TaskState = { goal: "Ship the Plan UI", steps: [{ id: 1, outcome: "Build renderer", doneWhen: "Snapshots are readable", status: "done" }, { id: 2, outcome: "Test lifecycle", doneWhen: "Timers are deterministic", status: "in_progress" }], constraints: ["Keep tool semantics"], findings: ["Snapshot retains all fields"] };
 
 function result(action: string, params: Record<string, unknown>, next: TaskState | null = state, feedback = "Canonical state remains available to the model."): AgentToolResult<TaskStateDetails> {
   return { content: [{ type: "text", text: feedback }], details: { tool: "task_state", action, params, version: 2, state: next } };
 }
 
-test("semantic status actions are silent while structural actions and show snapshot full details state", () => {
-  assert.equal(formatPlanResult(result("advance_step", { id: 2 }), { expanded: false, isPartial: false }, theme), "");
+function normalized(lines: string[]): string {
+  return lines.map((line) => line.trim()).join("\n").trim();
+}
 
-  const revisedOutcome = { ...state, steps: [state.steps[0]!, { ...state.steps[1]!, outcome: "Verify lifecycle" }] };
-  const revisedDoneWhen = { ...state, steps: [state.steps[0]!, { ...state.steps[1]!, doneWhen: "Widget hides" }] };
-  for (const action of ["set_plan", "add_step", "show"]) {
-    assert.match(formatPlanResult(result(action, {}, revisedOutcome), { expanded: false, isPartial: false }, theme), /Verify lifecycle/);
+test("actions render only approved transcript feedback", () => {
+  const cases: TaskStateParams[] = [
+    { action: "set_plan", goal: state.goal, steps: state.steps.map(({ outcome, doneWhen }) => ({ outcome, doneWhen })) },
+    { action: "advance_step", id: 2 },
+    { action: "update_step", id: 2, status: "pending" },
+    { action: "update_step", id: 2, outcome: "Verify lifecycle" },
+    { action: "update_step", id: 2, doneWhen: "Widget hides" },
+    { action: "add_step", outcome: "Ship", doneWhen: "Released" },
+    { action: "add_finding", finding: "Useful finding" },
+    { action: "add_finding", finding: state.findings[0]! },
+    { action: "show" },
+    { action: "clear" },
+  ];
+  for (const params of cases) {
+    const applied = applyAction(state, params);
+    assert.equal(applied.error, undefined, params.action);
+    const response = result(params.action, params, applied.state ?? null, applied.feedback);
+    const component = renderResult(response, { expanded: false, isPartial: false }, theme, {});
+    if (!["set_plan", "show", "add_finding"].includes(params.action) || (params.action === "add_finding" && params.finding === state.findings[0])) {
+      assert.equal(formatPlanResult(response, { expanded: false, isPartial: false }, theme), "");
+      assert.deepEqual(component.render(180), [], params.action);
+      continue;
+    }
+    if (params.action === "add_finding") {
+      assert.equal(normalized(component.render(180)), "[plan] Finding · Useful finding");
+      continue;
+    }
+    assert.ok(component instanceof PlanSnapshotComponent, params.action);
+    assert.match(normalized(component.render(180)), /^\[plan\].*complete.*to expand\)/, params.action);
+    const expanded = renderResult(response, { expanded: true, isPartial: false }, theme, { lastComponent: component });
+    assert.equal(expanded, component);
+    const body = normalized(expanded.render(180));
+    assert.ok(body.includes(applied.state!.goal), params.action);
+    for (const step of applied.state!.steps) {
+      assert.ok(body.includes(`#${step.id} ${step.outcome}`), params.action);
+      assert.ok(body.includes(`Status: ${step.status}`), params.action);
+      assert.ok(body.includes(`Done when: ${step.doneWhen}`), params.action);
+    }
+    for (const value of [...applied.state!.constraints, ...applied.state!.findings]) assert.ok(body.includes(value), params.action);
+    assert.equal(body.includes("Constraints\n"), applied.state!.constraints.length > 0);
+    assert.equal(body.includes("Findings\n"), applied.state!.findings.length > 0);
+    assert.ok(!body.includes("to expand"));
   }
-  const outcomeSnapshot = formatPlanResult(result("update_step", { id: 2, outcome: "Verify lifecycle" }, revisedOutcome), { expanded: false, isPartial: false }, theme);
-  const doneWhenSnapshot = formatPlanResult(result("update_step", { id: 2, doneWhen: "Widget hides" }, revisedDoneWhen), { expanded: true, isPartial: false }, theme);
-  assert.match(outcomeSnapshot, /Verify lifecycle/);
-  assert.doesNotMatch(outcomeSnapshot, /Test lifecycle/);
-  assert.match(doneWhenSnapshot, /Done when: Widget hides/);
-  assert.doesNotMatch(doneWhenSnapshot, /Done when: Timers are deterministic/);
 });
 
-test("snapshot components wrap long CJK steps within the actual render width", () => {
+test("empty, clear, and failed plans share the plan label and sanitize output", () => {
+  const cases = [
+    { response: result("show", {}, null), error: false, expected: "[plan] Empty" },
+    { response: result("clear", {}, null), error: false, expected: "" },
+    { response: { content: [{ type: "text", text: "Useful\t\x1b[31mtext\x1b[0m\u0007\nCanonical state" }] } as AgentToolResult<TaskStateDetails>, error: true, expected: "[plan] ✗ Useful text" },
+  ];
+  for (const row of cases) {
+    const options = { expanded: false, isPartial: false };
+    assert.equal(formatPlanResult(row.response, options, theme, row.error), row.expected);
+    const component = renderResult(row.response, options, theme, { isError: row.error });
+    assert.equal(normalized(component.render(160)), row.expected);
+  }
+});
+
+test("every plan card uses native background and exactly one inset regardless of tool padding", () => {
+  try {
+    for (const outputPad of [0, 1]) {
+      configureOutputPadding({ getSettings: () => ({ outputPad }) } as Parameters<typeof configureOutputPadding>[0]);
+      for (const action of ["show", "add_finding", "error"]) {
+        const painted: string[] = [];
+        const nativeTheme = { ...theme, bg: (token: string, text: string) => { painted.push(token); return text; } };
+        const response = result(action, { finding: "Finding text" });
+        const context = { isError: action === "error" };
+        const component = renderResult(response, { expanded: false, isPartial: false }, nativeTheme, context);
+        const lines = component.render(90);
+        assert.ok(lines.every((line) => visibleWidth(line) === 90));
+        assert.equal(lines[0]!.trim(), "");
+        assert.match(lines[1]!, /^ \[plan\]/);
+        assert.equal(lines.at(-1)!.trim(), "");
+        assert.ok(painted.length > 0 && painted.every((token) => token === "customMessageBg"));
+        assert.equal(renderResult(response, { expanded: true, isPartial: false }, nativeTheme, { ...context, lastComponent: component }), component);
+        for (const width of [0, 1, 2, 12]) assert.ok(component.render(width).every((line) => visibleWidth(line) <= width));
+      }
+    }
+    assert.deepEqual(renderCall({}, theme, {}).render(32), []);
+  } finally {
+    configureOutputPadding({ getSettings: () => ({ outputPad: 1 }) } as Parameters<typeof configureOutputPadding>[0]);
+  }
+});
+
+test("expanded CJK content wraps without losing fields", () => {
   const long = "確認長文字顯示正常並且在非常窄的終端視窗中仍然保持清楚可讀的步驟內容";
-  const component = new PlanSnapshotComponent({ ...state, steps: [{ ...state.steps[0]!, outcome: long }, state.steps[1]!] }, true, theme);
+  const component = new PlanSnapshotComponent({ ...state, steps: [{ ...state.steps[0]!, outcome: long }] }, true, theme);
   const lines = component.render(24);
   assert.ok(lines.every((line) => visibleWidth(line) <= 24));
   assert.match(lines.join("\n"), /✓ #1/);
-  assert.match(lines.join("\n"), /Done when:[\s\S]*Snapshots are[\s\S]*readable/);
+  assert.match(lines.join("\n"), /Done when:[\s\S]*Snapshots[\s\S]*are readable/);
 });
 
-test("changes and errors sanitize terminal controls", () => {
-  const injected = "Useful\n\t\x1b[31mtext\x1b[0m\u0007";
-  assert.equal(formatPlanResult(result("add_finding", { finding: injected }), { expanded: false, isPartial: false }, theme), "✓ Finding · Useful text");
-  const error = formatPlanResult({ content: [{ type: "text", text: "Useful\t\x1b[31mtext\x1b[0m\u0007\nCanonical state" }], details: undefined } as never, { expanded: false, isPartial: false }, theme, true);
-  assert.equal(error, "✗ Plan · Useful text");
+test("findings collapse independently and expand only their text", () => {
+  for (const finding of ["Short", "Evidence ".repeat(40)]) {
+    const response = result("add_finding", { finding });
+    const component = renderResult(response, { expanded: false, isPartial: false }, theme, {});
+    const collapsed = normalized(component.render(90));
+    assert.equal(collapsed.includes("to expand"), finding.length > 90);
+    const expanded = renderResult(response, { expanded: true, isPartial: false }, theme, { lastComponent: component });
+    assert.equal(expanded, component);
+    const body = normalized(expanded.render(90));
+    assert.equal(body.replace(/\s+/g, " "), `[plan] Finding · ${finding.trim()}`);
+    assert.doesNotMatch(body, /Goal|Progress|to expand/);
+  }
 });
 
-test("all seven actions render their authoritative results, including idempotent findings", () => {
-  const snapshot = "Plan · 1/2 complete\n  Steps\n    ✓ #1 Build renderer\n    ● #2 Test lifecycle";
-  const cases: Array<{ name: string; before?: TaskState; params: TaskStateParams; expected: string; snapshot: boolean }> = [
-    { name: "set plan", params: { action: "set_plan", goal: state.goal, steps: state.steps.map(({ outcome, doneWhen }) => ({ outcome, doneWhen })) }, expected: snapshot.replace("1/2", "0/2").replace("✓ #1", "○ #1").replace("● #2", "○ #2"), snapshot: true },
-    { name: "advance is silent", before: state, params: { action: "advance_step", id: 2 }, expected: "", snapshot: false },
-    { name: "status update snapshots", before: state, params: { action: "update_step", id: 2, status: "pending" }, expected: snapshot.replace("● #2", "○ #2"), snapshot: true },
-    { name: "outcome update snapshots", before: state, params: { action: "update_step", id: 2, outcome: "Verify lifecycle" }, expected: snapshot.replace("Test lifecycle", "Verify lifecycle"), snapshot: true },
-    { name: "add step snapshots", before: state, params: { action: "add_step", outcome: "Ship", doneWhen: "Released" }, expected: snapshot.replace("1/2", "1/3") + "\n    ○ #3 Ship", snapshot: true },
-    { name: "new finding", before: state, params: { action: "add_finding", finding: "Useful finding" }, expected: "✓ Finding · Useful finding", snapshot: false },
-    { name: "duplicate finding", before: { ...state, findings: ["Useful finding"] }, params: { action: "add_finding", finding: "Useful finding" }, expected: "✓ Finding already recorded · Useful finding", snapshot: false },
-    { name: "duplicate at capacity", before: { ...state, findings: ["Useful finding", ...Array.from({ length: 9 }, (_, i) => `Finding ${i}`)] }, params: { action: "add_finding", finding: "Useful finding" }, expected: "✓ Finding already recorded · Useful finding", snapshot: false },
-    { name: "show", before: state, params: { action: "show" }, expected: snapshot, snapshot: true },
-    { name: "empty show", params: { action: "show" }, expected: "Plan · Empty", snapshot: true },
-    { name: "clear", before: state, params: { action: "clear" }, expected: "Plan cleared", snapshot: false },
-  ];
-  for (const row of cases) {
-    const applied = applyAction(row.before, row.params);
-    assert.equal(applied.error, undefined, row.name);
-    const response = result(row.params.action, row.params, applied.state ?? null, applied.feedback);
-    const options = { expanded: false, isPartial: false };
-
-    assert.equal(formatPlanResult(response, options, theme), row.expected, row.name);
-    const component = renderResult(response, options, theme, {});
-    assert.equal(component instanceof PlanSnapshotComponent, row.snapshot, row.name);
-    assert.equal(component instanceof Text, !row.snapshot, row.name);
-    assert.equal(component.render(76).join("\n").trim(), row.expected, row.name);
-    if (row.params.action === "add_finding") {
-      const finding = row.params.finding;
-      assert.equal(applied.state?.findings.filter((entry) => entry === finding).length, 1, row.name);
-    }
+test("errors remain visible for every action", () => {
+  for (const action of ["set_plan", "show", "update_step", "advance_step", "add_step", "add_finding", "clear"]) {
+    const response = result(action, {}, state, "Operation failed");
+    assert.equal(normalized(renderResult(response, { expanded: false, isPartial: false }, theme, { isError: true }).render(90)), "[plan] ✗ Operation failed");
   }
 });
