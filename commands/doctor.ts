@@ -1,7 +1,12 @@
+import { RESEARCHER_TOOL_NAME } from "../subagents/agents/researcher/index.ts";
+import { WORKER_TOOL_NAME } from "../subagents/agents/worker/index.ts";
+import { REVIEWER_TOOL_NAME } from "../subagents/agents/reviewer/index.ts";
 import type { SandboxStatus } from "../execution/sandbox/controller.ts";
 import { formatSubagentDispatch } from "../subagents/runtime/dispatch.ts";
 import type { SubagentSummary } from "../subagents/settings.ts";
 import type { WorkspaceSearchStatus } from "../workspace/service.ts";
+
+const dispatchTools = { researcher: RESEARCHER_TOOL_NAME, worker: WORKER_TOOL_NAME, reviewer: REVIEWER_TOOL_NAME };
 
 const describeDomains = (domains: readonly string[]): string => domains.length > 0 ? domains.join(", ") : "(none)";
 
@@ -56,7 +61,7 @@ export function formatDoctor(
   lines.push("", "Subagents:");
   if (runtimeError) lines.push(`Runtime config: invalid · ${runtimeError}`);
   for (const summary of subagents) {
-    const availability = activeTools.includes(summary.id) ? "enabled" : "disabled";
+    const availability = activeTools.includes(dispatchTools[summary.id]) ? "enabled" : "disabled";
     const dispatch = formatSubagentDispatch(summary.dispatch) ?? "unresolved";
     const modelStatus = summary.available ? "" : " · model unavailable";
     lines.push(`- ${summary.id}: ${availability} · ${summary.source} ${summary.mode} · ${dispatch}${modelStatus}`);

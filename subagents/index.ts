@@ -184,7 +184,7 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
     label: "Observe subagent",
     description: "Wait until the run finishes, goes quiet for a few seconds, or the timeout elapses (default 30s). A timeout ends only this observation; the subagent keeps running. Prefer one long wait over repeated polling; omit afterRevision unless resuming from a known revision.",
     parameters: Type.Object({
-      runId: Type.String({ description: "Run identifier returned by researcher, worker, or reviewer." }),
+      runId: Type.String({ description: "Run identifier returned by subagent_spawn_research, subagent_spawn_work, or subagent_spawn_review." }),
       afterRevision: Type.Integer({ minimum: 0, description: "Last observed revision. Returns when a newer revision is available." }),
       timeoutSeconds: Type.Optional(Type.Number({ minimum: 0, description: "Maximum seconds to wait. Defaults to 30; values above 60 are clamped." })),
     }),
@@ -201,7 +201,7 @@ export function setupSubagents(pi: ExtensionAPI, workspace?: WorkspaceServices):
     name: "subagent_cancel",
     label: "Cancel subagent",
     description: "Cancel one subagent and wait for its process to terminate. Other runs and the main agent continue; repeated cancellation returns the same terminal state.",
-    parameters: Type.Object({ runId: Type.String({ description: "Run identifier returned by researcher, worker, or reviewer." }) }),
+    parameters: Type.Object({ runId: Type.String({ description: "Run identifier returned by subagent_spawn_research, subagent_spawn_work, or subagent_spawn_review." }) }),
     async execute(_toolCallId, { runId }): Promise<AgentToolResult<CompactSubagentOutput>> {
       return subagentControlResult(await background.cancel(runId));
     },

@@ -205,7 +205,7 @@ test("follow cannot escape into deny-covered targets", async () => {
   }
 });
 
-test("task_state, researcher, and Bash pass without warnings", async () => {
+test("task_state, subagent_spawn_research, and Bash pass without warnings", async () => {
   let handler: ((event: ToolCall, ctx: ExtensionContext) => Promise<unknown>) | undefined;
   const warnings: string[] = [];
   const pi = {
@@ -217,7 +217,7 @@ test("task_state, researcher, and Bash pass without warnings", async () => {
   setupFilesystemGuard(pi);
   assert.ok(handler);
 
-  for (const toolName of ["task_state", "researcher", "bash"] as const) {
+  for (const toolName of ["task_state", "subagent_spawn_research", "bash"] as const) {
     const result = await handler(
       { type: "tool_call", toolName, toolCallId: `test-${toolName}`, input: {} },
       {

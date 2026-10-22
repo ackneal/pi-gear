@@ -19,7 +19,7 @@ test("doctor reports active subagents and their resolved model settings", () => 
       { id: "researcher", mode: "inherit", source: "main", dispatch: { model: "main/model-a", thinkingLevel: "low" }, available: true },
       { id: "worker", mode: "override", source: "runtime", dispatch: { model: "provider/model-b", thinkingLevel: "high" }, available: false },
     ],
-    ["researcher"],
+    ["subagent_spawn_research"],
     "darwin",
     "invalid JSON",
   );
@@ -28,6 +28,26 @@ test("doctor reports active subagents and their resolved model settings", () => 
   assert.match(output, /- researcher: enabled · main inherit · \(main\) model-a • low/);
   assert.match(output, /- worker: disabled · runtime override · \(provider\) model-b • high · model unavailable/);
   assert.doesNotMatch(output, /\nLSP:/);
+});
+
+test("doctor maps profile IDs to public dispatch tools", () => {
+  for (const { id, tool } of [
+    { id: "researcher", tool: "subagent_spawn_research" },
+    { id: "worker", tool: "subagent_spawn_work" },
+    { id: "reviewer", tool: "subagent_spawn_review" },
+  ] as const) {
+    for (const { activeTools, expected } of [
+      { activeTools: [tool], expected: "enabled" },
+      { activeTools: [id], expected: "disabled" },
+      { activeTools: [], expected: "disabled" },
+    ]) {
+      const output = formatDoctor(sandboxStatus, [
+        { id, mode: "inherit", source: "main", dispatch: {}, available: true },
+      ], activeTools);
+
+      assert.ok(output.includes(`- ${id}: ${expected} ·`));
+    }
+  }
 });
 
 test("doctor formats configured LSP server statuses", () => {
@@ -100,7 +120,7 @@ test("gear commands are centrally registered and delegate to their services", as
     registerCommand: (name: string, definition: { handler: (args: string, ctx: any) => Promise<void> }) => {
       commands.set(name, definition);
     },
-    getActiveTools: () => ["researcher", "worker"],
+    getActiveTools: () => ["subagent_spawn_research", "subagent_spawn_work"],
     sendMessage: (message: { customType: string; content: string; display: boolean }, options: unknown) => {
       assert.equal(message.customType, GEAR_COMMANDS.doctor);
       assert.equal(message.display, true);

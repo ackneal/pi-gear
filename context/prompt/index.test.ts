@@ -10,11 +10,11 @@ test("composes only selected pi-gear capability sections", () => {
     { name: "undefined", tools: undefined, plan: false, research: false, worker: false, review: false, subagents: false },
     { name: "none", tools: [], plan: false, research: false, worker: false, review: false, subagents: false },
     { name: "task_state", tools: ["task_state"], plan: true, research: false, worker: false, review: false, subagents: false },
-    { name: "research", tools: ["researcher"], plan: false, research: true, worker: false, review: false, subagents: true },
-    { name: "worker", tools: ["worker"], plan: false, research: false, worker: true, review: false, subagents: true },
-    { name: "reviewer", tools: ["reviewer"], plan: false, research: false, worker: false, review: true, subagents: true },
-    { name: "both research and plan", tools: ["researcher", "task_state"], plan: true, research: true, worker: false, review: false, subagents: true },
-    { name: "all four", tools: ["researcher", "task_state", "worker", "reviewer"], plan: true, research: true, worker: true, review: true, subagents: true },
+    { name: "research", tools: ["subagent_spawn_research"], plan: false, research: true, worker: false, review: false, subagents: true },
+    { name: "worker", tools: ["subagent_spawn_work"], plan: false, research: false, worker: true, review: false, subagents: true },
+    { name: "reviewer", tools: ["subagent_spawn_review"], plan: false, research: false, worker: false, review: true, subagents: true },
+    { name: "both research and plan", tools: ["subagent_spawn_research", "task_state"], plan: true, research: true, worker: false, review: false, subagents: true },
+    { name: "all four", tools: ["subagent_spawn_research", "task_state", "subagent_spawn_work", "subagent_spawn_review"], plan: true, research: true, worker: true, review: true, subagents: true },
     { name: "unrelated tool", tools: ["bash"], plan: false, research: false, worker: false, review: false, subagents: false },
   ];
   for (const current of cases) {
@@ -60,13 +60,13 @@ test("setupPromptComposer composes static prompt on before_agent_start", () => {
 });
 
 test("orders Plan before Research before Worker before Review before Subagents and replaces only its idempotent block", () => {
-  const prompt = composePrompt(base, ["reviewer", "worker", "researcher", "task_state"]);
+  const prompt = composePrompt(base, ["subagent_spawn_review", "subagent_spawn_work", "subagent_spawn_research", "task_state"]);
   assert.ok(prompt.indexOf("Plan:\n") < prompt.indexOf("Research:\n"));
   assert.ok(prompt.indexOf("Research:\n") < prompt.indexOf("Worker:\n"));
   assert.ok(prompt.indexOf("Worker:\n") < prompt.indexOf("Review:\n"));
   assert.ok(prompt.indexOf("Review:\n") < prompt.indexOf("Subagents:\n"));
   assert.equal((prompt.match(/<pi_gear_context>/g) ?? []).length, 1);
-  const replaced = composePrompt(prompt, ["worker", "researcher"]);
+  const replaced = composePrompt(prompt, ["subagent_spawn_work", "subagent_spawn_research"]);
   assert.equal((replaced.match(/<pi_gear_context>/g) ?? []).length, 1);
   assert.doesNotMatch(replaced, /Plan:\n/);
   assert.doesNotMatch(replaced, /Review:\n/);
@@ -86,14 +86,14 @@ test("plan guidance is concise and completion-oriented", () => {
 });
 
 test("delegation guidance preserves research terms and explains asynchronous subagent control", () => {
-  const prompt = composePrompt(base, ["researcher", "worker", "reviewer", "subagents"]);
+  const prompt = composePrompt(base, ["subagent_spawn_research", "subagent_spawn_work", "subagent_spawn_review", "subagents"]);
   assert.match(prompt, /Preserve exact identifiers and quoted terms in delegated questions/);
   assert.match(prompt, /Ask one bounded question; require a conclusion, evidence, and uncertainty/);
-  assert.match(prompt, /For non-trivial work, use workers to speed up two or more independent ready tasks with disjoint files/);
+  assert.match(prompt, /For non-trivial work, use subagent_spawn_work to speed up two or more independent ready tasks with disjoint files/);
   assert.match(prompt, /Do not parallelize dependencies or overlapping edits/);
   assert.match(prompt, /Workers should satisfy focused completion checks/);
   assert.match(prompt, /Keep integration and final verification in the main agent/);
-  assert.match(prompt, /Use reviewer for independent read-only review when requested or after non-trivial code changes pass focused checks/);
+  assert.match(prompt, /Use subagent_spawn_review for independent read-only review when requested or after non-trivial code changes pass focused checks/);
   assert.match(prompt, /Pass the change scope, requirements or intent in context, and applicable coding or review skill paths in skills/);
   assert.match(prompt, /Reviewer does not modify files; evaluate findings, fix confirmed issues, and re-verify in the main agent/);
   assert.match(prompt, /Subagents do not inherit the parent agent's skills; provide the absolute path of any skill needed for the delegated task/);

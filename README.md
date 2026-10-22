@@ -149,9 +149,9 @@ Each extension may belong to only one server. `languageIds` must map every confi
 - **`task_state`** — manages a goal, outcome steps, constraints, and decision-relevant findings.
 - **`diagnostics`** — returns LSP diagnostics for changed files or the workspace.
 - **`navigation`** — resolves definitions or references with 1-based positions.
-- **`researcher`** — delegates focused read-only research to an isolated Pi child process.
-- **`worker`** — delegates bounded implementation work to a child process.
-- **`reviewer`** — delegates focused read-only code review to a child process.
+- **`subagent_spawn_research`** — delegates focused read-only research to an isolated Pi child process.
+- **`subagent_spawn_work`** — delegates bounded implementation work to a child process.
+- **`subagent_spawn_review`** — delegates focused read-only code review to a child process.
 
 Expanded Agent results show the task, all retained tool-call summaries, and then the answer. Activity omits raw tool output and thinking. Older activity is marked when the runtime retention limit drops entries.
 
@@ -163,7 +163,7 @@ Successful Pi `edit` and `write` calls synchronize matching LSP files and report
 - File paths are checked for traversal, symlink escape, and dangling-symlink writes, but authorization remains a preflight check and cannot eliminate all filesystem races.
 - Workspace `grep` filters content exposure through filesystem policy. Workspace `find` intentionally provides path discovery without per-file content-read filtering. Pi's builtin recursive `ls` remains outside filesystem-policy guarding.
 - Network approvals are scoped to the current sandbox generation and cleared on shutdown.
-- Researcher queries may be sent to the remote Exa and grep.app MCP services. These MCP connections are separate from sandboxed Bash network policy and approval. Understand this external trust and privacy boundary before using researcher.
+- Researcher queries may be sent to the remote Exa and grep.app MCP services. These MCP connections are separate from sandboxed Bash network policy and approval. Understand this external trust and privacy boundary before using `subagent_spawn_research`.
 - Sandboxed Bash inherits the host process environment subject to runtime configuration; avoid exposing credentials through environment variables.
 - Sandbox Runtime currently supports macOS. LSP uses one session working directory as its workspace root and does not discover monorepo roots.
 

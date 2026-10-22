@@ -4,7 +4,7 @@ import { runChildSubagent, type RunChildSubagentOptions } from "../../runtime/ru
 import type { SubagentRun } from "../../runtime/types.ts";
 import { reviewerProfile } from "./profile.ts";
 
-export const REVIEWER_TOOL_NAME = reviewerProfile.id;
+export const REVIEWER_TOOL_NAME = "subagent_spawn_review";
 
 export interface ReviewerSubagentInput {
   scope: string;

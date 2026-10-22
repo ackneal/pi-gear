@@ -11,7 +11,7 @@ import type { WorkerSubagentInput } from "./index.ts";
 import { setupSubagents } from "../../index.ts";
 
 test("worker profile, prompt, and capabilities match specification", () => {
-  assert.equal(WORKER_TOOL_NAME, "worker");
+  assert.equal(WORKER_TOOL_NAME, "subagent_spawn_work");
   assert.equal(workerProfile.id, "worker");
   assert.equal(workerProfile.label, "worker");
   assert.equal(workerProfile.description, "Delegate one of several disjoint tasks for parallel execution.");
@@ -95,12 +95,12 @@ test("setupSubagents registers asynchronous subagent and control tools", async (
 
   setupSubagents(mockPi);
 
-  assert.deepEqual([...tools.keys()], ["researcher", "worker", "reviewer", "subagent_observe", "subagent_cancel"]);
+  assert.deepEqual([...tools.keys()], ["subagent_spawn_research", "subagent_spawn_work", "subagent_spawn_review", "subagent_observe", "subagent_cancel"]);
 
-  assert.match(tools.get("researcher")?.description ?? "", /Start focused read-only research/);
-  assert.match(tools.get("researcher")?.description ?? "", /Returns immediately with a runId/);
+  assert.match(tools.get("subagent_spawn_research")?.description ?? "", /Start focused read-only research/);
+  assert.match(tools.get("subagent_spawn_research")?.description ?? "", /Returns immediately with a runId/);
 
-  const workerTool = tools.get("worker")!;
+  const workerTool = tools.get("subagent_spawn_work")!;
   assert.equal(workerTool.label, "worker");
   assert.equal(workerTool.executionMode, "parallel");
   assert.match(workerTool.description, /Returns immediately with a runId/);

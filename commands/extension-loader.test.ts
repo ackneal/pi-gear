@@ -31,9 +31,9 @@ for (const { profile, extension, expectedServers } of [
       assert.ok(runtime.handlers.has("user_bash"));
       assert.ok(runtime.handlers.has("session_start"));
       assert.equal(runtime.commands.size, 0);
-      assert.equal(runtime.tools.has("researcher"), false);
-      assert.equal(runtime.tools.has("worker"), false);
-      assert.equal(runtime.tools.has("reviewer"), false);
+      assert.equal(runtime.tools.has("subagent_spawn_research"), false);
+      assert.equal(runtime.tools.has("subagent_spawn_work"), false);
+      assert.equal(runtime.tools.has("subagent_spawn_review"), false);
       assert.equal(runtime.tools.has("request_command"), false);
       for (const loaded of result.extensions) {
         if (loaded.path !== entry) assert.equal(loaded.handlers.size, 0);
@@ -59,6 +59,12 @@ test("Pi's extension loader loads gear with its package aliases", async () => {
     assert.deepEqual(result.errors, []);
     assert.equal(result.extensions.length, 1);
     assert.equal(result.extensions[0].tools.has("request_command"), true);
+    for (const name of ["subagent_spawn_research", "subagent_spawn_work", "subagent_spawn_review"]) {
+      assert.equal(result.extensions[0].tools.has(name), true);
+    }
+    for (const name of ["researcher", "worker", "reviewer"]) {
+      assert.equal(result.extensions[0].tools.has(name), false);
+    }
   } finally {
     if (previous === undefined) delete process.env.PI_GEAR_CHILD;
     else process.env.PI_GEAR_CHILD = previous;

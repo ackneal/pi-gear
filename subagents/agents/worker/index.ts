@@ -4,7 +4,7 @@ import { runChildSubagent, type RunChildSubagentOptions } from "../../runtime/ru
 import type { SubagentRun } from "../../runtime/types.ts";
 import { workerProfile } from "./profile.ts";
 
-export const WORKER_TOOL_NAME = workerProfile.id;
+export const WORKER_TOOL_NAME = "subagent_spawn_work";
 
 export interface WorkerSubagentInput {
   task: string;

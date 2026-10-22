@@ -4,7 +4,7 @@ import { runChildSubagent, type RunChildSubagentOptions } from "../../runtime/ru
 import type { SubagentRun } from "../../runtime/types.ts";
 import { researcherProfile } from "./profile.ts";
 
-export const RESEARCHER_TOOL_NAME = researcherProfile.id;
+export const RESEARCHER_TOOL_NAME = "subagent_spawn_research";
 
 export interface ResearcherSubagentInput {
   question: string;

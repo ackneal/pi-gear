@@ -13,7 +13,7 @@ import { REVIEWER_CAPABILITIES, reviewerProfile } from "./profile.ts";
 import { REVIEWER_SYSTEM_PROMPT } from "./prompt.ts";
 
 test("reviewer profile, prompt, and capabilities match specification", () => {
-  assert.equal(REVIEWER_TOOL_NAME, "reviewer");
+  assert.equal(REVIEWER_TOOL_NAME, "subagent_spawn_review");
   assert.equal(reviewerProfile.id, "reviewer");
   assert.equal(reviewerProfile.label, "reviewer");
   assert.equal(reviewerProfile.description, "Delegate focused read-only code review.");
