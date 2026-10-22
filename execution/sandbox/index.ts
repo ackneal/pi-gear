@@ -46,7 +46,6 @@ export function setupSandbox(
     await controller.shutdown();
   });
 
-  pi.on("user_bash", () => ({ operations: controller.operations }));
   pi.on("session_start", (_event, ctx) => {
     pi.registerTool(createSandboxBashTool(ctx.cwd, controller.operations));
   });
