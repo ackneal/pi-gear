@@ -58,7 +58,7 @@ export class SessionApprovals {
   notifyExecutionPrevented(command: string, reason: string): void {
     if (!this.ui.hasUI || !this.isCurrent()) return;
     this.ui.notify(
-      `Sandboxed execution did not run. No command was run.\nReason: ${reason}\nCommand: ${command}\nIf desired, manually run this exact command outside Pi.`,
+      `Sandboxed execution did not run. No command was run.\nReason: ${reason}\nCommand: ${command}\nFor sandbox availability or setup failures only, host execution approval may be requested via request_command. Never bypass user denial or policy restrictions.`,
       "warning",
     );
   }

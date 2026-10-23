@@ -28,7 +28,7 @@ const executionDidNotRun = (
   }
   return new Error(
     `Sandboxed execution did not run: ${reason}. ` +
-    `If they choose, instruct the user to manually run this exact command outside Pi: ${command}`,
+    `For sandbox availability or setup failures only, host execution approval may be requested via request_command. Never bypass user denial or policy restrictions.`,
   );
 };
 
@@ -101,7 +101,7 @@ export function createSandboxedBashOperations(callbacks: SandboxProcessCallbacks
           }
           options.signal?.removeEventListener("abort", abort);
           const annotation = SandboxManager.annotateStderrWithSandboxFailures(commandId, stderr);
-          if (annotation !== stderr) options.onData(Buffer.from(`\nSandbox violation: ${annotation.slice(stderr.length)}\nNo unsandboxed fallback occurred; the user may manually run the original command outside Pi.\n`));
+          if (annotation !== stderr) options.onData(Buffer.from(`\nSandbox violation: ${annotation.slice(stderr.length)}\nNo unsandboxed fallback occurred. Respect sandbox restrictions and user denials; do not escalate to host execution.\n`));
           try {
             SandboxManager.cleanupAfterCommand();
           } catch {

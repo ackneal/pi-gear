@@ -62,11 +62,13 @@ export function setupHostCommand(pi: ExtensionAPI, options: HostCommandOptions =
     name: REQUEST_COMMAND_TOOL_NAME,
     label: "Command",
     description:
-      "Request approval to run a shell command on the host. The user can approve, edit, or cancel; approved commands return execution output.",
+      "Request actual tool approval to run a shell command needing authorization or host environment/credentials unavailable in the sandbox, rather than asking the user to copy/paste it. The user can approve, edit, or cancel; approved commands return execution output. Never retry or route around user denial or policy restrictions. Provide manual steps only if the tool is unavailable, the user requests instructions, or an interactive terminal is needed.",
     promptSnippet:
-      "Request user authorization for shell commands instead of asking the user to run them manually.",
+      "Prefer actual request_command approval over copy/paste for commands needing authorization or host environment/credentials unavailable in the sandbox. Never retry or route around user denial or policy restrictions. Manual steps only if the tool is unavailable, the user requests instructions, or an interactive terminal is needed.",
     promptGuidelines: [
-      "Use request_command when a command requires user authorization. State why approval is needed; never bypass a user denial or policy restriction.",
+      "Prefer actual request_command approval over asking the user to copy/paste commands needing authorization or host environment/credentials unavailable in the sandbox. State why approval is needed.",
+      "Never retry or route around user denial or policy restrictions, including through manual instructions or another tool.",
+      "Provide manual steps only if request_command is unavailable, the user requests instructions, or an interactive terminal is needed; these exceptions do not override user denial or policy restrictions.",
     ],
     exposure: "model-only",
     parameters: requestCommandParameters,

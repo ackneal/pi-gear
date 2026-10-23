@@ -63,3 +63,26 @@ for (const scenario of [
     assert.equal(approvals.pendingHostPrompts.size, 0);
   });
 }
+
+for (const scenario of [
+  { name: "availability failure", hasUI: true, current: true, reason: "Sandbox unavailable" },
+  { name: "setup failure", hasUI: true, current: true, reason: "Sandbox preparation failed" },
+  { name: "headless", hasUI: false, current: true, reason: "Sandbox unavailable" },
+  { name: "stale", hasUI: true, current: false, reason: "Sandbox unavailable" },
+]) {
+  test(`execution prevention notification: ${scenario.name}`, () => {
+    const notifications: Array<[string, string]> = [];
+    const approvals = new SessionApprovals({
+      hasUI: scenario.hasUI,
+      confirm: async () => assert.fail("must not prompt"),
+      notify: (message, level) => { notifications.push([message, level]); },
+    }, () => scenario.current);
+
+    approvals.notifyExecutionPrevented("printf test", scenario.reason);
+
+    assert.deepEqual(notifications, scenario.hasUI && scenario.current ? [[
+      `Sandboxed execution did not run. No command was run.\nReason: ${scenario.reason}\nCommand: printf test\nFor sandbox availability or setup failures only, host execution approval may be requested via request_command. Never bypass user denial or policy restrictions.`,
+      "warning",
+    ]] : []);
+  });
+}

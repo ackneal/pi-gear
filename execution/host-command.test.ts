@@ -39,6 +39,26 @@ function createRegisteredHostTool(options: Parameters<typeof setupHostCommand>[1
   return { tool: registered, handlers };
 }
 
+test("request_command metadata prefers approval and limits manual fallbacks without bypassing restrictions", () => {
+  const { tool } = createRegisteredHostTool();
+  const cases = [
+    { name: "description", text: tool.description },
+    { name: "prompt snippet", text: tool.promptSnippet },
+    { name: "prompt guidelines", text: tool.promptGuidelines?.join(" ") },
+  ];
+
+  for (const { name, text } of cases) {
+    assert.ok(text, name);
+    assert.match(text, /actual .*approval.*copy\/paste/, name);
+    assert.match(text, /needing authorization or host environment\/credentials unavailable in the sandbox/, name);
+    assert.match(text, /Never retry or route around user denial or policy restrictions/, name);
+    assert.match(text, /manual steps only if .*unavailable, the user requests instructions, or an interactive terminal is needed/i, name);
+  }
+
+  assert.match(tool.promptGuidelines!.join(" "), /including through manual instructions or another tool/);
+  assert.match(tool.promptGuidelines!.join(" "), /exceptions do not override user denial or policy restrictions/);
+});
+
 test("request_command approval, editing, cancellation, and UI requirement", async () => {
   const cases = [
     {

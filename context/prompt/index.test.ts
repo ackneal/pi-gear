@@ -32,6 +32,29 @@ test("composes only selected pi-gear capability sections", () => {
   assert.equal(composePrompt("Pi base  ", undefined), "Pi base  ");
 });
 
+test("execution guidance is selected, idempotent, and preserves approval boundaries", () => {
+  for (const { tools, expected } of [
+    { tools: ["request_command"], expected: true },
+    { tools: ["request_command", "task_state"], expected: true },
+    { tools: ["bash"], expected: false },
+    { tools: [], expected: false },
+  ]) {
+    const prompt = composePrompt(base, tools);
+    assert.equal(prompt.includes("Execution:\n"), expected);
+    assert.equal(composePrompt(prompt, tools), prompt);
+    assert.equal(composePrompt(prompt, []), base);
+    if (!expected) continue;
+
+    assert.match(prompt, /Call the tool with the command and reason instead of asking the user to copy and run it/);
+    assert.match(prompt, /host credentials unavailable in the sandbox/);
+    assert.match(prompt, /does not grant permission to execute/);
+    assert.match(prompt, /Never use host execution or manual instructions to bypass a user denial or policy restriction/);
+    assert.match(prompt, /After a denial or cancellation, stop that command unless the user explicitly asks to reconsider it/);
+    assert.match(prompt, /Provide manual steps only when request_command is unavailable, the user asks for instructions, or the command requires an interactive terminal/);
+    assert.match(prompt, /Do not repeat a command that already succeeded/);
+  }
+});
+
 test("keeps system prompt static without dynamic working memory to preserve prompt cache", () => {
   const prompt = composePrompt(base, ["task_state"]);
   assert.match(prompt, /Plan:\nUse task_state for multi-step tasks that require tracking progress\./);

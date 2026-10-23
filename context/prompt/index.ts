@@ -1,5 +1,12 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
+const EXECUTION_POLICY =
+  "Use request_command to request approval for commands that need user authorization or host execution, including host credentials unavailable in the sandbox. " +
+  "Call the tool with the command and reason instead of asking the user to copy and run it. " +
+  "A sandbox availability, setup, or credential failure may justify requesting host approval; it does not grant permission to execute. " +
+  "Never use host execution or manual instructions to bypass a user denial or policy restriction. After a denial or cancellation, stop that command unless the user explicitly asks to reconsider it. " +
+  "Provide manual steps only when request_command is unavailable, the user asks for instructions, or the command requires an interactive terminal. " +
+  "Do not repeat a command that already succeeded.";
 const PLAN_POLICY =
   "Use task_state for multi-step tasks that require tracking progress. " +
   "Mark a step complete only after its doneWhen condition is met. " +
@@ -28,13 +35,15 @@ export function composePrompt(
     : systemPrompt;
 
   if (selectedTools === undefined) return base;
+  const execution = selectedTools.includes("request_command");
   const plan = selectedTools.includes("task_state");
   const research = selectedTools.includes("subagent_spawn_research");
   const worker = selectedTools.includes("subagent_spawn_work");
   const reviewer = selectedTools.includes("subagent_spawn_review");
-  if (!plan && !research && !worker && !reviewer) return base;
+  if (!execution && !plan && !research && !worker && !reviewer) return base;
 
   const sections: string[] = [];
+  if (execution) sections.push(`Execution:\n${EXECUTION_POLICY}`);
   if (plan) sections.push(`Plan:\n${PLAN_POLICY}`);
   if (research) sections.push(`Research:\n${RESEARCH_POLICY}`);
   if (worker) sections.push(`Worker:\n${WORKER_POLICY}`);
