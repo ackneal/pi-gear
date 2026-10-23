@@ -34,10 +34,11 @@ test("doctor includes the failure reason when sandbox is unavailable", () => {
   assert.match(output, /^Sandbox: unavailable\nReason: sandbox dependency missing\nPlatform: darwin/);
 });
 
-test("sandbox exposes diagnostics without owning commands", () => {
+test("sandbox exposes diagnostics without owning commands or user Bash", () => {
   let registeredCommand = false;
+  const handlers = new Set<string>();
   const pi = {
-    on: () => undefined,
+    on: (event: string) => { handlers.add(event); },
     registerTool: () => undefined,
     registerCommand: () => { registeredCommand = true; },
     sendMessage: () => { assert.fail("sandbox must not send model messages"); },
@@ -50,6 +51,7 @@ test("sandbox exposes diagnostics without owning commands", () => {
   });
 
   assert.equal(registeredCommand, false);
+  assert.equal(handlers.has("user_bash"), false);
   assert.match(diagnostics.status().reason ?? "", /starting/);
 });
 

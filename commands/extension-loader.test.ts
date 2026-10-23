@@ -28,7 +28,7 @@ for (const { profile, extension, expectedServers } of [
       assert.equal(result.extensions.filter((loaded: { path: string }) => loaded.path === entry).length, 1);
       const runtime = result.extensions.find((loaded: { path: string }) => loaded.path === entry);
       assert.ok(runtime.handlers.has("tool_call"));
-      assert.ok(runtime.handlers.has("user_bash"));
+      assert.equal(runtime.handlers.has("user_bash"), false);
       assert.ok(runtime.handlers.has("session_start"));
       assert.equal(runtime.commands.size, 0);
       assert.equal(runtime.tools.has("subagent_spawn_research"), false);

@@ -76,7 +76,7 @@ Sandboxing defaults to enabled, including when `sandbox` or `sandbox.enabled` is
 }
 ```
 
-When enabled, pi-gear replaces Pi's Bash tool and `user_bash` operations with Sandbox Runtime implementations. If initialization or dependency checks fail, Bash remains unavailable; there is no automatic host fallback.
+When enabled, pi-gear replaces Pi's agent Bash tool with a Sandbox Runtime implementation. If initialization or dependency checks fail, agent Bash remains unavailable; there is no automatic host fallback. User-entered `!` commands use Pi's native host execution and UI, outside the sandbox.
 
 To intentionally use Pi's normal host Bash:
 

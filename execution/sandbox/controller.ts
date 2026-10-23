@@ -135,7 +135,7 @@ export class SandboxController {
         this.state = { kind: "unavailable", reason };
         if (ctx.hasUI) {
           ctx.ui.notify(
-            `Sandbox unavailable: ${reason}\nBash and user_bash will not execute. No host fallback occurred.`,
+            `Sandbox unavailable: ${reason}\nAgent Bash will not execute. No host fallback occurred. User-entered ! commands still run on the host.`,
             "warning",
           );
         }
