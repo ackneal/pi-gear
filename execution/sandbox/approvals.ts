@@ -36,24 +36,29 @@ export class SessionApprovals {
 
     let prompt = this.pendingHostPrompts.get(key);
     if (prompt === undefined) {
-      prompt = this.ui.confirm("Network access required", `Allow bash to connect to ${key}?`);
+      prompt = this.promptNetwork(key);
       this.pendingHostPrompts.set(key, prompt);
     }
 
-    const approved = await prompt;
-    const isFirstSettler = this.pendingHostPrompts.get(key) === prompt;
-    if (isFirstSettler) this.pendingHostPrompts.delete(key);
+    return prompt;
+  }
 
-    if (!approved) {
-      if (isFirstSettler) this.ui.notify(`User denied network access: ${key}`, "warning");
+  private async promptNetwork(key: string): Promise<boolean> {
+    try {
+      const approved = await this.ui.confirm("Network access required", `Allow bash to connect to ${key}?`);
+      if (!this.isCurrent()) return false;
+
+      if (approved) {
+        this.approvedHosts.add(key);
+        this.ui.notify(`User approved network access: ${key}`, "info");
+        return true;
+      }
+
+      this.ui.notify(`User denied network access: ${key}`, "warning");
       return false;
+    } finally {
+      this.pendingHostPrompts.delete(key);
     }
-    if (!this.isCurrent()) return false;
-    if (this.approvedHosts.has(key)) return true;
-
-    this.approvedHosts.add(key);
-    this.ui.notify(`User approved network access: ${key}`, "info");
-    return true;
   }
 
   notifyExecutionPrevented(command: string, reason: string): void {

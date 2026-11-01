@@ -2,53 +2,49 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { SessionApprovals } from "./approvals.ts";
 
-test("concurrent requests share one approval notification", async () => {
-  let approve!: (approved: boolean) => void;
-  const confirmation = new Promise<boolean>((resolve) => { approve = resolve; });
-  const notifications: Array<[string, string]> = [];
-  let promptMessage: string | undefined;
-  const approvals = new SessionApprovals({
-    hasUI: true,
-    confirm: (_title, message) => { promptMessage = message; return confirmation; },
-    notify: (message, level) => { notifications.push([message, level]); },
-  }, () => true);
-  const request = { host: "registry.npmjs.org", port: 443 };
+for (const scenario of [
+  {
+    name: "concurrent requests share one approval notification",
+    approved: true,
+    host: "registry.npmjs.org",
+    port: 443,
+    expectedNotification: ["User approved network access: registry.npmjs.org:443", "info"] as const,
+    expectedResult: true,
+  },
+  {
+    name: "concurrent requests share one denial notification",
+    approved: false,
+    host: "dl.google.com",
+    port: 443,
+    expectedNotification: ["User denied network access: dl.google.com:443", "warning"] as const,
+    expectedResult: false,
+  },
+]) {
+  test(scenario.name, async () => {
+    let approve!: (approved: boolean) => void;
+    const confirmation = new Promise<boolean>((resolve) => { approve = resolve; });
+    const notifications: Array<[string, string]> = [];
+    let promptMessage: string | undefined;
+    const approvals = new SessionApprovals({
+      hasUI: true,
+      confirm: (_title, message) => { promptMessage = message; return confirmation; },
+      notify: (message, level) => { notifications.push([message, level]); },
+    }, () => true);
+    const request = { host: scenario.host, port: scenario.port };
 
-  const results = Promise.all([
-    approvals.requestNetwork(request),
-    approvals.requestNetwork(request),
-    approvals.requestNetwork(request),
-  ]);
-  approve(true);
+    const results = Promise.all([
+      approvals.requestNetwork(request),
+      approvals.requestNetwork(request),
+      approvals.requestNetwork(request),
+    ]);
+    approve(scenario.approved);
 
-  assert.deepEqual(await results, [true, true, true]);
-  assert.equal(promptMessage, "Allow bash to connect to registry.npmjs.org:443?");
-  assert.deepEqual(notifications, [["User approved network access: registry.npmjs.org:443", "info"]]);
-});
-
-test("concurrent requests share one denial notification", async () => {
-  let approve!: (approved: boolean) => void;
-  const confirmation = new Promise<boolean>((resolve) => { approve = resolve; });
-  const notifications: Array<[string, string]> = [];
-  let promptMessage: string | undefined;
-  const approvals = new SessionApprovals({
-    hasUI: true,
-    confirm: (_title, message) => { promptMessage = message; return confirmation; },
-    notify: (message, level) => { notifications.push([message, level]); },
-  }, () => true);
-  const request = { host: "dl.google.com", port: 443 };
-
-  const results = Promise.all([
-    approvals.requestNetwork(request),
-    approvals.requestNetwork(request),
-    approvals.requestNetwork(request),
-  ]);
-  approve(false);
-
-  assert.deepEqual(await results, [false, false, false]);
-  assert.equal(promptMessage, "Allow bash to connect to dl.google.com:443?");
-  assert.deepEqual(notifications, [["User denied network access: dl.google.com:443", "warning"]]);
-});
+    assert.deepEqual(await results, [scenario.expectedResult, scenario.expectedResult, scenario.expectedResult]);
+    assert.equal(promptMessage, `Allow bash to connect to ${scenario.host}:${scenario.port}?`);
+    assert.deepEqual(notifications, [scenario.expectedNotification]);
+    assert.equal(approvals.pendingHostPrompts.size, 0);
+  });
+}
 
 for (const scenario of [
   { name: "approval is cached case-insensitively per port", hasUI: true, current: true, approved: true, expire: false, requests: [{ host: "EXAMPLE.com", port: 443 }, { host: "example.com", port: 443 }, { host: "example.com", port: 80 }], results: [true, true, true], prompts: 2, levels: ["info", "info"], cached: ["example.com:443", "example.com:80"] },
