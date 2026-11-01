@@ -41,10 +41,11 @@ export class SessionApprovals {
     }
 
     const approved = await prompt;
-    if (this.pendingHostPrompts.get(key) === prompt) this.pendingHostPrompts.delete(key);
+    const isFirstSettler = this.pendingHostPrompts.get(key) === prompt;
+    if (isFirstSettler) this.pendingHostPrompts.delete(key);
 
     if (!approved) {
-      this.ui.notify(`User denied network access: ${key}`, "warning");
+      if (isFirstSettler) this.ui.notify(`User denied network access: ${key}`, "warning");
       return false;
     }
     if (!this.isCurrent()) return false;

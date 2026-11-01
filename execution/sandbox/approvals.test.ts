@@ -26,6 +26,30 @@ test("concurrent requests share one approval notification", async () => {
   assert.deepEqual(notifications, [["User approved network access: registry.npmjs.org:443", "info"]]);
 });
 
+test("concurrent requests share one denial notification", async () => {
+  let approve!: (approved: boolean) => void;
+  const confirmation = new Promise<boolean>((resolve) => { approve = resolve; });
+  const notifications: Array<[string, string]> = [];
+  let promptMessage: string | undefined;
+  const approvals = new SessionApprovals({
+    hasUI: true,
+    confirm: (_title, message) => { promptMessage = message; return confirmation; },
+    notify: (message, level) => { notifications.push([message, level]); },
+  }, () => true);
+  const request = { host: "dl.google.com", port: 443 };
+
+  const results = Promise.all([
+    approvals.requestNetwork(request),
+    approvals.requestNetwork(request),
+    approvals.requestNetwork(request),
+  ]);
+  approve(false);
+
+  assert.deepEqual(await results, [false, false, false]);
+  assert.equal(promptMessage, "Allow bash to connect to dl.google.com:443?");
+  assert.deepEqual(notifications, [["User denied network access: dl.google.com:443", "warning"]]);
+});
+
 for (const scenario of [
   { name: "approval is cached case-insensitively per port", hasUI: true, current: true, approved: true, expire: false, requests: [{ host: "EXAMPLE.com", port: 443 }, { host: "example.com", port: 443 }, { host: "example.com", port: 80 }], results: [true, true, true], prompts: 2, levels: ["info", "info"], cached: ["example.com:443", "example.com:80"] },
   { name: "denial warns and is not cached", hasUI: true, current: true, approved: false, expire: false, requests: [{ host: "example.com", port: undefined }, { host: "example.com", port: undefined }], results: [false, false], prompts: 2, levels: ["warning", "warning"], cached: [] },
