@@ -57,3 +57,29 @@ test("global config takes priority over the bundled default", async () => {
     await rm(agentDir, { recursive: true, force: true });
   }
 });
+
+const appendTo = async (agentDir: string, host: string): Promise<ExtensionConfig> => {
+  const loaderUrl = new URL("./loader.ts", import.meta.url).href;
+  const script = `import { appendAllowedNetworkHost } from ${JSON.stringify(loaderUrl)}; console.log(JSON.stringify(await appendAllowedNetworkHost(${JSON.stringify(host)})));`;
+  const { stdout } = await promisify(execFile)(
+    process.execPath,
+    ["--experimental-strip-types", "--input-type=module", "--eval", script],
+    { env: { ...process.env, PI_CODING_AGENT_DIR: agentDir } },
+  );
+  return JSON.parse(stdout) as ExtensionConfig;
+};
+
+test("appendAllowedNetworkHost normalizes host and updates config idempotently", async () => {
+  const agentDir = await mkdtemp(join(tmpdir(), "pi-gear-agent-dir-"));
+
+  try {
+    const updated = await appendTo(agentDir, "DL.Google.COM");
+    assert.ok(updated.sandbox.network.rules.some((rule) => rule.host === "dl.google.com" && rule.access === "allow"));
+
+    const reloaded = await appendTo(agentDir, "dl.google.com");
+    const matching = reloaded.sandbox.network.rules.filter((rule) => rule.host === "dl.google.com");
+    assert.equal(matching.length, 1);
+  } finally {
+    await rm(agentDir, { recursive: true, force: true });
+  }
+});

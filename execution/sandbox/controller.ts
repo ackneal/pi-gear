@@ -2,8 +2,8 @@ import { SandboxManager, type NetworkHostPattern, type SandboxRuntimeConfig } fr
 import type { BashOperations, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { evaluateNetwork } from "../policy/network.ts";
 import { canonicalizeWorkspace, type CanonicalWorkspace } from "../filesystem/paths.ts";
-import { loadExtensionConfig } from "../../config/index.ts";
-import { SessionApprovals } from "./approvals.ts";
+import { appendAllowedNetworkHost, loadExtensionConfig, type AccessPolicy } from "../../config/index.ts";
+import { networkKey, SessionApprovals } from "./approvals.ts";
 import { createEffectiveSandboxConfig, resolveRuntimeTempDir } from "./config.ts";
 import { createSandboxedBashOperations } from "./spawn.ts";
 import { CONFIRMATION_TIMEOUT_MS, ConfirmationQueue } from "../confirmation-queue.ts";
@@ -80,18 +80,9 @@ export class SandboxController {
   private async startCurrent(ctx: ExtensionContext): Promise<void> {
     const generation = ++this.generation;
     this.approvals?.clear();
-    let approvals: SessionApprovals;
-    approvals = new SessionApprovals({
-      hasUI: ctx.hasUI,
-      confirm: (title, message) => this.confirmationQueue.confirm((signal) => ctx.ui.confirm(
-        title,
-        message,
-        { timeout: CONFIRMATION_TIMEOUT_MS, signal },
-      )),
-      notify: (message, level) => ctx.ui.notify(message, level),
-    }, () => this.generation === generation && this.approvals === approvals);
-    this.approvals = approvals;
+    this.approvals = undefined;
     this.state = { kind: "starting" };
+    let approvals: SessionApprovals | undefined;
     let initializationAttempted = false;
     try {
       if (this.manager.isSandboxingEnabled()) await this.manager.reset();
@@ -104,17 +95,53 @@ export class SandboxController {
         resolveRuntimeTempDir(),
       ]);
       if (tempDir.warning !== undefined && ctx.hasUI) ctx.ui.notify(tempDir.warning, "warning");
-      const policy = extensionConfig;
+      let currentPolicy: AccessPolicy = extensionConfig;
       const dependencies = await this.manager.checkDependenciesAsync();
       if (dependencies.errors.length > 0) throw new Error(dependencies.errors.join("; "));
-      const config = await createEffectiveSandboxConfig(workspace.canonicalRoot, policy, { tempDir: tempDir.path });
+      const config = await createEffectiveSandboxConfig(workspace.canonicalRoot, currentPolicy, { tempDir: tempDir.path });
+
+      const currentApprovals = new SessionApprovals({
+        hasUI: ctx.hasUI,
+        promptNetwork: (request) => this.confirmationQueue.prompt(async (signal) => {
+          const key = networkKey(request);
+          const choice = await ctx.ui.select(
+            `Allow bash to connect to ${key}?`,
+            ["Allow once", "Always allow", "Deny"],
+            { timeout: CONFIRMATION_TIMEOUT_MS, signal },
+          );
+          if (choice === "Always allow") return "always";
+          if (choice === "Allow once") return "once";
+          return "deny";
+        }, "deny"),
+        notify: (message, level) => ctx.ui.notify(message, level),
+        persistAllowedHost: async (host) => {
+          const updated = await appendAllowedNetworkHost(host);
+          currentPolicy = updated;
+          if (this.state.kind === "ready") {
+            const allowed = new Set([...(this.state.config.network.allowedDomains ?? []), host]);
+            this.state = {
+              ...this.state,
+              config: {
+                ...this.state.config,
+                network: {
+                  ...this.state.config.network,
+                  allowedDomains: [...allowed],
+                },
+              },
+            };
+          }
+        },
+      }, () => this.generation === generation && this.approvals === currentApprovals);
+      approvals = currentApprovals;
+      this.approvals = approvals;
+
       initializationAttempted = true;
       await this.manager.initialize(config, async (request: NetworkHostPattern) => {
-        if (this.generation !== generation || this.approvals !== approvals) return false;
-        const decision = evaluateNetwork(policy, request.host, request.port);
+        if (this.generation !== generation || this.approvals !== currentApprovals) return false;
+        const decision = evaluateNetwork(currentPolicy, request.host, request.port);
         if (decision === "deny") return false;
         if (decision === "allow") return true;
-        return approvals.requestNetwork(request);
+        return currentApprovals.requestNetwork(request);
       });
       if (this.generation !== generation || this.approvals !== approvals) { await this.manager.reset(); return; }
       this.state = { kind: "ready", workspace, config };

@@ -89,3 +89,15 @@ test("already aborted requests never show and concurrent callbacks serialize", a
   assert.equal(maximum, 1);
   assert.deepEqual(results, Array(10).fill(true));
 });
+
+test("prompt returns outcome or fallback on abort", async () => {
+  const queue = new ConfirmationQueue();
+  const caller = new AbortController();
+
+  const success = await queue.prompt(async () => "always", "deny");
+  assert.equal(success, "always");
+
+  caller.abort();
+  const aborted = await queue.prompt(async () => "always", "deny", caller.signal);
+  assert.equal(aborted, "deny");
+});

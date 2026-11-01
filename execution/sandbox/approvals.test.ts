@@ -5,15 +5,23 @@ import { SessionApprovals } from "./approvals.ts";
 for (const scenario of [
   {
     name: "concurrent requests share one approval notification",
-    approved: true,
+    choice: "once" as const,
     host: "registry.npmjs.org",
     port: 443,
     expectedNotification: ["User approved network access: registry.npmjs.org:443", "info"] as const,
     expectedResult: true,
   },
   {
+    name: "concurrent requests share one permanent approval notification",
+    choice: "always" as const,
+    host: "dl.google.com",
+    port: 443,
+    expectedNotification: ["User permanently approved network access: dl.google.com", "info"] as const,
+    expectedResult: true,
+  },
+  {
     name: "concurrent requests share one denial notification",
-    approved: false,
+    choice: "deny" as const,
     host: "dl.google.com",
     port: 443,
     expectedNotification: ["User denied network access: dl.google.com:443", "warning"] as const,
@@ -21,14 +29,15 @@ for (const scenario of [
   },
 ]) {
   test(scenario.name, async () => {
-    let approve!: (approved: boolean) => void;
-    const confirmation = new Promise<boolean>((resolve) => { approve = resolve; });
+    let approve!: (choice: "once" | "always" | "deny") => void;
+    const confirmation = new Promise<"once" | "always" | "deny">((resolve) => { approve = resolve; });
     const notifications: Array<[string, string]> = [];
-    let promptMessage: string | undefined;
+    const persisted: string[] = [];
     const approvals = new SessionApprovals({
       hasUI: true,
-      confirm: (_title, message) => { promptMessage = message; return confirmation; },
+      promptNetwork: () => confirmation,
       notify: (message, level) => { notifications.push([message, level]); },
+      persistAllowedHost: async (host) => { persisted.push(host); },
     }, () => true);
     const request = { host: scenario.host, port: scenario.port };
 
@@ -37,11 +46,11 @@ for (const scenario of [
       approvals.requestNetwork(request),
       approvals.requestNetwork(request),
     ]);
-    approve(scenario.approved);
+    approve(scenario.choice);
 
     assert.deepEqual(await results, [scenario.expectedResult, scenario.expectedResult, scenario.expectedResult]);
-    assert.equal(promptMessage, `Allow bash to connect to ${scenario.host}:${scenario.port}?`);
     assert.deepEqual(notifications, [scenario.expectedNotification]);
+    if (scenario.choice === "always") assert.deepEqual(persisted, [scenario.host.toLowerCase()]);
     assert.equal(approvals.pendingHostPrompts.size, 0);
   });
 }
@@ -83,3 +92,46 @@ for (const scenario of [
     assert.equal(approvals.pendingHostPrompts.size, 0);
   });
 }
+
+test("always approval persists host and allows all ports without re-prompting", async () => {
+  const persisted: string[] = [];
+  const notifications: Array<[string, string]> = [];
+  let prompts = 0;
+  const approvals = new SessionApprovals({
+    hasUI: true,
+    promptNetwork: async () => {
+      prompts += 1;
+      return "always";
+    },
+    notify: (message, level) => { notifications.push([message, level]); },
+    persistAllowedHost: async (host) => { persisted.push(host); },
+  }, () => true);
+
+  const first = await approvals.requestNetwork({ host: "DL.Google.COM", port: 443 });
+  const second = await approvals.requestNetwork({ host: "dl.google.com", port: 80 });
+
+  assert.equal(first, true);
+  assert.equal(second, true);
+  assert.equal(prompts, 1);
+  assert.deepEqual(persisted, ["dl.google.com"]);
+  assert.deepEqual(notifications, [["User permanently approved network access: dl.google.com", "info"]]);
+  assert.deepEqual([...approvals.permanentlyApprovedHosts], ["dl.google.com"]);
+});
+
+test("persistence failure warns but permits access in current session", async () => {
+  const notifications: Array<[string, string]> = [];
+  const approvals = new SessionApprovals({
+    hasUI: true,
+    promptNetwork: async () => "always",
+    notify: (message, level) => { notifications.push([message, level]); },
+    persistAllowedHost: async () => { throw new Error("disk full"); },
+  }, () => true);
+
+  const allowed = await approvals.requestNetwork({ host: "dl.google.com", port: 443 });
+
+  assert.equal(allowed, true);
+  assert.deepEqual(notifications, [
+    ["Failed to persist network access to config: disk full", "warning"],
+    ["User permanently approved network access: dl.google.com", "info"],
+  ]);
+});
