@@ -4,8 +4,7 @@ export type NetworkApprovalChoice = "once" | "always" | "deny";
 
 export interface ApprovalUI {
   readonly hasUI: boolean;
-  readonly promptNetwork?: (request: NetworkHostPattern) => Promise<NetworkApprovalChoice>;
-  readonly confirm?: (title: string, message: string) => Promise<boolean>;
+  readonly promptNetwork: (request: NetworkHostPattern) => Promise<NetworkApprovalChoice>;
   readonly notify: (message: string, level: "info" | "warning") => void;
   readonly persistAllowedHost?: (host: string) => Promise<void>;
 }
@@ -54,14 +53,7 @@ export class SessionApprovals {
 
   private async promptNetwork(request: NetworkHostPattern, key: string): Promise<boolean> {
     try {
-      let choice: NetworkApprovalChoice;
-      if (this.ui.promptNetwork) {
-        choice = await this.ui.promptNetwork(request);
-      } else if (this.ui.confirm) {
-        choice = (await this.ui.confirm("Network access required", `Allow bash to connect to ${key}?`)) ? "once" : "deny";
-      } else {
-        choice = "deny";
-      }
+      const choice = await this.ui.promptNetwork(request);
       if (!this.isCurrent()) return false;
 
       if (choice === "always") {
