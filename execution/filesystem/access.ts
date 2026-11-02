@@ -46,6 +46,28 @@ export interface FilesystemAccessOptions {
   readonly persistRule?: (rule: FilesystemRule) => Promise<void>;
 }
 
+const awaitWithSignal = (
+  promise: Promise<FilesystemAuthorization>,
+  fallback: FilesystemAuthorization,
+  signal?: AbortSignal,
+): Promise<FilesystemAuthorization> => {
+  if (signal?.aborted) return Promise.resolve(fallback);
+  if (signal === undefined) return promise;
+
+  return new Promise<FilesystemAuthorization>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      resolve(fallback);
+    };
+
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (result) => { signal.removeEventListener("abort", onAbort); resolve(result); },
+      (error) => { signal.removeEventListener("abort", onAbort); reject(error); },
+    );
+  });
+};
+
 export class FilesystemAccess {
   readonly cwd: string;
   readonly sessionApprovals: SessionFilesystemApproval[] = [];
@@ -115,11 +137,11 @@ export class FilesystemAccess {
     const key = `${authorization.path}:${operation}`;
     let prompt = this.pendingPrompts.get(key);
     if (prompt === undefined) {
-      prompt = this.promptAccess(authorization, operation, label, ctx, key, signal);
+      prompt = this.promptAccess(authorization, operation, label, ctx, key);
       this.pendingPrompts.set(key, prompt);
     }
 
-    return prompt;
+    return awaitWithSignal(prompt, authorization, signal);
   }
 
   private async promptAccess(
@@ -128,7 +150,6 @@ export class FilesystemAccess {
     label: string,
     ctx: ExtensionContext,
     key: string,
-    signal?: AbortSignal,
   ): Promise<FilesystemAuthorization> {
     try {
       return await this.confirmationQueue.prompt(async (queueSignal) => {
@@ -145,7 +166,7 @@ export class FilesystemAccess {
         }
 
         return this.promptConfirm(authorization, label, ruleAccess, ctx, queueSignal);
-      }, authorization, signal);
+      }, authorization);
     } finally {
       this.pendingPrompts.delete(key);
     }
@@ -160,9 +181,10 @@ export class FilesystemAccess {
     signal: AbortSignal,
   ): Promise<FilesystemAuthorization> {
     const fileLabel = basename(authorization.path);
-    const allowFileOnce = projectRoot !== undefined
-      ? `Allow file once (${fileLabel})`
-      : "Allow file once";
+    const allowFileOnce = `Allow file once (${fileLabel})`;
+    const allowFileSession = `Allow file for this session (${fileLabel})`;
+    const alwaysAllowFile = `Always allow file (${fileLabel})`;
+
     const projectPattern = projectRoot !== undefined
       ? `${projectRoot.replace(/\/+$/, "")}/**`
       : undefined;
@@ -172,16 +194,14 @@ export class FilesystemAccess {
     const alwaysAllowProject = projectPattern !== undefined
       ? `Always allow project (${projectPattern})`
       : undefined;
-    const alwaysAllowFile = projectPattern === undefined
-      ? "Always allow file"
-      : undefined;
     const deny = "Deny";
 
     const options = [
       allowFileOnce,
+      allowFileSession,
       ...(allowProjectSession ? [allowProjectSession] : []),
+      alwaysAllowFile,
       ...(alwaysAllowProject ? [alwaysAllowProject] : []),
-      ...(alwaysAllowFile ? [alwaysAllowFile] : []),
       deny,
     ];
 
@@ -192,7 +212,7 @@ export class FilesystemAccess {
     );
 
     if (choice === allowProjectSession && projectPattern !== undefined) {
-      this.sessionApprovals.push({ pattern: projectPattern, access: ruleAccess });
+      this.addSessionApproval(projectPattern, ruleAccess);
       ctx.ui.notify(
         `User approved outside-workspace project access: ${label} ${projectPattern}`,
         "info",
@@ -201,7 +221,7 @@ export class FilesystemAccess {
     }
 
     if (choice === alwaysAllowProject && projectPattern !== undefined) {
-      this.sessionApprovals.push({ pattern: projectPattern, access: ruleAccess });
+      this.addSessionApproval(projectPattern, ruleAccess);
       await this.persistRule({ path: projectPattern, access: ruleAccess }, ctx);
       ctx.ui.notify(
         `User permanently approved outside-workspace project access: ${label} ${projectPattern}`,
@@ -210,8 +230,17 @@ export class FilesystemAccess {
       return { ...authorization, decision: "allow" };
     }
 
+    if (choice === allowFileSession) {
+      this.addSessionApproval(authorization.path, ruleAccess);
+      ctx.ui.notify(
+        `User approved outside-workspace access: ${label} ${authorization.path}`,
+        "info",
+      );
+      return { ...authorization, decision: "allow" };
+    }
+
     if (choice === alwaysAllowFile) {
-      this.sessionApprovals.push({ pattern: authorization.path, access: ruleAccess });
+      this.addSessionApproval(authorization.path, ruleAccess);
       await this.persistRule({ path: authorization.path, access: ruleAccess }, ctx);
       ctx.ui.notify(
         `User permanently approved outside-workspace access: ${label} ${authorization.path}`,
@@ -221,7 +250,6 @@ export class FilesystemAccess {
     }
 
     if (choice === allowFileOnce) {
-      this.sessionApprovals.push({ pattern: authorization.path, access: ruleAccess });
       ctx.ui.notify(
         `User approved outside-workspace access: ${label} ${authorization.path}`,
         "info",
@@ -250,7 +278,7 @@ export class FilesystemAccess {
     );
 
     if (allowed) {
-      this.sessionApprovals.push({ pattern: authorization.path, access: ruleAccess });
+      this.addSessionApproval(authorization.path, ruleAccess);
       ctx.ui.notify(
         `User approved outside-workspace access: ${label} ${authorization.path}`,
         "info",
@@ -263,6 +291,20 @@ export class FilesystemAccess {
       "warning",
     );
     return authorization;
+  }
+
+  private addSessionApproval(pattern: string, access: FilesystemRuleAccess): void {
+    const existingIndex = this.sessionApprovals.findIndex((approval) => approval.pattern === pattern);
+    if (existingIndex >= 0) {
+      const existing = this.sessionApprovals[existingIndex];
+      const mergedAccess: FilesystemRuleAccess = existing?.access === "read-write" || access === "read-write"
+        ? "read-write"
+        : access;
+      this.sessionApprovals[existingIndex] = { pattern, access: mergedAccess };
+      return;
+    }
+
+    this.sessionApprovals.push({ pattern, access });
   }
 
   private async persistRule(rule: FilesystemRule, ctx: ExtensionContext): Promise<void> {

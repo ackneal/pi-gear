@@ -64,9 +64,9 @@ test("detectProjectRoot identifies git and project markers within safe boundarie
       expected: undefined,
     },
     {
-      name: "respects custom boundary",
+      name: "respects custom boundary with trailing slash",
       target: join(gitSubdir, "index.ts"),
-      options: { boundary: gitRepo },
+      options: { boundary: `${gitRepo}/` },
       expected: undefined,
     },
   ];

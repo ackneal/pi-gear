@@ -151,6 +151,56 @@ test("project approval options allow session-wide and persistent project access"
   }
 });
 
+test("file scope choices distinguish single in-flight vs session-level approval", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-gear-file-scopes-"));
+  const workspace = join(root, "workspace");
+  const fileOnce = join(root, "once.txt");
+  const fileSession = join(root, "session.txt");
+
+  await mkdir(workspace);
+  await writeFile(fileOnce, "once");
+  await writeFile(fileSession, "session");
+
+  try {
+    let promptCount = 0;
+    let selectedOption = "";
+    const ctx = {
+      hasUI: true,
+      ui: {
+        select: async (_title: string, options: string[]) => {
+          promptCount++;
+          return options.find((opt) => opt.startsWith(selectedOption)) ?? options[0];
+        },
+        notify: () => undefined,
+      },
+    } as unknown as ExtensionContext;
+
+    const access = new FilesystemAccess(workspace, { loadConfig: async () => policy(fileOnce, false) });
+
+    // Allow file once does not cache into sessionApprovals
+    selectedOption = "Allow file once";
+    const resOnce1 = await access.request(fileOnce, "read", "read", ctx);
+    assert.equal(resOnce1.decision, "allow");
+    assert.equal(promptCount, 1);
+
+    const resOnce2 = await access.request(fileOnce, "read", "read", ctx);
+    assert.equal(resOnce2.decision, "allow");
+    assert.equal(promptCount, 2); // Prompted again!
+
+    // Allow file for this session caches into sessionApprovals
+    selectedOption = "Allow file for this session";
+    const resSession1 = await access.request(fileSession, "read", "read", ctx);
+    assert.equal(resSession1.decision, "allow");
+    assert.equal(promptCount, 3);
+
+    const resSession2 = await access.request(fileSession, "read", "read", ctx);
+    assert.equal(resSession2.decision, "allow");
+    assert.equal(promptCount, 3); // Not prompted again!
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("concurrent outside-workspace requests share a prompt and deduplicate notifications", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-gear-concurrent-fs-"));
   const workspace = join(root, "workspace");
@@ -209,6 +259,52 @@ test("concurrent outside-workspace requests share a prompt and deduplicate notif
     const resB = await access.request(fileB, "read", "read", ctx);
     assert.equal(resB.decision, "allow");
     assert.equal(promptCount, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("concurrent request with abort signal does not abort independent concurrent caller", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-gear-abort-isolation-"));
+  const workspace = join(root, "workspace");
+  const outsideFile = join(root, "outside.txt");
+
+  await mkdir(workspace);
+  await writeFile(outsideFile, "content");
+
+  try {
+    let resolvePrompt: ((choice: string) => void) | undefined;
+    const ctx = {
+      hasUI: true,
+      ui: {
+        select: (_title: string, options: string[]) => new Promise<string>((resolve) => {
+          resolvePrompt = () => resolve(options[0]!);
+        }),
+        notify: () => undefined,
+      },
+    } as unknown as ExtensionContext;
+
+    const access = new FilesystemAccess(workspace, { loadConfig: async () => policy(outsideFile, false) });
+    const abortController = new AbortController();
+
+    const reqAborted = access.request(outsideFile, "read", "read", ctx, abortController.signal);
+    const reqNormal = access.request(outsideFile, "read", "read", ctx);
+
+    // Abort first caller
+    abortController.abort();
+    const resAborted = await reqAborted;
+    assert.equal(resAborted.decision, "ask"); // Aborted returns fallback
+
+    // Wait until select prompt is reached
+    while (resolvePrompt === undefined) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    // Normal caller should still resolve successfully when prompt resolves
+    assert.ok(resolvePrompt);
+    resolvePrompt("");
+    const resNormal = await reqNormal;
+    assert.equal(resNormal.decision, "allow");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

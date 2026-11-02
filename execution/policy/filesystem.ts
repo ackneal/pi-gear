@@ -6,14 +6,16 @@ export type FilesystemOperation = "read" | "write";
 export type FilesystemDecision = "allow" | "ask" | "deny";
 
 export const selectorPath = (selector: string, workspace: string): string =>
-  selector.startsWith("~/")
-    ? join(homedir(), selector.slice(2))
-    : selector.startsWith("/")
-      ? selector
-      : join(workspace, selector);
+  selector === "~"
+    ? homedir()
+    : selector.startsWith("~/")
+      ? join(homedir(), selector.slice(2))
+      : selector.startsWith("/")
+        ? selector
+        : join(workspace, selector);
 
 export const isHostSelector = (selector: string): boolean =>
-  selector.startsWith("~/") || selector.startsWith("/");
+  selector === "~" || selector.startsWith("~/") || selector.startsWith("/");
 
 const globRegex = (pattern: string): RegExp => {
   let expression = "^";

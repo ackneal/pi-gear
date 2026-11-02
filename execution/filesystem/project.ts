@@ -45,20 +45,22 @@ export const detectProjectRoot = async (
   targetPath: string,
   options: DetectProjectRootOptions = {},
 ): Promise<string | undefined> => {
-  const home = options.home ?? homedir();
-  const boundary = options.boundary;
-  let current = (await isDirectory(targetPath)) ? targetPath : dirname(targetPath);
+  const home = resolve(options.home ?? homedir());
+  const boundary = options.boundary !== undefined ? resolve(options.boundary) : undefined;
+  const absoluteTarget = resolve(targetPath);
+  let current = (await isDirectory(absoluteTarget)) ? absoluteTarget : dirname(absoluteTarget);
 
   let fallbackProject: string | undefined;
 
   while (current !== home && current !== boundary) {
+    const parent = dirname(current);
+    if (parent === current) break;
+
     if (await pathExists(resolve(current, ".git"))) return current;
     if (fallbackProject === undefined && await hasProjectMarker(current)) {
       fallbackProject = current;
     }
 
-    const parent = dirname(current);
-    if (parent === current) break;
     current = parent;
   }
 

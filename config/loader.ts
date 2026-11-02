@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { getAgentDir, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { parseExtensionConfig } from "./parse.ts";
 import type { ExtensionConfig, FilesystemRule } from "./types.ts";
@@ -72,9 +72,10 @@ const writeAtomicConfig = async (configPath: string, updatedRaw: Record<string, 
 };
 
 export const normalizeFilesystemRulePath = (targetPath: string, home: string = homedir()): string => {
-  if (targetPath.startsWith("~/")) return targetPath;
-  if (targetPath === home) return "~";
-  if (targetPath.startsWith(`${home}/`)) return `~/${targetPath.slice(home.length + 1)}`;
+  const resolvedHome = resolve(home);
+  if (targetPath === "~" || targetPath.startsWith("~/")) return targetPath;
+  if (targetPath === resolvedHome) return "~";
+  if (targetPath.startsWith(`${resolvedHome}/`)) return `~/${targetPath.slice(resolvedHome.length + 1)}`;
   return targetPath;
 };
 
@@ -118,12 +119,16 @@ export const appendAllowedFilesystemRule = async (
       ? filesystem.rules as Array<{ path?: string; access?: string; follow?: boolean }>
       : [];
 
-    const existing = existingRules.find((r) => r?.path === normalizedPath);
+    const existing = existingRules.find((r) =>
+      r?.path !== undefined && normalizeFilesystemRulePath(r.path, options.home) === normalizedPath
+    );
     const access = existing?.access === "read-write" || rule.access === "read-write"
       ? "read-write"
       : rule.access;
 
-    const filtered = existingRules.filter((r) => r?.path !== normalizedPath);
+    const filtered = existingRules.filter((r) =>
+      r?.path === undefined || normalizeFilesystemRulePath(r.path, options.home) !== normalizedPath
+    );
     const updatedRule = { ...rule, path: normalizedPath, access };
     const updatedRaw = {
       ...raw,
