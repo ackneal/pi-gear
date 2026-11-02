@@ -1,11 +1,10 @@
 import { basename } from "node:path";
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { Key, matchesKey } from "@earendil-works/pi-tui";
+import { Key, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import { CONFIRMATION_TIMEOUT_MS } from "../confirmation-queue.ts";
 
 export type FilesystemPromptChoice =
   | "allow-file-once"
-  | "allow-file-session"
   | "allow-project-session"
   | "always-allow-file"
   | "always-allow-project"
@@ -14,7 +13,7 @@ export type FilesystemPromptChoice =
 export interface FilesystemPromptParams {
   readonly path: string;
   readonly label: string;
-  readonly projectRoot: string | undefined;
+  readonly projectPattern: string | undefined;
   readonly ctx: ExtensionContext;
   readonly signal?: AbortSignal;
 }
@@ -64,10 +63,6 @@ export class FilesystemApprovalComponent {
     ];
   }
 
-  get isPermanent(): boolean {
-    return this.permanent;
-  }
-
   get items(): readonly PromptItem[] {
     return this.permanent ? this.itemsPermanent : this.itemsTransient;
   }
@@ -107,7 +102,7 @@ export class FilesystemApprovalComponent {
     }
   }
 
-  render(_width: number): string[] {
+  render(width: number): string[] {
     const modeBadge = this.permanent
       ? this.theme.fg("warning", "[Mode: Always Allow (Write to config.json)]")
       : this.theme.fg("muted", "[Mode: Session / Once]");
@@ -132,16 +127,15 @@ export class FilesystemApprovalComponent {
       : "[Tab] Switch to Always Allow";
     lines.push(this.theme.fg("dim", `${toggleHint} • [↑/↓] Select • [Enter] Confirm • [Esc] Deny`));
 
-    return lines;
+    return lines.map((line) => truncateToWidth(line, width));
   }
 }
 
 export const promptFilesystemAccess = async (params: FilesystemPromptParams): Promise<FilesystemPromptChoice> => {
-  const { path, label, projectRoot, ctx, signal } = params;
+  if (params.signal?.aborted) return "deny";
+
+  const { path, label, projectPattern, ctx, signal } = params;
   const fileLabel = basename(path);
-  const projectPattern = projectRoot !== undefined
-    ? `${projectRoot.replace(/\/+$/, "")}/**`
-    : undefined;
   const title = `Allow ${label} access to ${path}?`;
 
   if (ctx.mode === "tui" && typeof ctx.ui?.custom === "function") {
@@ -164,31 +158,28 @@ export const promptFilesystemAccess = async (params: FilesystemPromptParams): Pr
     });
   }
 
+  const dialogOptions = signal !== undefined
+    ? { timeout: CONFIRMATION_TIMEOUT_MS, signal }
+    : { timeout: CONFIRMATION_TIMEOUT_MS };
+
   if (typeof ctx.ui?.select === "function") {
     const options = [
       `Allow file once (${fileLabel})`,
       ...(projectPattern !== undefined ? [`Allow project for this session (${projectPattern})`] : []),
-      ...(projectPattern !== undefined ? [`Always allow project (${projectPattern})`] : []),
       `Always allow file (${fileLabel})`,
+      ...(projectPattern !== undefined ? [`Always allow project (${projectPattern})`] : []),
       "Deny",
     ];
-
-    const dialogOptions = signal !== undefined
-      ? { timeout: CONFIRMATION_TIMEOUT_MS, signal }
-      : { timeout: CONFIRMATION_TIMEOUT_MS };
 
     const choice = await ctx.ui.select(title, options, dialogOptions);
 
     if (choice === `Allow file once (${fileLabel})`) return "allow-file-once";
     if (projectPattern !== undefined && choice === `Allow project for this session (${projectPattern})`) return "allow-project-session";
-    if (projectPattern !== undefined && choice === `Always allow project (${projectPattern})`) return "always-allow-project";
     if (choice === `Always allow file (${fileLabel})`) return "always-allow-file";
+    if (projectPattern !== undefined && choice === `Always allow project (${projectPattern})`) return "always-allow-project";
     return "deny";
   }
 
-  const dialogOptions = signal !== undefined
-    ? { timeout: CONFIRMATION_TIMEOUT_MS, signal }
-    : { timeout: CONFIRMATION_TIMEOUT_MS };
   const allowed = await ctx.ui.confirm("Outside workspace access", title, dialogOptions);
   return allowed ? "allow-file-once" : "deny";
 };

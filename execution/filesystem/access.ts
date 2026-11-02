@@ -165,7 +165,7 @@ export class FilesystemAccess {
         const choice = await promptFilesystemAccess({
           path: authorization.path,
           label,
-          projectRoot,
+          projectPattern,
           ctx,
           signal: queueSignal,
         });
@@ -199,15 +199,6 @@ export class FilesystemAccess {
       await this.persistRule({ path: projectPattern, access: ruleAccess }, ctx);
       ctx.ui.notify(
         `User permanently approved outside-workspace project access: ${label} ${projectPattern}`,
-        "info",
-      );
-      return { ...authorization, decision: "allow" };
-    }
-
-    if (choice === "allow-file-session") {
-      this.addSessionApproval(authorization.path, ruleAccess);
-      ctx.ui.notify(
-        `User approved outside-workspace access: ${label} ${authorization.path}`,
         "info",
       );
       return { ...authorization, decision: "allow" };
