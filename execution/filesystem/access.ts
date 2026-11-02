@@ -1,4 +1,3 @@
-import { basename } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   appendAllowedFilesystemRule,
@@ -7,7 +6,7 @@ import {
   type FilesystemAccess as FilesystemRuleAccess,
   type FilesystemRule,
 } from "../../config/index.ts";
-import { CONFIRMATION_TIMEOUT_MS, ConfirmationQueue } from "../confirmation-queue.ts";
+import { ConfirmationQueue } from "../confirmation-queue.ts";
 import { resolveRuntimeTempDir, type TempDirSource } from "../sandbox/config.ts";
 import {
   decisionForAccess,
@@ -26,6 +25,7 @@ import {
   type CanonicalWorkspace,
 } from "./paths.ts";
 import { detectProjectRoot } from "./project.ts";
+import { promptFilesystemAccess, type FilesystemPromptChoice } from "./prompt.ts";
 
 export interface FilesystemAuthorization {
   readonly path: string;
@@ -160,58 +160,32 @@ export class FilesystemAccess {
         const workspace = await this.workspace;
         const projectRoot = await detectProjectRoot(authorization.path, { boundary: workspace.canonicalRoot });
         const ruleAccess: FilesystemRuleAccess = operation === "read" ? "read-only" : "read-write";
+        const projectPattern = projectRoot !== undefined ? `${projectRoot.replace(/\/+$/, "")}/**` : undefined;
 
-        if (typeof ctx.ui?.select === "function") {
-          return this.promptSelect(authorization, label, projectRoot, ruleAccess, ctx, queueSignal);
-        }
+        const choice = await promptFilesystemAccess({
+          path: authorization.path,
+          label,
+          projectRoot,
+          ctx,
+          signal: queueSignal,
+        });
 
-        return this.promptConfirm(authorization, label, ruleAccess, ctx, queueSignal);
+        return this.handlePromptChoice(choice, authorization, label, ruleAccess, projectPattern, ctx);
       }, authorization);
     } finally {
       this.pendingPrompts.delete(key);
     }
   }
 
-  private async promptSelect(
+  private async handlePromptChoice(
+    choice: FilesystemPromptChoice,
     authorization: FilesystemAuthorization,
     label: string,
-    projectRoot: string | undefined,
     ruleAccess: FilesystemRuleAccess,
+    projectPattern: string | undefined,
     ctx: ExtensionContext,
-    signal: AbortSignal,
   ): Promise<FilesystemAuthorization> {
-    const fileLabel = basename(authorization.path);
-    const allowFileOnce = `Allow file once (${fileLabel})`;
-    const allowFileSession = `Allow file for this session (${fileLabel})`;
-    const alwaysAllowFile = `Always allow file (${fileLabel})`;
-
-    const projectPattern = projectRoot !== undefined
-      ? `${projectRoot.replace(/\/+$/, "")}/**`
-      : undefined;
-    const allowProjectSession = projectPattern !== undefined
-      ? `Allow project for this session (${projectPattern})`
-      : undefined;
-    const alwaysAllowProject = projectPattern !== undefined
-      ? `Always allow project (${projectPattern})`
-      : undefined;
-    const deny = "Deny";
-
-    const options = [
-      allowFileOnce,
-      allowFileSession,
-      ...(allowProjectSession ? [allowProjectSession] : []),
-      alwaysAllowFile,
-      ...(alwaysAllowProject ? [alwaysAllowProject] : []),
-      deny,
-    ];
-
-    const choice = await ctx.ui.select!(
-      `Allow ${label} access to ${authorization.path}?`,
-      options,
-      { timeout: CONFIRMATION_TIMEOUT_MS, signal },
-    );
-
-    if (choice === allowProjectSession && projectPattern !== undefined) {
+    if (choice === "allow-project-session" && projectPattern !== undefined) {
       this.addSessionApproval(projectPattern, ruleAccess);
       ctx.ui.notify(
         `User approved outside-workspace project access: ${label} ${projectPattern}`,
@@ -220,7 +194,7 @@ export class FilesystemAccess {
       return { ...authorization, decision: "allow" };
     }
 
-    if (choice === alwaysAllowProject && projectPattern !== undefined) {
+    if (choice === "always-allow-project" && projectPattern !== undefined) {
       this.addSessionApproval(projectPattern, ruleAccess);
       await this.persistRule({ path: projectPattern, access: ruleAccess }, ctx);
       ctx.ui.notify(
@@ -230,7 +204,7 @@ export class FilesystemAccess {
       return { ...authorization, decision: "allow" };
     }
 
-    if (choice === allowFileSession) {
+    if (choice === "allow-file-session") {
       this.addSessionApproval(authorization.path, ruleAccess);
       ctx.ui.notify(
         `User approved outside-workspace access: ${label} ${authorization.path}`,
@@ -239,7 +213,7 @@ export class FilesystemAccess {
       return { ...authorization, decision: "allow" };
     }
 
-    if (choice === alwaysAllowFile) {
+    if (choice === "always-allow-file") {
       this.addSessionApproval(authorization.path, ruleAccess);
       await this.persistRule({ path: authorization.path, access: ruleAccess }, ctx);
       ctx.ui.notify(
@@ -249,36 +223,7 @@ export class FilesystemAccess {
       return { ...authorization, decision: "allow" };
     }
 
-    if (choice === allowFileOnce) {
-      ctx.ui.notify(
-        `User approved outside-workspace access: ${label} ${authorization.path}`,
-        "info",
-      );
-      return { ...authorization, decision: "allow" };
-    }
-
-    ctx.ui.notify(
-      `User denied outside-workspace access: ${label} ${authorization.path}`,
-      "warning",
-    );
-    return authorization;
-  }
-
-  private async promptConfirm(
-    authorization: FilesystemAuthorization,
-    label: string,
-    ruleAccess: FilesystemRuleAccess,
-    ctx: ExtensionContext,
-    signal: AbortSignal,
-  ): Promise<FilesystemAuthorization> {
-    const allowed = await ctx.ui.confirm(
-      "Outside workspace access",
-      `Allow ${label} access to ${authorization.path}?`,
-      { timeout: CONFIRMATION_TIMEOUT_MS, signal },
-    );
-
-    if (allowed) {
-      this.addSessionApproval(authorization.path, ruleAccess);
+    if (choice === "allow-file-once") {
       ctx.ui.notify(
         `User approved outside-workspace access: ${label} ${authorization.path}`,
         "info",

@@ -151,15 +151,15 @@ test("project approval options allow session-wide and persistent project access"
   }
 });
 
-test("file scope choices distinguish single in-flight vs session-level approval", async () => {
+test("file choices distinguish single in-flight vs persistent approval", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-gear-file-scopes-"));
   const workspace = join(root, "workspace");
   const fileOnce = join(root, "once.txt");
-  const fileSession = join(root, "session.txt");
+  const fileAlways = join(root, "always.txt");
 
   await mkdir(workspace);
   await writeFile(fileOnce, "once");
-  await writeFile(fileSession, "session");
+  await writeFile(fileAlways, "always");
 
   try {
     let promptCount = 0;
@@ -187,14 +187,14 @@ test("file scope choices distinguish single in-flight vs session-level approval"
     assert.equal(resOnce2.decision, "allow");
     assert.equal(promptCount, 2); // Prompted again!
 
-    // Allow file for this session caches into sessionApprovals
-    selectedOption = "Allow file for this session";
-    const resSession1 = await access.request(fileSession, "read", "read", ctx);
-    assert.equal(resSession1.decision, "allow");
+    // Always allow file caches into session and persists
+    selectedOption = "Always allow file";
+    const resAlways1 = await access.request(fileAlways, "read", "read", ctx);
+    assert.equal(resAlways1.decision, "allow");
     assert.equal(promptCount, 3);
 
-    const resSession2 = await access.request(fileSession, "read", "read", ctx);
-    assert.equal(resSession2.decision, "allow");
+    const resAlways2 = await access.request(fileAlways, "read", "read", ctx);
+    assert.equal(resAlways2.decision, "allow");
     assert.equal(promptCount, 3); // Not prompted again!
   } finally {
     await rm(root, { recursive: true, force: true });
