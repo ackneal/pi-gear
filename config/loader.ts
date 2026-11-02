@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { getAgentDir, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { parseExtensionConfig } from "./parse.ts";
@@ -54,6 +55,29 @@ export const loadExtensionConfig = async (): Promise<ExtensionConfig> => {
   return pending;
 };
 
+const writeAtomicConfig = async (configPath: string, updatedRaw: Record<string, unknown>): Promise<ExtensionConfig> => {
+  const serialized = `${JSON.stringify(updatedRaw, null, 2)}\n`;
+  await mkdir(dirname(configPath), { recursive: true });
+  const temporary = `${configPath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, serialized, { encoding: "utf8", mode: 0o600 });
+    await rename(temporary, configPath);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+
+  const updated = withRuntimeDefaults(parseExtensionConfig(updatedRaw));
+  cachedConfig = Promise.resolve(updated);
+  return updated;
+};
+
+export const normalizeFilesystemRulePath = (targetPath: string, home: string = homedir()): string => {
+  if (targetPath.startsWith("~/")) return targetPath;
+  if (targetPath === home) return "~";
+  if (targetPath.startsWith(`${home}/`)) return `~/${targetPath.slice(home.length + 1)}`;
+  return targetPath;
+};
+
 export const appendAllowedNetworkHost = async (host: string): Promise<ExtensionConfig> => {
   const normalized = host.toLowerCase();
   const configPath = getGlobalConfigPath();
@@ -76,18 +100,39 @@ export const appendAllowedNetworkHost = async (host: string): Promise<ExtensionC
       },
     };
 
-    const serialized = `${JSON.stringify(updatedRaw, null, 2)}\n`;
-    await mkdir(dirname(configPath), { recursive: true });
-    const temporary = `${configPath}.${process.pid}.${randomUUID()}.tmp`;
-    try {
-      await writeFile(temporary, serialized, { encoding: "utf8", mode: 0o600 });
-      await rename(temporary, configPath);
-    } finally {
-      await rm(temporary, { force: true });
-    }
+    return writeAtomicConfig(configPath, updatedRaw);
+  });
+};
 
-    const updated = withRuntimeDefaults(parseExtensionConfig(updatedRaw));
-    cachedConfig = Promise.resolve(updated);
-    return updated;
+export const appendAllowedFilesystemRule = async (
+  rule: FilesystemRule,
+  options: { home?: string } = {},
+): Promise<ExtensionConfig> => {
+  const normalizedPath = normalizeFilesystemRulePath(rule.path, options.home);
+  const configPath = getGlobalConfigPath();
+
+  return withFileMutationQueue(configPath, async () => {
+    const raw = await readRawConfig();
+    const filesystem = (raw.filesystem ?? {}) as Record<string, unknown>;
+    const existingRules = Array.isArray(filesystem.rules)
+      ? filesystem.rules as Array<{ path?: string; access?: string; follow?: boolean }>
+      : [];
+
+    const existing = existingRules.find((r) => r?.path === normalizedPath);
+    const access = existing?.access === "read-write" || rule.access === "read-write"
+      ? "read-write"
+      : rule.access;
+
+    const filtered = existingRules.filter((r) => r?.path !== normalizedPath);
+    const updatedRule = { ...rule, path: normalizedPath, access };
+    const updatedRaw = {
+      ...raw,
+      filesystem: {
+        ...filesystem,
+        rules: [...filtered, updatedRule],
+      },
+    };
+
+    return writeAtomicConfig(configPath, updatedRaw);
   });
 };

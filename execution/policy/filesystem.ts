@@ -69,7 +69,7 @@ const matchingRules = (
 const rank = (access: FilesystemAccess): number =>
   access === "deny" ? 3 : access === "read-only" ? 2 : 1;
 
-const decisionForAccess = (
+export const decisionForAccess = (
   access: FilesystemAccess,
   operation: FilesystemOperation,
 ): FilesystemDecision => access === "deny" || (access === "read-only" && operation === "write")

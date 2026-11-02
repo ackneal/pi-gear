@@ -69,6 +69,39 @@ const appendTo = async (agentDir: string, host: string): Promise<ExtensionConfig
   return JSON.parse(stdout) as ExtensionConfig;
 };
 
+const appendFsRuleTo = async (agentDir: string, rule: { path: string; access: string }): Promise<ExtensionConfig> => {
+  const loaderUrl = new URL("./loader.ts", import.meta.url).href;
+  const script = `import { appendAllowedFilesystemRule } from ${JSON.stringify(loaderUrl)}; console.log(JSON.stringify(await appendAllowedFilesystemRule(${JSON.stringify(rule)})));`;
+  const { stdout } = await promisify(execFile)(
+    process.execPath,
+    ["--experimental-strip-types", "--input-type=module", "--eval", script],
+    { env: { ...process.env, PI_CODING_AGENT_DIR: agentDir } },
+  );
+  return JSON.parse(stdout) as ExtensionConfig;
+};
+
+test("appendAllowedFilesystemRule normalizes path, avoids duplicates, and upgrades access", async () => {
+  const agentDir = await mkdtemp(join(tmpdir(), "pi-gear-agent-dir-"));
+
+  try {
+    const updated = await appendFsRuleTo(agentDir, { path: "~/Developer/other-project/**", access: "read-only" });
+    const rule = updated.filesystem.rules.find((r) => r.path === "~/Developer/other-project/**");
+    assert.equal(rule?.access, "read-only");
+
+    const upgraded = await appendFsRuleTo(agentDir, { path: "~/Developer/other-project/**", access: "read-write" });
+    const matching = upgraded.filesystem.rules.filter((r) => r.path === "~/Developer/other-project/**");
+    assert.equal(matching.length, 1);
+    assert.equal(matching[0]?.access, "read-write");
+
+    const retained = await appendFsRuleTo(agentDir, { path: "~/Developer/other-project/**", access: "read-only" });
+    const finalMatching = retained.filesystem.rules.filter((r) => r.path === "~/Developer/other-project/**");
+    assert.equal(finalMatching.length, 1);
+    assert.equal(finalMatching[0]?.access, "read-write");
+  } finally {
+    await rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("appendAllowedNetworkHost normalizes host and updates config idempotently", async () => {
   const agentDir = await mkdtemp(join(tmpdir(), "pi-gear-agent-dir-"));
 

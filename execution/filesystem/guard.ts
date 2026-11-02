@@ -72,6 +72,7 @@ export function setupFilesystemGuard(
 
   const clear = (): void => {
     confirmationQueue.reset();
+    for (const access of workspaces.values()) access.clear();
     workspaces.clear();
   };
   pi.on("session_start", clear);

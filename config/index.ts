@@ -1,4 +1,4 @@
-export { appendAllowedNetworkHost, loadExtensionConfig } from "./loader.ts";
+export { appendAllowedFilesystemRule, appendAllowedNetworkHost, loadExtensionConfig } from "./loader.ts";
 export { parseExtensionConfig } from "./parse.ts";
 export type {
   AccessPolicy,
