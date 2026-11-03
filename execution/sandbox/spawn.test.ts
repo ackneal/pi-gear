@@ -6,6 +6,54 @@ import test from "node:test";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { createSandboxedBashOperations } from "./spawn.ts";
 
+test("customConfigFor allows writing to dynamically approved directory and restricts when cleared", {
+  skip: process.platform !== "darwin",
+}, async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "pi-gear-spawn-ws-"));
+  const outsideDir = await mkdtemp(join(tmpdir(), "pi-gear-spawn-outside-"));
+
+  let customConfig: SandboxRuntimeConfig = {
+    filesystem: { allowRead: [], denyRead: [], allowWrite: [workspace], denyWrite: [] },
+    network: { allowedDomains: [], deniedDomains: [] },
+  };
+
+  const operations = createSandboxedBashOperations({
+    isAvailable: () => true,
+    unavailableReason: () => "unused",
+    onCleanupFailure: () => undefined,
+    onExecutionPrevented: () => undefined,
+    customConfigFor: async () => customConfig,
+  });
+
+  try {
+    // 1. Without outsideDir in allowWrite, customConfigFor reflects restricted write
+    assert.deepEqual(customConfig.filesystem.allowWrite, [workspace]);
+
+    // 2. Dynamically add outsideDir to allowWrite for the next command
+    customConfig = {
+      ...customConfig,
+      filesystem: {
+        ...customConfig.filesystem,
+        allowWrite: [workspace, outsideDir],
+      },
+    };
+    assert.ok(customConfig.filesystem.allowWrite.includes(outsideDir));
+
+    // 3. Clear session approval: next command loses outsideDir
+    customConfig = {
+      ...customConfig,
+      filesystem: {
+        ...customConfig.filesystem,
+        allowWrite: [workspace],
+      },
+    };
+    assert.ok(!customConfig.filesystem.allowWrite.includes(outsideDir));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outsideDir, { recursive: true, force: true });
+  }
+});
+
 test("unavailable sandbox prevents host command execution", async () => {
   const prevented: string[] = [];
   const operations = createSandboxedBashOperations({

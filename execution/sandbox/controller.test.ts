@@ -76,13 +76,15 @@ test("customConfigFor merges dynamic session approvals into sandbox filesystem a
     { path: `${readonlyDir}/**`, access: "read-only" as const },
   ];
 
+  const staticConfig = {
+    version: 1 as const,
+    filesystem: { rules: [{ path: "~/.ssh", access: "deny" as const }] },
+    sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } },
+  };
+
   const controller = new SandboxController(
     manager,
-    async () => ({
-      version: 1,
-      filesystem: { rules: [{ path: "~/.ssh", access: "deny" }] },
-      sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } },
-    }),
+    async () => staticConfig,
     undefined,
     (baseRules) => [...baseRules, ...sessionRules],
   );
@@ -96,11 +98,6 @@ test("customConfigFor merges dynamic session approvals into sandbox filesystem a
   try {
     await controller.start(ctx);
 
-    // Access customConfigFor via operations
-    let capturedConfig: any;
-    const dummyOps = controller.operations;
-    // We can directly call the private sessionConfig via customConfigFor if exposed or inspect through customConfigFor
-    // In spawn.ts, callbacks.customConfigFor is passed to wrapWithSandbox. Let's test the config generated:
     // Normalize /tmp on macOS
     const expectedProject = normalizeTempAlias(`${projectDir}/**`);
     const expectedReadonly = normalizeTempAlias(`${readonlyDir}/**`);
@@ -124,6 +121,10 @@ test("customConfigFor merges dynamic session approvals into sandbox filesystem a
     sessionRules = [];
     const clearedConfig = await (controller as any).sessionConfig();
     assert.ok(!clearedConfig.filesystem.allowWrite.includes(expectedProject));
+
+    // 6. Config caching: consecutive call with unchanged rules returns exact same cached config object
+    const cachedConfig = await (controller as any).sessionConfig();
+    assert.equal(cachedConfig, clearedConfig);
   } finally {
     await rm(workspace, { recursive: true, force: true });
     await rm(projectDir, { recursive: true, force: true });

@@ -4,7 +4,7 @@ import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { matchesFilesystemSelector, selectorPath } from "../policy/filesystem.ts";
-import type { AccessPolicy } from "../../config/types.ts";
+import type { AccessPolicy, FilesystemRule } from "../../config/types.ts";
 
 export const validateRuntimePath = (path: string, source: string): string => {
   if (/[*?\[\]]/.test(path)) throw new Error(`${source} contains Sandbox Runtime glob metacharacters`);
@@ -132,7 +132,12 @@ const followedPolicyPaths = async (
   return new Map(paths);
 };
 
+const hasWorkspaceRelativeDeny = (rules: readonly FilesystemRule[]): boolean =>
+  rules.some((rule) => rule.access === "deny" && !rule.path.startsWith("/") && !rule.path.startsWith("~/"));
+
 const deniedWorkspaceFiles = async (workspace: string, policy: AccessPolicy): Promise<readonly string[]> => {
+  if (!hasWorkspaceRelativeDeny(policy.filesystem.rules)) return [];
+
   const denied: string[] = [];
   const visit = async (directory: string, relativeDirectory: string): Promise<void> => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {

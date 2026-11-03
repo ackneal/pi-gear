@@ -2,7 +2,7 @@ import { SandboxManager, type NetworkHostPattern, type SandboxRuntimeConfig } fr
 import type { BashOperations, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { evaluateNetwork } from "../policy/network.ts";
 import { canonicalizeWorkspace, type CanonicalWorkspace } from "../filesystem/paths.ts";
-import { appendAllowedNetworkHost, loadExtensionConfig, type AccessPolicy, type FilesystemRule } from "../../config/index.ts";
+import { appendAllowedNetworkHost, loadExtensionConfig, type AccessPolicy, type ExtensionConfig, type FilesystemRule } from "../../config/index.ts";
 import { networkKey, SessionApprovals } from "./approvals.ts";
 import { createEffectiveSandboxConfig, resolveRuntimeTempDir } from "./config.ts";
 import { createSandboxedBashOperations } from "./spawn.ts";
@@ -46,6 +46,12 @@ export interface SandboxControllerOptions {
   readonly getEffectiveFilesystemRules?: ((baseRules: readonly FilesystemRule[]) => readonly FilesystemRule[]) | undefined;
 }
 
+interface EffectiveConfigCache {
+  readonly configVersion: ExtensionConfig;
+  readonly sessionRulesSignature: string;
+  readonly effectiveSandboxConfig: SandboxRuntimeConfig;
+}
+
 export class SandboxController {
   private readonly manager: SandboxManagerLike;
   private readonly loadConfig: typeof loadExtensionConfig;
@@ -69,6 +75,7 @@ export class SandboxController {
   private approvals: SessionApprovals | undefined;
   private lifecycle: Promise<void> = Promise.resolve();
   private tempDirPath: string | undefined;
+  private effectiveCache: EffectiveConfigCache | undefined;
 
   readonly operations: BashOperations = createSandboxedBashOperations({
     isAvailable: () => this.state.kind === "ready",
@@ -92,6 +99,7 @@ export class SandboxController {
     const generation = ++this.generation;
     this.approvals?.clear();
     this.approvals = undefined;
+    this.effectiveCache = undefined;
     this.state = { kind: "starting" };
     let approvals: SessionApprovals | undefined;
     let initializationAttempted = false;
@@ -186,6 +194,7 @@ export class SandboxController {
     ++this.generation;
     this.approvals?.clear();
     this.approvals = undefined;
+    this.effectiveCache = undefined;
     if (this.state.kind === "ready" || this.manager.isSandboxingEnabled()) {
       try { await this.manager.reset(); } catch { /* Bash remains unavailable after cleanup failure. */ }
     }
@@ -226,6 +235,16 @@ export class SandboxController {
 
     const currentConfig = await this.loadConfig();
     const effectiveRules = this.getEffectiveFilesystemRules(currentConfig.filesystem.rules);
+    const sessionRulesSignature = effectiveRules.map((r) => `${r.path}:${r.access}`).join(";");
+
+    if (
+      this.effectiveCache !== undefined &&
+      this.effectiveCache.configVersion === currentConfig &&
+      this.effectiveCache.sessionRulesSignature === sessionRulesSignature
+    ) {
+      return this.effectiveCache.effectiveSandboxConfig;
+    }
+
     const dynamicPolicy: AccessPolicy = {
       ...currentConfig,
       filesystem: {
@@ -240,9 +259,17 @@ export class SandboxController {
       { tempDir: this.tempDirPath },
     );
 
-    return {
+    const mergedConfig: SandboxRuntimeConfig = {
       ...effectiveSandboxConfig,
       network: this.state.config.network,
     };
+
+    this.effectiveCache = {
+      configVersion: currentConfig,
+      sessionRulesSignature,
+      effectiveSandboxConfig: mergedConfig,
+    };
+
+    return mergedConfig;
   }
 }
