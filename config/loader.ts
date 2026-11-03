@@ -56,6 +56,7 @@ export const loadExtensionConfig = async (): Promise<ExtensionConfig> => {
 };
 
 const writeAtomicConfig = async (configPath: string, updatedRaw: Record<string, unknown>): Promise<ExtensionConfig> => {
+  const updated = withRuntimeDefaults(parseExtensionConfig(updatedRaw));
   const serialized = `${JSON.stringify(updatedRaw, null, 2)}\n`;
   await mkdir(dirname(configPath), { recursive: true });
   const temporary = `${configPath}.${process.pid}.${randomUUID()}.tmp`;
@@ -66,7 +67,6 @@ const writeAtomicConfig = async (configPath: string, updatedRaw: Record<string, 
     await rm(temporary, { force: true });
   }
 
-  const updated = withRuntimeDefaults(parseExtensionConfig(updatedRaw));
   cachedConfig = Promise.resolve(updated);
   return updated;
 };

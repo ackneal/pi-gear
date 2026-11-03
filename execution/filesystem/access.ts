@@ -76,6 +76,7 @@ export class FilesystemAccess {
   private tempPrefixes: Promise<readonly string[]> | undefined;
   private readonly confirmationQueue: ConfirmationQueue;
   private readonly pendingPrompts = new Map<string, Promise<FilesystemAuthorization>>();
+  private generation = 0;
 
   constructor(cwd: string, options: FilesystemAccessOptions = {}) {
     this.cwd = cwd;
@@ -152,7 +153,9 @@ export class FilesystemAccess {
     key: string,
   ): Promise<FilesystemAuthorization> {
     try {
+      const promptGeneration = this.generation;
       return await this.confirmationQueue.prompt(async (queueSignal) => {
+        if (queueSignal.aborted || this.generation !== promptGeneration) return authorization;
         if (this.isSessionApproved(authorization, operation)) {
           return { ...authorization, decision: "allow" };
         }
@@ -170,7 +173,17 @@ export class FilesystemAccess {
           signal: queueSignal,
         });
 
-        return this.handlePromptChoice(choice, authorization, label, ruleAccess, projectPattern, ctx);
+        if (queueSignal.aborted || this.generation !== promptGeneration) return authorization;
+
+        return this.handlePromptChoice(
+          choice,
+          authorization,
+          label,
+          ruleAccess,
+          projectPattern,
+          ctx,
+          () => !queueSignal.aborted && this.generation === promptGeneration,
+        );
       }, authorization);
     } finally {
       this.pendingPrompts.delete(key);
@@ -184,7 +197,10 @@ export class FilesystemAccess {
     ruleAccess: FilesystemRuleAccess,
     projectPattern: string | undefined,
     ctx: ExtensionContext,
+    isCurrent: () => boolean,
   ): Promise<FilesystemAuthorization> {
+    if (!isCurrent()) return authorization;
+
     if (choice === "allow-project" && projectPattern !== undefined) {
       this.addSessionApproval(projectPattern, ruleAccess);
       ctx.ui.notify(
@@ -195,8 +211,9 @@ export class FilesystemAccess {
     }
 
     if (choice === "always-allow-project" && projectPattern !== undefined) {
-      this.addSessionApproval(projectPattern, ruleAccess);
       await this.persistRule({ path: projectPattern, access: ruleAccess }, ctx);
+      if (!isCurrent()) return authorization;
+      this.addSessionApproval(projectPattern, ruleAccess);
       ctx.ui.notify(
         `User permanently approved outside-workspace project access: ${label} ${projectPattern}`,
         "info",
@@ -205,8 +222,9 @@ export class FilesystemAccess {
     }
 
     if (choice === "always-allow-file") {
-      this.addSessionApproval(authorization.path, ruleAccess);
       await this.persistRule({ path: authorization.path, access: ruleAccess }, ctx);
+      if (!isCurrent()) return authorization;
+      this.addSessionApproval(authorization.path, ruleAccess);
       ctx.ui.notify(
         `User permanently approved outside-workspace access: ${label} ${authorization.path}`,
         "info",
@@ -284,6 +302,7 @@ export class FilesystemAccess {
   }
 
   clear(): void {
+    ++this.generation;
     this.sessionApprovals.length = 0;
     this.pendingPrompts.clear();
   }

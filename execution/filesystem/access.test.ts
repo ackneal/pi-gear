@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { FilesystemRule } from "../../config/index.ts";
 import { CONFIRMATION_TIMEOUT_MS } from "../confirmation-queue.ts";
+import { ConfirmationQueue } from "../confirmation-queue.ts";
 import { FilesystemAccess } from "./access.ts";
 
 const policy = (path: string, deny: boolean) => ({
@@ -312,6 +313,63 @@ test("concurrent request with abort signal does not abort independent concurrent
     resolvePrompt("");
     const resNormal = await reqNormal;
     assert.equal(resNormal.decision, "allow");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("prompt callback delayed return after reset/clear does not apply approval or persist rule", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-gear-delayed-prompt-"));
+  const workspace = join(root, "workspace");
+  const outsideFile = join(root, "outside.txt");
+
+  await mkdir(workspace);
+  await writeFile(outsideFile, "content");
+
+  try {
+    let resolvePrompt: ((choice: string) => void) | undefined;
+    const notifications: string[] = [];
+    const persisted: string[] = [];
+
+    const ctx = {
+      hasUI: true,
+      ui: {
+        select: (_title: string, options: string[]) => new Promise<string>((resolve) => {
+          resolvePrompt = () => resolve(options[1]!); // "Always allow"
+        }),
+        notify: (msg: string) => notifications.push(msg),
+      },
+    } as unknown as ExtensionContext;
+
+    const queue = new ConfirmationQueue();
+    const access = new FilesystemAccess(workspace, {
+      loadConfig: async () => policy(outsideFile, false),
+      confirmationQueue: queue,
+      persistRule: async (rule) => { persisted.push(rule.path); },
+    });
+
+    const pending = access.request(outsideFile, "read", "read", ctx);
+
+    // Wait until prompt is active
+    while (resolvePrompt === undefined) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    // Reset queue / clear session while prompt is open
+    queue.reset();
+    access.clear();
+
+    const abortedOutcome = await pending;
+    assert.equal(abortedOutcome.decision, "ask");
+
+    // UI returns after session reset
+    resolvePrompt("");
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+
+    // Must not have persisted rule or added session approval
+    assert.equal(persisted.length, 0);
+    assert.equal(access.sessionApprovals.length, 0);
+    assert.equal(notifications.length, 0);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
