@@ -235,7 +235,7 @@ export class SandboxController {
 
     const currentConfig = await this.loadConfig();
     const effectiveRules = this.getEffectiveFilesystemRules(currentConfig.filesystem.rules);
-    const sessionRulesSignature = effectiveRules.map((r) => `${r.path}:${r.access}`).join(";");
+    const sessionRulesSignature = effectiveRules.map((r) => `${r.path}:${r.access}:${r.follow ?? false}`).join(";");
 
     if (
       this.effectiveCache !== undefined &&

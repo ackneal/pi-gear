@@ -374,3 +374,22 @@ test("prompt callback delayed return after reset/clear does not apply approval o
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("getEffectiveRules does not override explicit deny rules with session approval", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-gear-effective-deny-"));
+  const workspace = join(root, "workspace");
+  await mkdir(workspace);
+
+  try {
+    const access = new FilesystemAccess(workspace);
+    (access as any).sessionApprovals.push({ pattern: "**/.env", access: "read-write" });
+
+    const baseRules = [{ path: "**/.env", access: "deny" as const }];
+    const effective = access.getEffectiveRules(baseRules);
+
+    assert.equal(effective.length, 1);
+    assert.equal(effective[0]?.access, "deny");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

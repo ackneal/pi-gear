@@ -307,6 +307,9 @@ export class FilesystemAccess {
       const existingIndex = rules.findIndex((r) => r.path === approval.pattern);
       if (existingIndex >= 0) {
         const existing = rules[existingIndex]!;
+        // Explicit deny must always take precedence over session approval.
+        if (existing.access === "deny") continue;
+
         const access: FilesystemRuleAccess = existing.access === "read-write" || approval.access === "read-write"
           ? "read-write"
           : approval.access;
