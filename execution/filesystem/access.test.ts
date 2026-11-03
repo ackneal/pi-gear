@@ -78,7 +78,7 @@ test("filesystem requests notify approval and denial without changing authorizat
       assert.equal(options.signal.aborted, false);
       assert.deepEqual(confirmations, [[
         "Outside workspace access",
-        `Allow read access to ${authorization.path}?`,
+        `Allow read access to ${authorization.path}? (Approved access applies to this session)`,
         { timeout: CONFIRMATION_TIMEOUT_MS, signal: options.signal },
       ]]);
       assert.deepEqual(notifications, [[
@@ -128,12 +128,12 @@ test("project approval options allow session-wide and persistent project access"
       persistRule: async (rule) => { persisted.push(rule); },
     });
 
-    // 1. User selects "Allow project for this session"
-    nextSelection = `Allow project for this session (${outsideProject}/**)`;
+    // 1. User selects "Allow project"
+    nextSelection = `Allow project (${outsideProject}/**)`;
     const resultA = await access.request(fileA, "read", "read", ctx);
     assert.equal(resultA.decision, "allow");
     assert.equal(selections.length, 1);
-    assert.ok(selections[0]?.some((opt) => opt.startsWith("Allow project for this session")));
+    assert.ok(selections[0]?.some((opt) => opt.startsWith("Allow project")));
 
     // 2. Requesting fileB in the same project succeeds without prompting
     const resultB = await access.request(fileB, "read", "read", ctx);
@@ -141,7 +141,7 @@ test("project approval options allow session-wide and persistent project access"
     assert.equal(selections.length, 1); // No new select prompt shown
 
     // 3. Requesting write access to fileA when only read was approved asks again
-    nextSelection = `Always allow project (${outsideProject}/**)`;
+    nextSelection = "Always allow project";
     const resultWrite = await access.request(fileA, "write", "write", ctx);
     assert.equal(resultWrite.decision, "allow");
     assert.equal(selections.length, 2); // Prompted for write access
@@ -151,7 +151,7 @@ test("project approval options allow session-wide and persistent project access"
   }
 });
 
-test("file choices distinguish single in-flight vs persistent approval", async () => {
+test("file choices distinguish session approval vs persistent approval and upgrade access", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-gear-file-scopes-"));
   const workspace = join(root, "workspace");
   const fileOnce = join(root, "once.txt");
@@ -164,38 +164,45 @@ test("file choices distinguish single in-flight vs persistent approval", async (
   try {
     let promptCount = 0;
     let selectedOption = "";
+    const persisted: unknown[] = [];
     const ctx = {
       hasUI: true,
       ui: {
         select: async (_title: string, options: string[]) => {
           promptCount++;
-          return options.find((opt) => opt.startsWith(selectedOption)) ?? options[0];
+          return options.find((opt) => opt === selectedOption) ?? options[0];
         },
         notify: () => undefined,
       },
     } as unknown as ExtensionContext;
 
-    const access = new FilesystemAccess(workspace, { loadConfig: async () => policy(fileOnce, false) });
+    const access = new FilesystemAccess(workspace, {
+      loadConfig: async () => policy(fileOnce, false),
+      persistRule: async (rule) => { persisted.push(rule); },
+    });
 
-    // Allow file once does not cache into sessionApprovals
-    selectedOption = "Allow file once";
+    // 1. Allow file for session
+    selectedOption = "Allow";
     const resOnce1 = await access.request(fileOnce, "read", "read", ctx);
     assert.equal(resOnce1.decision, "allow");
     assert.equal(promptCount, 1);
 
+    // Reading fileOnce again in the same session does not prompt
     const resOnce2 = await access.request(fileOnce, "read", "read", ctx);
     assert.equal(resOnce2.decision, "allow");
-    assert.equal(promptCount, 2); // Prompted again!
+    assert.equal(promptCount, 1);
 
-    // Always allow file caches into session and persists
-    selectedOption = "Always allow file";
-    const resAlways1 = await access.request(fileAlways, "read", "read", ctx);
-    assert.equal(resAlways1.decision, "allow");
-    assert.equal(promptCount, 3);
+    // Requesting write on fileOnce prompts again and upgrades read-only to read-write
+    selectedOption = "Always allow";
+    const resOnceWrite = await access.request(fileOnce, "write", "write", ctx);
+    assert.equal(resOnceWrite.decision, "allow");
+    assert.equal(promptCount, 2);
+    assert.deepEqual(persisted, [{ path: fileOnce, access: "read-write" }]);
 
-    const resAlways2 = await access.request(fileAlways, "read", "read", ctx);
-    assert.equal(resAlways2.decision, "allow");
-    assert.equal(promptCount, 3); // Not prompted again!
+    // Writing to fileOnce again does not prompt
+    const resOnceWrite2 = await access.request(fileOnce, "write", "write", ctx);
+    assert.equal(resOnceWrite2.decision, "allow");
+    assert.equal(promptCount, 2);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -225,7 +232,7 @@ test("concurrent outside-workspace requests share a prompt and deduplicate notif
           promptCount++;
           return new Promise<string>((resolve) => {
             resolvePrompt = () => {
-              const projectOption = options.find((opt) => opt.startsWith("Allow project for this session")) ?? options[0]!;
+              const projectOption = options.find((opt) => opt.startsWith("Allow project")) ?? options[0]!;
               resolve(projectOption);
             };
           });

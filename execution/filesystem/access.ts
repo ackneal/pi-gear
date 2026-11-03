@@ -185,7 +185,7 @@ export class FilesystemAccess {
     projectPattern: string | undefined,
     ctx: ExtensionContext,
   ): Promise<FilesystemAuthorization> {
-    if (choice === "allow-project-session" && projectPattern !== undefined) {
+    if (choice === "allow-project" && projectPattern !== undefined) {
       this.addSessionApproval(projectPattern, ruleAccess);
       ctx.ui.notify(
         `User approved outside-workspace project access: ${label} ${projectPattern}`,
@@ -214,7 +214,8 @@ export class FilesystemAccess {
       return { ...authorization, decision: "allow" };
     }
 
-    if (choice === "allow-file-once") {
+    if (choice === "allow-file") {
+      this.addSessionApproval(authorization.path, ruleAccess);
       ctx.ui.notify(
         `User approved outside-workspace access: ${label} ${authorization.path}`,
         "info",

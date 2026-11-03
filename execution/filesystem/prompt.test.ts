@@ -1,343 +1,149 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
-  FilesystemApprovalComponent,
   promptFilesystemAccess,
   type FilesystemPromptChoice,
 } from "./prompt.ts";
 
-const dummyTheme = {
-  fg: (_color: string, text: string) => text,
-  bold: (text: string) => text,
-} as unknown as Theme;
+test("promptFilesystemAccess presents native select options with project detected", async () => {
+  let capturedTitle = "";
+  let capturedOptions: string[] = [];
 
-test("FilesystemApprovalComponent handles Tab toggle, arrow navigation, and submission", () => {
-  const cases: Array<{
-    name: string;
-    params: { fileLabel: string; projectPattern: string | undefined };
-    inputs: string[];
-    expectedChoice: FilesystemPromptChoice;
-    expectedPermanent: boolean;
-  }> = [
-    {
-      name: "submits default transient file choice without Tab",
-      params: { fileLabel: "index.ts", projectPattern: "repo/**" },
-      inputs: ["\r"],
-      expectedChoice: "allow-file-once",
-      expectedPermanent: false,
+  const ctx = {
+    hasUI: true,
+    ui: {
+      select: async (title: string, options: string[]) => {
+        capturedTitle = title;
+        capturedOptions = options;
+        return options[0]!;
+      },
     },
-    {
-      name: "submits transient project choice after down arrow",
-      params: { fileLabel: "index.ts", projectPattern: "repo/**" },
-      inputs: ["\x1b[B", "\r"],
-      expectedChoice: "allow-project-session",
-      expectedPermanent: false,
+  } as unknown as ExtensionContext;
+
+  const choice = await promptFilesystemAccess({
+    path: "/dev/repo/src/index.ts",
+    label: "read",
+    projectPattern: "/dev/repo/**",
+    ctx,
+  });
+
+  assert.equal(choice, "allow-file");
+  assert.ok(capturedTitle.includes("Allow read access to /dev/repo/src/index.ts?"));
+  assert.ok(capturedTitle.includes("(Approved access applies to this session)"));
+  assert.deepEqual(capturedOptions, [
+    "Allow",
+    "Allow project (/dev/repo/**)",
+    "Always allow project",
+    "Deny",
+  ]);
+});
+
+test("promptFilesystemAccess presents native select options for standalone file without project", async () => {
+  let capturedOptions: string[] = [];
+
+  const ctx = {
+    hasUI: true,
+    ui: {
+      select: async (_title: string, options: string[]) => {
+        capturedOptions = options;
+        return "Always allow";
+      },
     },
-    {
-      name: "submits permanent file choice after Tab",
-      params: { fileLabel: "index.ts", projectPattern: "repo/**" },
-      inputs: ["\t", "\r"],
-      expectedChoice: "always-allow-file",
-      expectedPermanent: true,
-    },
-    {
-      name: "submits permanent project choice after Tab and down arrow",
-      params: { fileLabel: "index.ts", projectPattern: "repo/**" },
-      inputs: ["\t", "\x1b[B", "\r"],
-      expectedChoice: "always-allow-project",
-      expectedPermanent: true,
-    },
-    {
-      name: "toggles Tab back to transient mode",
-      params: { fileLabel: "index.ts", projectPattern: "repo/**" },
-      inputs: ["\t", "\t", "\r"],
-      expectedChoice: "allow-file-once",
-      expectedPermanent: false,
-    },
-    {
-      name: "submits deny on escape",
-      params: { fileLabel: "index.ts", projectPattern: "repo/**" },
-      inputs: ["\x1b"],
-      expectedChoice: "deny",
-      expectedPermanent: false,
-    },
-    {
-      name: "wraps selection around on up arrow",
-      params: { fileLabel: "index.ts", projectPattern: "repo/**" },
-      inputs: ["\x1b[A", "\r"],
-      expectedChoice: "deny",
-      expectedPermanent: false,
-    },
-    {
-      name: "handles standalone file without project pattern (transient once)",
-      params: { fileLabel: "single.txt", projectPattern: undefined },
-      inputs: ["\r"],
-      expectedChoice: "allow-file-once",
-      expectedPermanent: false,
-    },
-    {
-      name: "handles standalone file without project pattern (permanent)",
-      params: { fileLabel: "single.txt", projectPattern: undefined },
-      inputs: ["\t", "\r"],
-      expectedChoice: "always-allow-file",
-      expectedPermanent: true,
-    },
-    {
-      name: "handles standalone file toggle back to transient",
-      params: { fileLabel: "single.txt", projectPattern: undefined },
-      inputs: ["\t", "\t", "\r"],
-      expectedChoice: "allow-file-once",
-      expectedPermanent: false,
-    },
-    {
-      name: "handles standalone file deny",
-      params: { fileLabel: "single.txt", projectPattern: undefined },
-      inputs: ["\x1b[B", "\r"],
-      expectedChoice: "deny",
-      expectedPermanent: false,
-    },
+  } as unknown as ExtensionContext;
+
+  const choice = await promptFilesystemAccess({
+    path: "/Users/user/.gitconfig",
+    label: "read",
+    projectPattern: undefined,
+    ctx,
+  });
+
+  assert.equal(choice, "always-allow-file");
+  assert.deepEqual(capturedOptions, [
+    "Allow",
+    "Always allow",
+    "Deny",
+  ]);
+});
+
+test("promptFilesystemAccess correctly maps every option when project detected", async () => {
+  const selections: Array<{ option: string; expected: FilesystemPromptChoice }> = [
+    { option: "Allow", expected: "allow-file" },
+    { option: "Allow project (/dev/repo/**)", expected: "allow-project" },
+    { option: "Always allow project", expected: "always-allow-project" },
+    { option: "Deny", expected: "deny" },
+    { option: "unknown", expected: "deny" },
   ];
 
-  for (const { name, params, inputs, expectedChoice, expectedPermanent } of cases) {
-    let resolvedChoice: FilesystemPromptChoice | undefined;
+  for (const { option, expected } of selections) {
+    const ctx = {
+      hasUI: true,
+      ui: {
+        select: async () => option,
+      },
+    } as unknown as ExtensionContext;
 
-    const component = new FilesystemApprovalComponent(
-      "Allow access?",
-      params,
-      dummyTheme,
-      () => {},
-      (choice) => { resolvedChoice = choice; },
-    );
+    const choice = await promptFilesystemAccess({
+      path: "/dev/repo/src/index.ts",
+      label: "write",
+      projectPattern: "/dev/repo/**",
+      ctx,
+    });
 
-    for (const input of inputs) {
-      component.handleInput(input);
-    }
-
-    assert.equal(resolvedChoice, expectedChoice, `${name} (choice)`);
-    const firstLine = component.render(80)[0];
-    const hasPermanentBadge = firstLine !== undefined && firstLine.includes("Always Allow");
-    assert.equal(hasPermanentBadge, expectedPermanent, `${name} (permanent)`);
-    assert.ok(component.render(80).length > 3, `${name} (render lines)`);
+    assert.equal(choice, expected, `Selection "${option}" should yield "${expected}"`);
   }
 });
 
-test("promptFilesystemAccess dispatches to custom, select, or confirm based on UI capability", async () => {
-  const inFlightAbortController = new AbortController();
+test("promptFilesystemAccess returns deny on pre-aborted signal", async () => {
+  const ctx = {
+    hasUI: true,
+    ui: {
+      select: async () => {
+        assert.fail("select should not be called when pre-aborted");
+      },
+    },
+  } as unknown as ExtensionContext;
 
-  let capturedSelectOptions: string[] = [];
+  const choice = await promptFilesystemAccess({
+    path: "/dev/repo/src/index.ts",
+    label: "read",
+    projectPattern: "/dev/repo/**",
+    ctx,
+    signal: AbortSignal.abort(),
+  });
 
-  const cases: Array<{
-    name: string;
-    params?: {
-      path?: string;
-      label?: string;
-      projectPattern?: string | undefined;
-      signal?: AbortSignal;
-    };
-    ctx: Partial<ExtensionContext>;
-    expected: FilesystemPromptChoice;
-    assertOptions?: (options: string[]) => void;
-  }> = [
-    {
-      name: "custom: submits choice via custom component in TUI mode",
-      ctx: {
-        mode: "tui",
-        hasUI: true,
-        ui: {
-          custom: ((factory: (tui: any, theme: any, kb: any, done: (res: FilesystemPromptChoice) => void) => any) => new Promise<FilesystemPromptChoice>((resolve) => {
-            const comp = factory({ requestRender: () => undefined }, dummyTheme, {}, resolve);
-            (comp as FilesystemApprovalComponent).handleInput("\t");
-            (comp as FilesystemApprovalComponent).handleInput("\r");
-          })) as any,
-        } as any,
-      },
-      expected: "always-allow-file",
-    },
-    {
-      name: "custom: returns deny on pre-aborted signal",
-      params: { signal: AbortSignal.abort() },
-      ctx: {
-        mode: "tui",
-        hasUI: true,
-        ui: {
-          custom: () => {
-            assert.fail("custom should not be invoked when signal is already aborted");
-          },
-        } as any,
-      },
-      expected: "deny",
-    },
-    {
-      name: "custom: resolves deny when signal aborts in-flight",
-      params: { signal: inFlightAbortController.signal },
-      ctx: {
-        mode: "tui",
-        hasUI: true,
-        ui: {
-          custom: ((factory: (tui: any, theme: any, kb: any, done: (res: FilesystemPromptChoice) => void) => any) => new Promise<FilesystemPromptChoice>((resolve) => {
-            factory({ requestRender: () => undefined }, dummyTheme, {}, resolve);
-            inFlightAbortController.abort();
-          })) as any,
-        } as any,
-      },
-      expected: "deny",
-    },
-    {
-      name: "select: allows file once and verifies symmetrical options",
-      ctx: {
-        mode: "json",
-        hasUI: true,
-        ui: {
-          select: async (_title: string, options: string[]) => {
-            capturedSelectOptions = options;
-            return options[0]!;
-          },
-        } as any,
-      },
-      expected: "allow-file-once",
-      assertOptions: (options) => {
-        assert.deepEqual(options, [
-          "Allow file once (index.ts)",
-          "Allow project for this session (/dev/repo/**)",
-          "Always allow file (index.ts)",
-          "Always allow project (/dev/repo/**)",
-          "Deny",
-        ]);
-      },
-    },
-    {
-      name: "select: allows project for session",
-      ctx: {
-        mode: "json",
-        hasUI: true,
-        ui: {
-          select: async (_title: string, options: string[]) => options[1]!,
-        } as any,
-      },
-      expected: "allow-project-session",
-    },
-    {
-      name: "select: always allows file",
-      ctx: {
-        mode: "json",
-        hasUI: true,
-        ui: {
-          select: async (_title: string, options: string[]) => options[2]!,
-        } as any,
-      },
-      expected: "always-allow-file",
-    },
-    {
-      name: "select: always allows project",
-      ctx: {
-        mode: "json",
-        hasUI: true,
-        ui: {
-          select: async (_title: string, options: string[]) => options[3]!,
-        } as any,
-      },
-      expected: "always-allow-project",
-    },
-    {
-      name: "select: denies access",
-      ctx: {
-        mode: "json",
-        hasUI: true,
-        ui: {
-          select: async (_title: string, options: string[]) => options[4]!,
-        } as any,
-      },
-      expected: "deny",
-    },
-    {
-      name: "select: handles standalone file without project pattern",
-      params: { projectPattern: undefined },
-      ctx: {
-        mode: "json",
-        hasUI: true,
-        ui: {
-          select: async (_title: string, options: string[]) => {
-            capturedSelectOptions = options;
-            return options[1]!;
-          },
-        } as any,
-      },
-      expected: "always-allow-file",
-      assertOptions: (options) => {
-        assert.deepEqual(options, [
-          "Allow file once (index.ts)",
-          "Always allow file (index.ts)",
-          "Deny",
-        ]);
-      },
-    },
-    {
-      name: "select: returns deny on pre-aborted signal",
-      params: { signal: AbortSignal.abort() },
-      ctx: {
-        mode: "json",
-        hasUI: true,
-        ui: {
-          select: async () => {
-            assert.fail("select should not be invoked when signal is already aborted");
-          },
-        } as any,
-      },
-      expected: "deny",
-    },
-    {
-      name: "confirm: allows file once when confirmed",
-      ctx: {
-        mode: "json",
-        hasUI: true,
-        ui: {
-          confirm: async () => true,
-        } as any,
-      },
-      expected: "allow-file-once",
-    },
-    {
-      name: "confirm: denies access when rejected",
-      ctx: {
-        mode: "json",
-        hasUI: true,
-        ui: {
-          confirm: async () => false,
-        } as any,
-      },
-      expected: "deny",
-    },
-    {
-      name: "confirm: returns deny on pre-aborted signal",
-      params: { signal: AbortSignal.abort() },
-      ctx: {
-        mode: "json",
-        hasUI: true,
-        ui: {
-          confirm: async () => {
-            assert.fail("confirm should not be invoked when signal is already aborted");
-          },
-        } as any,
-      },
-      expected: "deny",
-    },
-  ];
+  assert.equal(choice, "deny");
+});
 
-  for (const { name, params, ctx, expected, assertOptions } of cases) {
-    const choice = await promptFilesystemAccess({
-      path: params?.path ?? "/dev/repo/src/index.ts",
-      label: params?.label ?? "read",
-      projectPattern: params !== undefined && "projectPattern" in params
-        ? params.projectPattern
-        : "/dev/repo/**",
-      ctx: ctx as ExtensionContext,
-      ...(params?.signal !== undefined ? { signal: params.signal } : {}),
-    });
+test("promptFilesystemAccess falls back to confirm when select is unavailable", async () => {
+  const ctxConfirmed = {
+    hasUI: true,
+    ui: {
+      confirm: async () => true,
+    },
+  } as unknown as ExtensionContext;
 
-    assert.equal(choice, expected, `${name} (choice)`);
-    if (assertOptions !== undefined) {
-      assertOptions(capturedSelectOptions);
-    }
-  }
+  const choiceAllow = await promptFilesystemAccess({
+    path: "/dev/repo/src/index.ts",
+    label: "read",
+    projectPattern: "/dev/repo/**",
+    ctx: ctxConfirmed,
+  });
+  assert.equal(choiceAllow, "allow-file");
+
+  const ctxDenied = {
+    hasUI: true,
+    ui: {
+      confirm: async () => false,
+    },
+  } as unknown as ExtensionContext;
+
+  const choiceDeny = await promptFilesystemAccess({
+    path: "/dev/repo/src/index.ts",
+    label: "read",
+    projectPattern: "/dev/repo/**",
+    ctx: ctxDenied,
+  });
+  assert.equal(choiceDeny, "deny");
 });
