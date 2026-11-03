@@ -301,6 +301,23 @@ export class FilesystemAccess {
       target.canonicalPath === prefix || target.canonicalPath.startsWith(`${prefix}/`));
   }
 
+  getEffectiveRules(baseRules: readonly FilesystemRule[] = []): readonly FilesystemRule[] {
+    const rules = [...baseRules];
+    for (const approval of this.sessionApprovals) {
+      const existingIndex = rules.findIndex((r) => r.path === approval.pattern);
+      if (existingIndex >= 0) {
+        const existing = rules[existingIndex]!;
+        const access: FilesystemRuleAccess = existing.access === "read-write" || approval.access === "read-write"
+          ? "read-write"
+          : approval.access;
+        rules[existingIndex] = { ...existing, path: existing.path, access };
+      } else {
+        rules.push({ path: approval.pattern, access: approval.access });
+      }
+    }
+    return rules;
+  }
+
   clear(): void {
     ++this.generation;
     this.sessionApprovals.length = 0;

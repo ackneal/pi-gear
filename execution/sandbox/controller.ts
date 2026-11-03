@@ -2,7 +2,7 @@ import { SandboxManager, type NetworkHostPattern, type SandboxRuntimeConfig } fr
 import type { BashOperations, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { evaluateNetwork } from "../policy/network.ts";
 import { canonicalizeWorkspace, type CanonicalWorkspace } from "../filesystem/paths.ts";
-import { appendAllowedNetworkHost, loadExtensionConfig, type AccessPolicy } from "../../config/index.ts";
+import { appendAllowedNetworkHost, loadExtensionConfig, type AccessPolicy, type FilesystemRule } from "../../config/index.ts";
 import { networkKey, SessionApprovals } from "./approvals.ts";
 import { createEffectiveSandboxConfig, resolveRuntimeTempDir } from "./config.ts";
 import { createSandboxedBashOperations } from "./spawn.ts";
@@ -39,25 +39,36 @@ export interface SandboxStatus {
 
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
+export interface SandboxControllerOptions {
+  readonly manager?: SandboxManagerLike;
+  readonly loadConfig?: typeof loadExtensionConfig;
+  readonly confirmationQueue?: ConfirmationQueue;
+  readonly getEffectiveFilesystemRules?: ((baseRules: readonly FilesystemRule[]) => readonly FilesystemRule[]) | undefined;
+}
+
 export class SandboxController {
   private readonly manager: SandboxManagerLike;
   private readonly loadConfig: typeof loadExtensionConfig;
   private readonly confirmationQueue: ConfirmationQueue;
+  private readonly getEffectiveFilesystemRules?: ((baseRules: readonly FilesystemRule[]) => readonly FilesystemRule[]) | undefined;
 
   constructor(
     manager: SandboxManagerLike = SandboxManager,
     loadConfig: typeof loadExtensionConfig = loadExtensionConfig,
     confirmationQueue: ConfirmationQueue = new ConfirmationQueue(),
+    getEffectiveFilesystemRules?: ((baseRules: readonly FilesystemRule[]) => readonly FilesystemRule[]) | undefined,
   ) {
     this.manager = manager;
     this.loadConfig = loadConfig;
     this.confirmationQueue = confirmationQueue;
+    this.getEffectiveFilesystemRules = getEffectiveFilesystemRules;
   }
 
   private state: SandboxState = { kind: "starting" };
   private generation = 0;
   private approvals: SessionApprovals | undefined;
   private lifecycle: Promise<void> = Promise.resolve();
+  private tempDirPath: string | undefined;
 
   readonly operations: BashOperations = createSandboxedBashOperations({
     isAvailable: () => this.state.kind === "ready",
@@ -98,6 +109,7 @@ export class SandboxController {
       let currentPolicy: AccessPolicy = extensionConfig;
       const dependencies = await this.manager.checkDependenciesAsync();
       if (dependencies.errors.length > 0) throw new Error(dependencies.errors.join("; "));
+      this.tempDirPath = tempDir.path;
       const config = await createEffectiveSandboxConfig(workspace.canonicalRoot, currentPolicy, { tempDir: tempDir.path });
 
       const currentApprovals = new SessionApprovals({
@@ -207,6 +219,30 @@ export class SandboxController {
       const reason = this.state.kind === "unavailable" ? this.state.reason : this.state.kind;
       throw new Error(`Sandbox unavailable: ${reason}`);
     }
-    return this.state.config;
+
+    if (!this.getEffectiveFilesystemRules) {
+      return this.state.config;
+    }
+
+    const currentConfig = await this.loadConfig();
+    const effectiveRules = this.getEffectiveFilesystemRules(currentConfig.filesystem.rules);
+    const dynamicPolicy: AccessPolicy = {
+      ...currentConfig,
+      filesystem: {
+        ...currentConfig.filesystem,
+        rules: effectiveRules,
+      },
+    };
+
+    const effectiveSandboxConfig = await createEffectiveSandboxConfig(
+      this.state.workspace.canonicalRoot,
+      dynamicPolicy,
+      { tempDir: this.tempDirPath },
+    );
+
+    return {
+      ...effectiveSandboxConfig,
+      network: this.state.config.network,
+    };
   }
 }

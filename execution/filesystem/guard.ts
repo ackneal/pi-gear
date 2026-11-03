@@ -5,6 +5,7 @@ import {
   type ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
 import type { FilesystemOperation } from "../policy/filesystem.ts";
+import type { FilesystemRule } from "../../config/index.ts";
 import { ConfirmationQueue } from "../confirmation-queue.ts";
 import { FilesystemAccess, type FilesystemAccessOptions } from "./access.ts";
 
@@ -28,6 +29,7 @@ const block = (operation: string, path: string, reason: string, ctx: ExtensionCo
 
 export interface FilesystemAccessService {
   forWorkspace(cwd: string): FilesystemAccess;
+  getEffectiveRules(cwd: string, baseRules?: readonly FilesystemRule[]): readonly FilesystemRule[];
 }
 
 export function setupFilesystemGuard(
@@ -78,5 +80,8 @@ export function setupFilesystemGuard(
   pi.on("session_start", clear);
   pi.on("session_shutdown", clear);
 
-  return { forWorkspace };
+  const getEffectiveRules = (cwd: string, baseRules?: readonly FilesystemRule[]): readonly FilesystemRule[] =>
+    forWorkspace(cwd).getEffectiveRules(baseRules);
+
+  return { forWorkspace, getEffectiveRules };
 }
