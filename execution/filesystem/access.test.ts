@@ -10,6 +10,12 @@ import { ConfirmationQueue } from "../confirmation-queue.ts";
 import { FilesystemAccess } from "./access.ts";
 import { createEffectiveSandboxConfig } from "../sandbox/config.ts";
 
+const deferred = <T>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => { resolve = accept; });
+  return { promise, resolve };
+};
+
 const policy = (path: string, deny: boolean) => ({
   version: 1 as const,
   filesystem: { rules: deny ? [{ path, access: "deny" as const }] : [] },
@@ -127,6 +133,7 @@ test("project approval options allow session-wide and persistent project access"
 
     const access = new FilesystemAccess(workspace, {
       loadConfig: async () => policy(fileA, false),
+      tempSource: async () => join(root, "trusted-temp"),
       persistRule: async (rule) => { persisted.push(rule); },
     });
 
@@ -180,6 +187,7 @@ test("file choices distinguish session approval vs persistent approval and upgra
 
     const access = new FilesystemAccess(workspace, {
       loadConfig: async () => policy(fileOnce, false),
+      tempSource: async () => join(root, "trusted-temp"),
       persistRule: async (rule) => { persisted.push(rule); },
     });
 
@@ -210,7 +218,7 @@ test("file choices distinguish session approval vs persistent approval and upgra
   }
 });
 
-test("concurrent outside-workspace requests share a prompt and deduplicate notifications", async () => {
+test("concurrent outside-workspace requests share a prompt and deduplicate notifications", { timeout: 5_000 }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), "pi-gear-concurrent-fs-"));
   const workspace = join(root, "workspace");
   const outsideProject = join(root, "outside-project");
@@ -223,6 +231,7 @@ test("concurrent outside-workspace requests share a prompt and deduplicate notif
   await writeFile(fileB, "b");
 
   try {
+    const opened = deferred<void>();
     let promptCount = 0;
     const notifications: unknown[][] = [];
     let resolvePrompt: ((choice: string) => void) | undefined;
@@ -237,6 +246,7 @@ test("concurrent outside-workspace requests share a prompt and deduplicate notif
               const projectOption = options.find((opt) => opt.startsWith("Allow project")) ?? options[0]!;
               resolve(projectOption);
             };
+            opened.resolve();
           });
         },
         notify: (...args: unknown[]) => { notifications.push(args); },
@@ -245,7 +255,9 @@ test("concurrent outside-workspace requests share a prompt and deduplicate notif
 
     const access = new FilesystemAccess(workspace, {
       loadConfig: async () => policy(fileA, false),
+      tempSource: async () => join(root, "trusted-temp"),
     });
+    t.after(() => { access.clear(); resolvePrompt?.(""); });
 
     // Case 1: Identical file concurrent requests share one prompt Promise
     const [req1, req2] = [
@@ -253,9 +265,7 @@ test("concurrent outside-workspace requests share a prompt and deduplicate notif
       access.request(fileA, "read", "read", ctx),
     ];
 
-    while (promptCount < 1) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
+    await opened.promise;
     assert.equal(promptCount, 1);
     resolvePrompt?.("");
 
@@ -273,7 +283,7 @@ test("concurrent outside-workspace requests share a prompt and deduplicate notif
   }
 });
 
-test("concurrent request with abort signal does not abort independent concurrent caller", async () => {
+test("concurrent request with abort signal does not abort independent concurrent caller", { timeout: 5_000 }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), "pi-gear-abort-isolation-"));
   const workspace = join(root, "workspace");
   const outsideFile = join(root, "outside.txt");
@@ -282,18 +292,24 @@ test("concurrent request with abort signal does not abort independent concurrent
   await writeFile(outsideFile, "content");
 
   try {
+    const opened = deferred<void>();
     let resolvePrompt: ((choice: string) => void) | undefined;
     const ctx = {
       hasUI: true,
       ui: {
         select: (_title: string, options: string[]) => new Promise<string>((resolve) => {
           resolvePrompt = () => resolve(options[0]!);
+          opened.resolve();
         }),
         notify: () => undefined,
       },
     } as unknown as ExtensionContext;
 
-    const access = new FilesystemAccess(workspace, { loadConfig: async () => policy(outsideFile, false) });
+    const access = new FilesystemAccess(workspace, {
+      loadConfig: async () => policy(outsideFile, false),
+      tempSource: async () => join(root, "trusted-temp"),
+    });
+    t.after(() => { access.clear(); resolvePrompt?.(""); });
     const abortController = new AbortController();
 
     const reqAborted = access.request(outsideFile, "read", "read", ctx, abortController.signal);
@@ -304,10 +320,7 @@ test("concurrent request with abort signal does not abort independent concurrent
     const resAborted = await reqAborted;
     assert.equal(resAborted.decision, "ask"); // Aborted returns fallback
 
-    // Wait until select prompt is reached
-    while (resolvePrompt === undefined) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
+    await opened.promise;
 
     // Normal caller should still resolve successfully when prompt resolves
     assert.ok(resolvePrompt);
@@ -319,7 +332,7 @@ test("concurrent request with abort signal does not abort independent concurrent
   }
 });
 
-test("prompt callback delayed return after reset/clear does not apply approval or persist rule", async () => {
+test("prompt callback delayed return after reset/clear does not apply approval or persist rule", { timeout: 5_000 }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), "pi-gear-delayed-prompt-"));
   const workspace = join(root, "workspace");
   const outsideFile = join(root, "outside.txt");
@@ -328,6 +341,7 @@ test("prompt callback delayed return after reset/clear does not apply approval o
   await writeFile(outsideFile, "content");
 
   try {
+    const opened = deferred<void>();
     let resolvePrompt: ((choice: string) => void) | undefined;
     const notifications: string[] = [];
     const persisted: string[] = [];
@@ -337,6 +351,7 @@ test("prompt callback delayed return after reset/clear does not apply approval o
       ui: {
         select: (_title: string, options: string[]) => new Promise<string>((resolve) => {
           resolvePrompt = () => resolve(options[1]!); // "Always allow"
+          opened.resolve();
         }),
         notify: (msg: string) => notifications.push(msg),
       },
@@ -345,16 +360,15 @@ test("prompt callback delayed return after reset/clear does not apply approval o
     const queue = new ConfirmationQueue();
     const access = new FilesystemAccess(workspace, {
       loadConfig: async () => policy(outsideFile, false),
+      tempSource: async () => join(root, "trusted-temp"),
       confirmationQueue: queue,
       persistRule: async (rule) => { persisted.push(rule.path); },
     });
 
+    t.after(() => { access.clear(); resolvePrompt?.(""); });
     const pending = access.request(outsideFile, "read", "read", ctx);
 
-    // Wait until prompt is active
-    while (resolvePrompt === undefined) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
+    await opened.promise;
 
     // Reset queue / clear session while prompt is open
     queue.reset();
@@ -364,8 +378,9 @@ test("prompt callback delayed return after reset/clear does not apply approval o
     assert.equal(abortedOutcome.decision, "ask");
 
     // UI returns after session reset
+    assert.ok(resolvePrompt);
     resolvePrompt("");
-    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    await queue.prompt(async () => undefined, undefined);
 
     // Must not have persisted rule or added session approval
     assert.equal(persisted.length, 0);

@@ -28,6 +28,7 @@ const loadSandboxRuntime = async (): Promise<{
     ["../../config/selectors.ts", "config/selectors.ts"],
     ["../../config/parse.ts", "config/parse.ts"],
     ["../policy/filesystem.ts", "policy/filesystem.ts"],
+    ["../filesystem/paths.ts", "filesystem/paths.ts"],
   ] as const;
   for (const [sourcePath, destination] of modules) {
     const destinationPath = join(root, destination);
