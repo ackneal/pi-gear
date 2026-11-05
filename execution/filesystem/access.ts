@@ -238,7 +238,11 @@ export class FilesystemAccess {
 
     const permanent = choice === "always-allow-file" || choice === "always-allow-project";
     if (permanent) {
-      await this.persistRule({ path: pattern, access: ruleAccess }, ctx);
+      await this.persistRule({
+        path: pattern,
+        access: ruleAccess,
+        ...(!project && target.path !== target.canonicalPath ? { follow: true } : {}),
+      }, ctx);
       if (!isCurrent()) return authorization;
     }
 

@@ -154,7 +154,7 @@ test("project approval options allow session-wide and persistent project access"
 });
 
 test("file choices distinguish session approval vs persistent approval and upgrade access", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-gear-file-scopes-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "pi-gear-file-scopes-")));
   const workspace = join(root, "workspace");
   const fileOnce = join(root, "once.txt");
   const fileAlways = join(root, "always.txt");
