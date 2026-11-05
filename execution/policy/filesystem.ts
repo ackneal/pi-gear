@@ -6,14 +6,16 @@ export type FilesystemOperation = "read" | "write";
 export type FilesystemDecision = "allow" | "ask" | "deny";
 
 export const selectorPath = (selector: string, workspace: string): string =>
-  selector.startsWith("~/")
-    ? join(homedir(), selector.slice(2))
-    : selector.startsWith("/")
-      ? selector
-      : join(workspace, selector);
+  selector === "~"
+    ? homedir()
+    : selector.startsWith("~/")
+      ? join(homedir(), selector.slice(2))
+      : selector.startsWith("/")
+        ? selector
+        : join(workspace, selector);
 
 export const isHostSelector = (selector: string): boolean =>
-  selector.startsWith("~/") || selector.startsWith("/");
+  selector === "~" || selector.startsWith("~/") || selector.startsWith("/");
 
 const globRegex = (pattern: string): RegExp => {
   let expression = "^";
@@ -69,7 +71,7 @@ const matchingRules = (
 const rank = (access: FilesystemAccess): number =>
   access === "deny" ? 3 : access === "read-only" ? 2 : 1;
 
-const decisionForAccess = (
+export const decisionForAccess = (
   access: FilesystemAccess,
   operation: FilesystemOperation,
 ): FilesystemDecision => access === "deny" || (access === "read-only" && operation === "write")

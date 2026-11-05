@@ -4,7 +4,8 @@ import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { matchesFilesystemSelector, selectorPath } from "../policy/filesystem.ts";
-import type { AccessPolicy } from "../../config/types.ts";
+import { canonicalizeResolvedPath } from "../filesystem/paths.ts";
+import type { AccessPolicy, FilesystemRule } from "../../config/types.ts";
 
 export const validateRuntimePath = (path: string, source: string): string => {
   if (/[*?\[\]]/.test(path)) throw new Error(`${source} contains Sandbox Runtime glob metacharacters`);
@@ -113,11 +114,11 @@ export const createSandboxConfig = (workspaceRoot: string, policy: AccessPolicy,
 const canonicalizeFollowPath = async (selector: string, workspace: string): Promise<string> => {
   const path = selectorPath(selector, workspace);
   const wildcardIndex = path.search(/[*?\[]/);
-  if (wildcardIndex < 0) return realpath(path);
+  if (wildcardIndex < 0) return canonicalizeResolvedPath(path, workspace);
 
   const prefixEnd = path.lastIndexOf("/", wildcardIndex);
   const prefix = prefixEnd <= 0 ? "/" : path.slice(0, prefixEnd);
-  return `${await realpath(prefix)}${path.slice(prefixEnd)}`;
+  return `${await canonicalizeResolvedPath(prefix, workspace)}${path.slice(prefixEnd)}`;
 };
 
 const followedPolicyPaths = async (
@@ -132,7 +133,12 @@ const followedPolicyPaths = async (
   return new Map(paths);
 };
 
+const hasWorkspaceRelativeDeny = (rules: readonly FilesystemRule[]): boolean =>
+  rules.some((rule) => rule.access === "deny" && !rule.path.startsWith("/") && !rule.path.startsWith("~/"));
+
 const deniedWorkspaceFiles = async (workspace: string, policy: AccessPolicy): Promise<readonly string[]> => {
+  if (!hasWorkspaceRelativeDeny(policy.filesystem.rules)) return [];
+
   const denied: string[] = [];
   const visit = async (directory: string, relativeDirectory: string): Promise<void> => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {

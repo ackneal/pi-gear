@@ -58,7 +58,7 @@ export const selectReadPath = async (path: string): Promise<string> => {
   return path;
 };
 
-const canonicalizeResolvedPath = async (
+export const canonicalizeResolvedPath = async (
   input: string,
   cwd: string,
   seenSymlinks = new Set<string>(),

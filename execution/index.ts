@@ -18,7 +18,10 @@ export interface ExecutionOptions {
 export function setupExecution(pi: ExtensionAPI, config: ExtensionConfig, options: ExecutionOptions = {}): ExecutionServices {
   const confirmationQueue = new ConfirmationQueue();
   const filesystem = setupFilesystemGuard(pi, { confirmationQueue });
-  const sandbox = setupSandbox(pi, config, { confirmationQueue });
+  const sandbox = setupSandbox(pi, config, {
+    confirmationQueue,
+    getEffectiveFilesystemRules: (cwd, baseRules) => filesystem.getEffectiveRules(cwd, baseRules),
+  });
   if (!options.child && config.sandbox.enabled) {
     setupHostCommand(pi, { confirmationQueue });
   }

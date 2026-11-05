@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { normalizeTempAlias } from "./config.ts";
 import { SandboxController, type SandboxManagerLike } from "./controller.ts";
 
 test("sandbox lifecycle serializes shutdown behind an in-flight start", { skip: process.platform !== "darwin" }, async () => {
@@ -54,5 +55,79 @@ test("sandbox lifecycle serializes shutdown behind an in-flight start", { skip: 
     assert.equal(controller.status().enabled, false);
   } finally {
     await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("customConfigFor merges dynamic session approvals into sandbox filesystem allowWrite", { skip: process.platform !== "darwin" }, async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "pi-gear-dynamic-"));
+  const projectDir = await mkdtemp(join(tmpdir(), "pi-gear-project-"));
+  const readonlyDir = await mkdtemp(join(tmpdir(), "pi-gear-readonly-"));
+
+  const manager: SandboxManagerLike = {
+    isSandboxingEnabled: () => false,
+    isSupportedPlatform: () => true,
+    checkDependenciesAsync: async () => ({ errors: [] }),
+    initialize: async () => undefined,
+    reset: async () => undefined,
+  };
+
+  let sessionRules = [
+    { path: `${projectDir}/**`, access: "read-write" as const },
+    { path: `${readonlyDir}/**`, access: "read-only" as const },
+  ];
+
+  const staticConfig = {
+    version: 1 as const,
+    filesystem: { rules: [{ path: "~/.ssh", access: "deny" as const }] },
+    sandbox: { enabled: true, network: { rules: [], strictAllowlist: false } },
+  };
+
+  const controller = new SandboxController(
+    manager,
+    async () => staticConfig,
+    undefined,
+    (baseRules) => [...baseRules, ...sessionRules],
+  );
+
+  const ctx = {
+    cwd: workspace,
+    hasUI: false,
+    ui: { confirm: async () => false, notify: () => undefined },
+  } as unknown as ExtensionContext;
+
+  try {
+    await controller.start(ctx);
+
+    // Normalize /tmp on macOS
+    const expectedProject = normalizeTempAlias(`${projectDir}/**`);
+    const expectedReadonly = normalizeTempAlias(`${readonlyDir}/**`);
+
+    const customConfig = await (controller as any).sessionConfig();
+
+    // 1. read-write session approval must be in allowWrite
+    assert.ok(customConfig.filesystem.allowWrite.includes(expectedProject));
+
+    // 2. read-only session approval must NOT be in allowWrite
+    assert.ok(!customConfig.filesystem.allowWrite.includes(expectedReadonly));
+
+    // 3. read-only session approval must be in denyWrite
+    assert.ok(customConfig.filesystem.denyWrite.includes(expectedReadonly));
+
+    // 4. Deny rules remain in denyRead and denyWrite
+    assert.ok(customConfig.filesystem.denyRead.some((r: string) => r.includes(".ssh")));
+    assert.ok(customConfig.filesystem.denyWrite.some((r: string) => r.includes(".ssh")));
+
+    // 5. When session rules clear (e.g. session reset), next command does not have projectDir in allowWrite
+    sessionRules = [];
+    const clearedConfig = await (controller as any).sessionConfig();
+    assert.ok(!clearedConfig.filesystem.allowWrite.includes(expectedProject));
+
+    // 6. Config caching: consecutive call with unchanged rules returns exact same cached config object
+    const cachedConfig = await (controller as any).sessionConfig();
+    assert.equal(cachedConfig, clearedConfig);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(projectDir, { recursive: true, force: true });
+    await rm(readonlyDir, { recursive: true, force: true });
   }
 });

@@ -11,20 +11,24 @@ export class ConfirmationQueue {
   }
 
   confirm(show: (signal: AbortSignal) => Promise<boolean>, signal?: AbortSignal): Promise<boolean> {
+    return this.prompt(show, false, signal);
+  }
+
+  prompt<T>(show: (signal: AbortSignal) => Promise<T>, fallback: T, signal?: AbortSignal): Promise<T> {
     const session = this.session.signal;
-    if (session.aborted || signal?.aborted) return Promise.resolve(false);
+    if (session.aborted || signal?.aborted) return Promise.resolve(fallback);
 
     const controller = new AbortController();
-    let resolve!: (allowed: boolean) => void;
+    let resolve!: (result: T) => void;
     let reject!: (error: unknown) => void;
-    const result = new Promise<boolean>((accept, fail) => { resolve = accept; reject = fail; });
+    const result = new Promise<T>((accept, fail) => { resolve = accept; reject = fail; });
     const cleanup = () => {
       session.removeEventListener("abort", abort);
       signal?.removeEventListener("abort", abort);
     };
     const abort = () => {
       cleanup();
-      resolve(false);
+      resolve(fallback);
       controller.abort();
     };
     session.addEventListener("abort", abort, { once: true });
@@ -35,8 +39,8 @@ export class ConfirmationQueue {
     this.tail = this.tail.then(async () => {
       try {
         if (controller.signal.aborted) return;
-        const allowed = await show(controller.signal);
-        resolve(!controller.signal.aborted && allowed);
+        const outcome = await show(controller.signal);
+        resolve(controller.signal.aborted ? fallback : outcome);
       } catch (error) {
         reject(error);
       } finally {

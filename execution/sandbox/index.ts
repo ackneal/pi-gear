@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { ExtensionConfig } from "../../config/index.ts";
+import type { ExtensionConfig, FilesystemRule } from "../../config/index.ts";
 import { SandboxController, type SandboxStatus } from "./controller.ts";
 import { createSandboxBashTool } from "../../ui/tools/index.ts";
 import { ConfirmationQueue } from "../confirmation-queue.ts";
@@ -19,6 +19,7 @@ const disabledStatus: SandboxStatus = Object.freeze({
 export interface SandboxSetupOptions {
   readonly confirmationQueue?: ConfirmationQueue;
   readonly createController?: () => SandboxController;
+  readonly getEffectiveFilesystemRules?: (cwd: string, baseRules: readonly FilesystemRule[]) => readonly FilesystemRule[];
 }
 
 export function setupSandbox(
@@ -38,10 +39,23 @@ export function setupSandbox(
     return { status: () => disabledStatus };
   }
 
+  let activeCwd = process.cwd();
   const confirmationQueue = options.confirmationQueue ?? new ConfirmationQueue();
-  const createController = options.createController ?? (() => new SandboxController(undefined, undefined, confirmationQueue));
+  const getEffectiveRules = options.getEffectiveFilesystemRules
+    ? (baseRules: readonly FilesystemRule[]) => options.getEffectiveFilesystemRules!(activeCwd, baseRules)
+    : undefined;
+
+  const createController = options.createController ?? (() => new SandboxController(
+    undefined,
+    undefined,
+    confirmationQueue,
+    getEffectiveRules,
+  ));
   const controller = createController();
-  pi.on("session_start", async (_event, ctx) => controller.start(ctx));
+  pi.on("session_start", async (_event, ctx) => {
+    activeCwd = ctx.cwd;
+    await controller.start(ctx);
+  });
   pi.on("session_shutdown", async () => {
     await controller.shutdown();
   });
