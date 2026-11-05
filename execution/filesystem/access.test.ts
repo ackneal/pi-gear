@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -8,6 +8,7 @@ import type { FilesystemRule } from "../../config/index.ts";
 import { CONFIRMATION_TIMEOUT_MS } from "../confirmation-queue.ts";
 import { ConfirmationQueue } from "../confirmation-queue.ts";
 import { FilesystemAccess } from "./access.ts";
+import { createEffectiveSandboxConfig } from "../sandbox/config.ts";
 
 const policy = (path: string, deny: boolean) => ({
   version: 1 as const,
@@ -41,7 +42,7 @@ test("filesystem access reloads policy and recovers from loader failures", async
   }
 });
 
-test("filesystem requests notify approval and denial without changing authorization semantics", async () => {
+test("filesystem requests notify approval and denial and retain session authorization", async () => {
   const cases = [
     { allowed: true, decision: "allow", status: "approved", severity: "info" },
     { allowed: false, decision: "ask", status: "denied", severity: "warning" },
@@ -86,7 +87,7 @@ test("filesystem requests notify approval and denial without changing authorizat
         `User ${status} outside-workspace access: read ${authorization.path}`,
         severity,
       ]]);
-      assert.deepEqual(await access.authorize(outside, "read"), authorization);
+      assert.deepEqual(await access.authorize(outside, "read"), { ...authorization, decision });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -372,6 +373,149 @@ test("prompt callback delayed return after reset/clear does not apply approval o
     assert.equal(notifications.length, 0);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("project session approvals respect canonical boundaries, follow rules, and denies", async () => {
+  const cases = [
+    { name: "ordinary project file", linked: false, follow: false, deny: false, decision: "allow" },
+    { name: "escaping symlink", linked: true, follow: false, deny: false, decision: "ask" },
+    { name: "intentional follow", linked: true, follow: true, deny: false, decision: "allow" },
+    { name: "canonical deny with follow", linked: true, follow: true, deny: true, decision: "deny" },
+    { name: "canonical deny without follow", linked: true, follow: false, deny: true, decision: "deny" },
+    { name: "project deny", linked: false, follow: false, deny: true, decision: "deny" },
+  ] as const;
+
+  for (const row of cases) {
+    const temporary = await mkdtemp(join(tmpdir(), "pi-gear-session-boundary-"));
+    const root = await realpath(temporary);
+    const workspace = join(root, "workspace");
+    const project = join(root, "project");
+    const external = join(root, "external.txt");
+    const ordinary = join(project, "ordinary.txt");
+    const linked = join(project, "linked.txt");
+    const seed = join(project, "seed.txt");
+    try {
+      await mkdir(workspace);
+      await mkdir(join(project, ".git"), { recursive: true });
+      await writeFile(seed, "seed");
+      await writeFile(ordinary, "ordinary");
+      await writeFile(external, "external");
+      await symlink(external, linked);
+      const target = row.linked ? linked : ordinary;
+      const rules: FilesystemRule[] = [];
+      const config = { ...policy(target, false), filesystem: { rules } };
+      let prompts = 0;
+      const ctx = {
+        hasUI: true,
+        ui: {
+          select: async () => {
+            prompts++;
+            return prompts === 1 ? `Allow project (${project}/**)` : "Deny";
+          },
+          notify: () => undefined,
+        },
+      } as unknown as ExtensionContext;
+      const access = new FilesystemAccess(workspace, {
+        loadConfig: async () => config,
+        tempSource: async () => join(root, "trusted-temp"),
+      });
+      assert.equal((await access.request(seed, "write", "write", ctx)).decision, "allow");
+      if (row.follow) rules.push({ path: linked, access: "read-write", follow: true });
+      if (row.deny) rules.push({ path: row.linked ? external : ordinary, access: "deny" });
+
+      assert.equal((await access.authorize(target, "write")).decision, row.decision, row.name);
+      assert.equal((await access.request(target, "write", "write", ctx)).decision, row.decision, row.name);
+      assert.equal(prompts, row.decision === "ask" ? 2 : 1, row.name);
+
+      const sandbox = await createEffectiveSandboxConfig(workspace, {
+        ...config, filesystem: { rules: access.getEffectiveRules(rules) },
+      });
+      assert.ok(sandbox.filesystem.allowWrite?.includes(`${project}/**`), row.name);
+      assert.equal(sandbox.filesystem.allowWrite?.includes(external), row.follow, row.name);
+      if (row.deny) {
+        assert.ok(sandbox.filesystem.denyWrite?.includes(row.linked ? external : ordinary), row.name);
+      }
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  }
+});
+
+test("approving a project from an escaping symlink does not approve its target", async () => {
+  for (const permanent of [false, true]) {
+    const temporary = await mkdtemp(join(tmpdir(), "pi-gear-project-choice-boundary-"));
+    const root = await realpath(temporary);
+    const project = join(root, "project");
+    const workspace = join(root, "workspace");
+    const external = join(root, "external.txt");
+    const linked = join(project, "linked.txt");
+    const persisted: FilesystemRule[] = [];
+    try {
+      await mkdir(workspace);
+      await mkdir(join(project, ".git"), { recursive: true });
+      await writeFile(external, "external");
+      await symlink(external, linked);
+      const access = new FilesystemAccess(workspace, {
+        loadConfig: async () => policy(linked, false),
+        tempSource: async () => join(root, "trusted-temp"),
+        persistRule: async (rule) => { persisted.push(rule); },
+      });
+      const ctx = {
+        hasUI: true,
+        ui: {
+          select: async () => permanent ? "Always allow project" : `Allow project (${project}/**)`,
+          notify: () => undefined,
+        },
+      } as unknown as ExtensionContext;
+
+      assert.equal((await access.request(linked, "read", "read", ctx)).decision, "ask");
+      assert.equal((await access.authorize(external, "read")).decision, "ask");
+      assert.deepEqual(persisted, permanent ? [{ path: `${project}/**`, access: "read-only" }] : []);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  }
+});
+
+test("canonical filenames do not become wildcard session approvals", async () => {
+  for (const projectApproval of [false, true]) {
+    const temporary = await mkdtemp(join(tmpdir(), "pi-gear-canonical-star-"));
+    const root = await realpath(temporary);
+    const workspace = join(root, "workspace");
+    const canonical = join(root, "secret*");
+    const sibling = join(root, "secret-private");
+    const alias = join(root, "alias");
+    try {
+      await mkdir(workspace);
+      if (projectApproval) {
+        await mkdir(join(canonical, ".git"), { recursive: true });
+        await mkdir(sibling);
+        await symlink(canonical, alias);
+      } else {
+        await writeFile(canonical, "secret");
+        await writeFile(sibling, "private");
+        await symlink(canonical, alias);
+      }
+      const access = new FilesystemAccess(workspace, {
+        loadConfig: async () => policy(alias, false),
+        tempSource: async () => join(root, "trusted-temp"),
+      });
+      const ctx = {
+        hasUI: true,
+        ui: {
+          select: async () => projectApproval ? `Allow project (${alias}/**)` : "Allow",
+          notify: () => undefined,
+        },
+      } as unknown as ExtensionContext;
+
+      await access.request(alias, "write", "write", ctx);
+
+      assert.equal((await access.authorize(sibling, "write")).decision, "ask");
+      assert.ok(!access.getEffectiveRules().some((rule) => rule.path.startsWith(canonical)));
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
   }
 });
 

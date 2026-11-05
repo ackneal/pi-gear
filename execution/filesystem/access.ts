@@ -9,10 +9,8 @@ import {
 import { ConfirmationQueue } from "../confirmation-queue.ts";
 import { resolveRuntimeTempDir, type TempDirSource } from "../sandbox/config.ts";
 import {
-  decisionForAccess,
   evaluateFilesystem,
   followFallbackAccess,
-  matchesFilesystemSelector,
   mostRestrictiveFilesystemDecision,
   type FilesystemDecision,
   type FilesystemOperation,
@@ -46,24 +44,35 @@ export interface FilesystemAccessOptions {
   readonly persistRule?: (rule: FilesystemRule) => Promise<void>;
 }
 
+interface PendingPrompt {
+  readonly controller: AbortController;
+  readonly promise: Promise<FilesystemAuthorization>;
+  callers: number;
+}
+
 const awaitWithSignal = (
   promise: Promise<FilesystemAuthorization>,
   fallback: FilesystemAuthorization,
+  release: () => void,
   signal?: AbortSignal,
 ): Promise<FilesystemAuthorization> => {
-  if (signal?.aborted) return Promise.resolve(fallback);
-  if (signal === undefined) return promise;
+  if (signal?.aborted) {
+    release();
+    return Promise.resolve(fallback);
+  }
+  if (signal === undefined) return promise.finally(release);
 
   return new Promise<FilesystemAuthorization>((resolve, reject) => {
     const onAbort = () => {
       signal.removeEventListener("abort", onAbort);
+      release();
       resolve(fallback);
     };
 
     signal.addEventListener("abort", onAbort, { once: true });
     promise.then(
-      (result) => { signal.removeEventListener("abort", onAbort); resolve(result); },
-      (error) => { signal.removeEventListener("abort", onAbort); reject(error); },
+      (result) => { signal.removeEventListener("abort", onAbort); release(); resolve(result); },
+      (error) => { signal.removeEventListener("abort", onAbort); release(); reject(error); },
     );
   });
 };
@@ -75,7 +84,7 @@ export class FilesystemAccess {
   private readonly workspace: Promise<CanonicalWorkspace>;
   private tempPrefixes: Promise<readonly string[]> | undefined;
   private readonly confirmationQueue: ConfirmationQueue;
-  private readonly pendingPrompts = new Map<string, Promise<FilesystemAuthorization>>();
+  private readonly pendingPrompts = new Map<string, PendingPrompt>();
   private generation = 0;
 
   constructor(cwd: string, options: FilesystemAccessOptions = {}) {
@@ -90,17 +99,18 @@ export class FilesystemAccess {
       (this.options.loadConfig ?? loadExtensionConfig)(),
       this.workspace,
     ]);
+    const effectiveConfig = { ...config, filesystem: { rules: this.getEffectiveRules(config.filesystem.rules, operation) } };
     const normalized = normalizeToolPath(path, workspace.cwd);
     const selected = operation === "read" ? await selectReadPath(normalized) : normalized;
     const target = await resolveAccessTarget(selected, workspace);
     const decision = mostRestrictiveFilesystemDecision([
-      evaluateFilesystem(config, workspace.cwd, target.path, operation),
+      evaluateFilesystem(effectiveConfig, workspace.cwd, target.path, operation),
       evaluateFilesystem(
-        config,
+        effectiveConfig,
         workspace.canonicalRoot,
         target.canonicalPath,
         operation,
-        followFallbackAccess(config, workspace.cwd, target.path),
+        followFallbackAccess(effectiveConfig, workspace.cwd, target.path),
       ),
     ]);
 
@@ -130,19 +140,38 @@ export class FilesystemAccess {
     signal?: AbortSignal,
   ): Promise<FilesystemAuthorization> {
     const authorization = await this.authorize(path, operation);
+    if (signal?.aborted) return { ...authorization, decision: authorization.decision === "deny" ? "deny" : "ask" };
     if (authorization.decision !== "ask") return authorization;
-    if (await this.withinRuntimeTemp(authorization)) return { ...authorization, decision: "allow" };
+    const withinTemp = await this.withinRuntimeTemp(authorization);
+    if (signal?.aborted) return authorization;
+    if (withinTemp) return { ...authorization, decision: "allow" };
     if (!ctx.hasUI) return authorization;
-    if (this.isSessionApproved(authorization, operation)) return { ...authorization, decision: "allow" };
 
     const key = `${authorization.path}:${operation}`;
     let prompt = this.pendingPrompts.get(key);
     if (prompt === undefined) {
-      prompt = this.promptAccess(authorization, operation, label, ctx, key);
+      const controller = new AbortController();
+      prompt = {
+        controller,
+        callers: 0,
+        promise: this.promptAccess(authorization, operation, label, ctx, controller.signal).finally(() => {
+          if (this.pendingPrompts.get(key) === prompt) this.pendingPrompts.delete(key);
+        }),
+      };
       this.pendingPrompts.set(key, prompt);
     }
 
-    return awaitWithSignal(prompt, authorization, signal);
+    const shared = prompt;
+    shared.callers++;
+    let released = false;
+    return awaitWithSignal(shared.promise, authorization, () => {
+      if (released) return;
+      released = true;
+      if (--shared.callers === 0) {
+        if (this.pendingPrompts.get(key) === shared) this.pendingPrompts.delete(key);
+        shared.controller.abort();
+      }
+    }, signal);
   }
 
   private async promptAccess(
@@ -150,44 +179,39 @@ export class FilesystemAccess {
     operation: FilesystemOperation,
     label: string,
     ctx: ExtensionContext,
-    key: string,
+    signal: AbortSignal,
   ): Promise<FilesystemAuthorization> {
-    try {
-      const promptGeneration = this.generation;
-      return await this.confirmationQueue.prompt(async (queueSignal) => {
-        if (queueSignal.aborted || this.generation !== promptGeneration) return authorization;
-        if (this.isSessionApproved(authorization, operation)) {
-          return { ...authorization, decision: "allow" };
-        }
+    const promptGeneration = this.generation;
+    return this.confirmationQueue.prompt(async (queueSignal) => {
+      if (queueSignal.aborted || this.generation !== promptGeneration) return authorization;
+      const current = await this.authorize(authorization.path, operation);
+      if (current.decision !== "ask") return current;
 
-        const workspace = await this.workspace;
-        const projectRoot = await detectProjectRoot(authorization.path, { boundary: workspace.canonicalRoot });
-        const ruleAccess: FilesystemRuleAccess = operation === "read" ? "read-only" : "read-write";
-        const projectPattern = projectRoot !== undefined ? `${projectRoot.replace(/\/+$/, "")}/**` : undefined;
+      const workspace = await this.workspace;
+      const projectRoot = await detectProjectRoot(authorization.path, { boundary: workspace.canonicalRoot });
+      const ruleAccess: FilesystemRuleAccess = operation === "read" ? "read-only" : "read-write";
+      const projectPattern = projectRoot !== undefined ? `${projectRoot.replace(/\/+$/, "")}/**` : undefined;
 
-        const choice = await promptFilesystemAccess({
-          path: authorization.path,
-          label,
-          projectPattern,
-          ctx,
-          signal: queueSignal,
-        });
+      const choice = await promptFilesystemAccess({
+        path: authorization.path,
+        label,
+        projectPattern,
+        ctx,
+        signal: queueSignal,
+      });
 
-        if (queueSignal.aborted || this.generation !== promptGeneration) return authorization;
+      if (queueSignal.aborted || this.generation !== promptGeneration) return authorization;
 
-        return this.handlePromptChoice(
-          choice,
-          authorization,
-          label,
-          ruleAccess,
-          projectPattern,
-          ctx,
-          () => !queueSignal.aborted && this.generation === promptGeneration,
-        );
-      }, authorization);
-    } finally {
-      this.pendingPrompts.delete(key);
-    }
+      return this.handlePromptChoice(
+        choice,
+        authorization,
+        label,
+        ruleAccess,
+        projectPattern,
+        ctx,
+        () => !queueSignal.aborted && this.generation === promptGeneration,
+      );
+    }, authorization, signal);
   }
 
   private async handlePromptChoice(
@@ -201,51 +225,33 @@ export class FilesystemAccess {
   ): Promise<FilesystemAuthorization> {
     if (!isCurrent()) return authorization;
 
-    if (choice === "allow-project" && projectPattern !== undefined) {
-      this.addSessionApproval(projectPattern, ruleAccess);
-      ctx.ui.notify(
-        `User approved outside-workspace project access: ${label} ${projectPattern}`,
-        "info",
-      );
-      return { ...authorization, decision: "allow" };
+    const project = choice === "allow-project" || choice === "always-allow-project";
+    if (choice === "deny" || project && projectPattern === undefined) {
+      ctx.ui.notify(`User denied outside-workspace access: ${label} ${authorization.path}`, "warning");
+      return authorization;
     }
 
-    if (choice === "always-allow-project" && projectPattern !== undefined) {
-      await this.persistRule({ path: projectPattern, access: ruleAccess }, ctx);
+    const pattern = project ? projectPattern! : authorization.path;
+    const target = await resolveAccessTarget(project ? pattern.slice(0, -3) : pattern, await this.workspace);
+    const canonicalPattern = project ? `${target.canonicalPath}/**` : target.canonicalPath;
+    if (!isCurrent()) return authorization;
+
+    const permanent = choice === "always-allow-file" || choice === "always-allow-project";
+    if (permanent) {
+      await this.persistRule({ path: pattern, access: ruleAccess }, ctx);
       if (!isCurrent()) return authorization;
-      this.addSessionApproval(projectPattern, ruleAccess);
-      ctx.ui.notify(
-        `User permanently approved outside-workspace project access: ${label} ${projectPattern}`,
-        "info",
-      );
-      return { ...authorization, decision: "allow" };
     }
 
-    if (choice === "always-allow-file") {
-      await this.persistRule({ path: authorization.path, access: ruleAccess }, ctx);
-      if (!isCurrent()) return authorization;
-      this.addSessionApproval(authorization.path, ruleAccess);
-      ctx.ui.notify(
-        `User permanently approved outside-workspace access: ${label} ${authorization.path}`,
-        "info",
-      );
-      return { ...authorization, decision: "allow" };
-    }
-
-    if (choice === "allow-file") {
-      this.addSessionApproval(authorization.path, ruleAccess);
-      ctx.ui.notify(
-        `User approved outside-workspace access: ${label} ${authorization.path}`,
-        "info",
-      );
-      return { ...authorization, decision: "allow" };
-    }
-
+    // Keep alias spellings and their resolved boundary in the same policy used by Bash.
+    this.addSessionApproval(pattern, ruleAccess);
+    // Policy selectors cannot represent literal stars in a resolved filename.
+    if (!target.canonicalPath.includes("*")) this.addSessionApproval(canonicalPattern, ruleAccess);
     ctx.ui.notify(
-      `User denied outside-workspace access: ${label} ${authorization.path}`,
-      "warning",
+      `User ${permanent ? "permanently approved" : "approved"} outside-workspace${project ? " project" : ""} access: ${label} ${pattern}`,
+      "info",
     );
-    return authorization;
+    return project ? this.authorize(authorization.path, ruleAccess === "read-only" ? "read" : "write")
+      : { ...authorization, decision: "allow" };
   }
 
   private addSessionApproval(pattern: string, access: FilesystemRuleAccess): void {
@@ -279,17 +285,6 @@ export class FilesystemAccess {
     }
   }
 
-  private isSessionApproved(target: FilesystemAuthorization, operation: FilesystemOperation): boolean {
-    for (const { pattern, access } of this.sessionApprovals) {
-      const matches = matchesFilesystemSelector(pattern, target.path) ||
-        matchesFilesystemSelector(pattern, target.canonicalPath);
-      if (matches && decisionForAccess(access, operation) === "allow") {
-        return true;
-      }
-    }
-    return false;
-  }
-
   private async withinRuntimeTemp(target: FilesystemAuthorization): Promise<boolean> {
     if (this.tempPrefixes === undefined) {
       const resolved = this.options.tempSource !== undefined ? { source: this.options.tempSource } : {};
@@ -301,9 +296,14 @@ export class FilesystemAccess {
       target.canonicalPath === prefix || target.canonicalPath.startsWith(`${prefix}/`));
   }
 
-  getEffectiveRules(baseRules: readonly FilesystemRule[] = []): readonly FilesystemRule[] {
+  getEffectiveRules(
+    baseRules: readonly FilesystemRule[] = [],
+    operation?: FilesystemOperation,
+  ): readonly FilesystemRule[] {
     const rules = [...baseRules];
     for (const approval of this.sessionApprovals) {
+      // A read approval does not deny a later request to approve writes.
+      if (operation === "write" && approval.access === "read-only") continue;
       const existingIndex = rules.findIndex((r) => r.path === approval.pattern);
       if (existingIndex >= 0) {
         const existing = rules[existingIndex]!;
@@ -324,6 +324,7 @@ export class FilesystemAccess {
   clear(): void {
     ++this.generation;
     this.sessionApprovals.length = 0;
+    for (const prompt of this.pendingPrompts.values()) prompt.controller.abort();
     this.pendingPrompts.clear();
   }
 }
