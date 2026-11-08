@@ -43,7 +43,8 @@ test("LSP tool contracts describe optional diagnostics scope and unchanged navig
           dirtyFiles: async () => [],
           onChange: () => () => undefined,
         }) as never,
-        status: () => undefined,
+        status: async () => undefined,
+        endpoint: () => undefined,
       },
       loadConfig: loadConfig as never,
     });
