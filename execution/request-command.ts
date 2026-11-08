@@ -1,13 +1,14 @@
 import {
   createBashToolDefinition,
-  ExtensionEditorComponent,
   type BashToolDetails,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Text } from "@earendil-works/pi-tui";
 import { Type, type Static } from "typebox";
+import { editCommand } from "../ui/command/editor.ts";
+import { selectCommand } from "../ui/command/selector.ts";
 import { executionToolRenderers } from "../ui/tools/index.ts";
-import { CONFIRMATION_TIMEOUT_MS, ConfirmationQueue } from "./confirmation-queue.ts";
+import { ConfirmationQueue } from "./confirmation-queue.ts";
 
 export const REQUEST_COMMAND_TOOL_NAME = "request_command";
 
@@ -33,12 +34,12 @@ export interface CommandDetails extends BashToolDetails {
   status: "Waiting approval" | "Running" | "Completed" | "Cancelled" | "Failed";
 }
 
-export interface HostCommandOptions {
+export interface RequestCommandOptions {
   readonly confirmationQueue?: ConfirmationQueue;
   readonly createBashTool?: typeof createBashToolDefinition;
 }
 
-export function setupHostCommand(pi: ExtensionAPI, options: HostCommandOptions = {}): void {
+export function setupRequestCommand(pi: ExtensionAPI, options: RequestCommandOptions = {}): void {
   const ownsQueue = options.confirmationQueue === undefined;
   const confirmationQueue = options.confirmationQueue ?? new ConfirmationQueue();
   const createBashTool = options.createBashTool ?? createBashToolDefinition;
@@ -120,40 +121,23 @@ export function setupHostCommand(pi: ExtensionAPI, options: HostCommandOptions =
         publish("Waiting approval");
         const reason = params.reason?.trim();
         const directory = cwd !== process.cwd() ? cwd : undefined;
-        const promptTitle = ["Run command?", reason, [directory, `$ ${command}`].filter(Boolean).join("\n")].filter(Boolean).join("\n\n");
-
         const approved = await confirmationQueue.confirm(async (approvalSignal) => {
           checkAbort();
-          const choice = await ctx.ui.select(
-            promptTitle,
-            ["Run", "Edit", "Cancel"],
-            { timeout: CONFIRMATION_TIMEOUT_MS, signal: approvalSignal },
-          );
+          const choice = await selectCommand(ctx, command, reason, directory, approvalSignal);
           checkAbort();
           if (choice === "Run") return true;
           if (choice === "Edit") {
-            // The RPC editor cannot be dismissed on abort or session changes.
-            if (ctx.mode !== "tui") throw new Error("Editing commands requires terminal UI. Request a revised command instead.");
-            const edited = await ctx.ui.custom<string | undefined>((tui, _theme, keybindings, done) => {
-              const abort = (): void => done(undefined);
-              const editor = new ExtensionEditorComponent(tui, keybindings, "Edit command", command, done, abort);
-              const handleInput = editor.handleInput.bind(editor);
-              editor.handleInput = (data) => {
-                if (keybindings.matches(data, "app.editor.external")) {
-                  ctx.ui.notify("External editors are unavailable during command approval.", "warning");
-                  return;
-                }
-                handleInput(data);
-              };
-              approvalSignal.addEventListener("abort", abort, { once: true });
-              if (approvalSignal.aborted) abort();
-              return Object.assign(editor, {
-                dispose: () => approvalSignal.removeEventListener("abort", abort),
-              });
-            });
+            const normalizedCommand = command.replace(/\r\n?/g, "\n").replace(/\t/g, "    ");
+            const edited = await editCommand(ctx, command, approvalSignal);
             checkAbort();
             if (edited === undefined || edited.trim() === "") return false;
-            command = edited.trim();
+            // The SDK editor normalizes tabs and line endings even without user edits.
+            if (edited !== normalizedCommand.trim()) {
+              if (normalizedCommand !== command) {
+                throw new Error("The built-in editor normalizes tabs and carriage returns. Request a revised command instead of editing this command here.");
+              }
+              command = edited.trim();
+            }
             return true;
           }
           return false;
