@@ -17,6 +17,9 @@
     "lsp"
   ],
   "packageManager": "bun@1.3.13",
+  "workspaces": [
+    "packages/*"
+  ],
   "license": "MIT",
   "type": "module",
   "pi": {
