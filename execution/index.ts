@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ExtensionConfig } from "../config/index.ts";
 import { setupFilesystemGuard, type FilesystemAccessService } from "./filesystem/guard.ts";
-import { setupHostCommand } from "./host-command.ts";
+import { setupRequestCommand } from "./request-command.ts";
 import { setupSandbox, type SandboxDiagnostics } from "./sandbox/index.ts";
 import { setupFileToolUi } from "../ui/tools/index.ts";
 import { ConfirmationQueue } from "./confirmation-queue.ts";
@@ -23,7 +23,7 @@ export function setupExecution(pi: ExtensionAPI, config: ExtensionConfig, option
     getEffectiveFilesystemRules: (cwd, baseRules) => filesystem.getEffectiveRules(cwd, baseRules),
   });
   if (!options.child && config.sandbox.enabled) {
-    setupHostCommand(pi, { confirmationQueue });
+    setupRequestCommand(pi, { confirmationQueue });
   }
   setupFileToolUi(pi);
 

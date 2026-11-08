@@ -9,14 +9,14 @@ import {
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { ConfirmationQueue } from "./confirmation-queue.ts";
-import { setupHostCommand, type CommandDetails, type requestCommandParameters } from "./host-command.ts";
+import { setupRequestCommand, type CommandDetails, type requestCommandParameters } from "./request-command.ts";
 
 initTheme();
 
 function fixture(exec: BashOperations["exec"] = async () => ({ exitCode: 0 }), shared = false) {
   let tool!: ToolDefinition<typeof requestCommandParameters, CommandDetails>;
   const handlers: Record<string, () => void> = {};
-  setupHostCommand({
+  setupRequestCommand({
     on: (event: string, handler: () => void) => { handlers[event] = handler; },
     registerTool: (registered: typeof tool) => { tool = registered; },
   } as unknown as ExtensionAPI, {
@@ -145,22 +145,19 @@ test("RPC editing fails closed without opening an uncancellable dialog", async (
   assert.equal(executions, 1);
 });
 
-test("approval editor cannot launch an uncancellable external editor", async () => {
+test("approval editor forwards the external editor shortcut to the native component", async () => {
   let executions = 0;
-  let notifications = 0;
+  let externalOpens = 0;
   const { tool } = fixture(async () => { executions++; return { exitCode: 0 }; });
   const ctx = context({
     select: async () => "Edit",
-    notify: (message: string, severity: string) => {
-      assert.match(message, /External editors are unavailable/);
-      assert.equal(severity, "warning");
-      notifications++;
-    },
+    notify: () => assert.fail("external editor shortcut was blocked"),
     custom: (factory: (...args: any[]) => any) => new Promise((resolve) => {
       const component = factory(
-        { requestRender() {}, stop() { assert.fail("approval launched external editor"); } },
+        { requestRender() {}, stop() { assert.fail("test launched a real external editor"); } },
         {}, { matches: (_data: string, action: string) => action === "app.editor.external" }, resolve,
       );
+      component.handleOpenExternalEditor = async () => { externalOpens++; };
       component.handleInput("external-editor-shortcut");
       component.dispose();
       resolve(undefined);
@@ -168,7 +165,7 @@ test("approval editor cannot launch an uncancellable external editor", async () 
   });
   Object.assign(ctx, { mode: "tui" });
   const result = await tool.execute("external", { command: "original" }, undefined, undefined, ctx);
-  assert.equal(notifications, 1);
+  assert.equal(externalOpens, 1);
   assert.equal(executions, 0);
   assert.equal(result.details?.status, "Cancelled");
 });

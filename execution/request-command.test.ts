@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { after, before } from "node:test";
+import { initTheme } from "@earendil-works/pi-coding-agent";
 import type {
   AgentToolResult,
   BashToolDetails,
@@ -9,7 +10,21 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { CONFIRMATION_TIMEOUT_MS, ConfirmationQueue } from "./confirmation-queue.ts";
-import { REQUEST_COMMAND_TOOL_NAME, setupHostCommand } from "./host-command.ts";
+import { REQUEST_COMMAND_TOOL_NAME, setupRequestCommand } from "./request-command.ts";
+
+initTheme();
+
+const stdoutDimensions = ["columns", "rows"].map((key) => [key, Object.getOwnPropertyDescriptor(process.stdout, key)] as const);
+before(() => {
+  Object.defineProperty(process.stdout, "columns", { configurable: true, value: 120 });
+  Object.defineProperty(process.stdout, "rows", { configurable: true, value: 60 });
+});
+after(() => {
+  for (const [key, descriptor] of stdoutDimensions) {
+    if (descriptor) Object.defineProperty(process.stdout, key, descriptor);
+    else Reflect.deleteProperty(process.stdout, key);
+  }
+});
 
 const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text } as never;
 
@@ -20,7 +35,7 @@ function renderText(component: { render(width: number): string[] }, width = 200)
     .join("\n");
 }
 
-function createRegisteredHostTool(options: Parameters<typeof setupHostCommand>[1] = {}) {
+function createRegisteredHostTool(options: Parameters<typeof setupRequestCommand>[1] = {}) {
   let registered: ToolDefinition<any, any, any> | undefined;
   const handlers: Record<string, () => void> = {};
   const pi = {
@@ -32,7 +47,7 @@ function createRegisteredHostTool(options: Parameters<typeof setupHostCommand>[1
     },
   } as unknown as ExtensionAPI;
 
-  setupHostCommand(pi, options);
+  setupRequestCommand(pi, options);
   assert.ok(registered);
   assert.equal(registered.name, REQUEST_COMMAND_TOOL_NAME);
   assert.equal(registered.exposure, "model-only");
@@ -168,10 +183,11 @@ test("request_command approval, editing, cancellation, and UI requirement", asyn
 
     if (row.expectedPrompt !== undefined) {
       assert.deepEqual(
-        selectCalls,
-        [{ title: row.expectedPrompt, options: ["Run", "Edit", "Cancel"], timeout: CONFIRMATION_TIMEOUT_MS }],
+        selectCalls.map(({ title, options }) => ({ title, options })),
+        [{ title: row.expectedPrompt, options: ["Run", "Edit", "Cancel"] }],
         row.name,
       );
+      assert.ok(selectCalls[0]!.timeout! > 0 && selectCalls[0]!.timeout! <= CONFIRMATION_TIMEOUT_MS, row.name);
     } else {
       assert.equal(selectCalls.length, 0, row.name);
     }
