@@ -29,6 +29,7 @@
     "test:sandbox:macos": "node --experimental-strip-types --test execution/sandbox/integration.test.ts && node --experimental-strip-types --test --test-name-pattern='sandbox spawn abort and timeout' execution/sandbox/spawn.test.ts"
   },
   "dependencies": {
+    "pi-roster": "workspace:*",
     "@anthropic-ai/sandbox-runtime": "0.0.71",
     "@ff-labs/fff-bun": "0.10.5"
   },

@@ -14,7 +14,8 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --experimental-strip-types --test packages/pi-gear/capabilities/*/*.test.ts packages/pi-gear/commands/*.test.ts packages/pi-gear/config/*.test.ts packages/pi-gear/context/*/*.test.ts packages/pi-gear/execution/*.test.ts packages/pi-gear/execution/*/*.test.ts packages/pi-gear/execution/*/*/*.test.ts packages/pi-gear/lifecycle/*.test.ts packages/pi-gear/lsp/*.test.ts packages/pi-gear/workspace/*.test.ts packages/pi-gear/subagents/*/*.test.ts packages/pi-gear/subagents/*/*/*.test.ts packages/pi-gear/ui/*/*.test.ts",
+    "test": "node --experimental-strip-types --test packages/pi-roster/tests/**/*.test.ts packages/pi-gear/capabilities/*/*.test.ts packages/pi-gear/commands/*.test.ts packages/pi-gear/config/*.test.ts packages/pi-gear/context/*/*.test.ts packages/pi-gear/execution/*.test.ts packages/pi-gear/execution/*/*.test.ts packages/pi-gear/execution/*/*/*.test.ts packages/pi-gear/lifecycle/*.test.ts packages/pi-gear/lsp/*.test.ts packages/pi-gear/workspace/*.test.ts packages/pi-gear/subagents/*/*.test.ts packages/pi-gear/subagents/*/*/*.test.ts packages/pi-gear/ui/*/*.test.ts",
+    "test:roster": "cd packages/pi-roster && bun run test",
     "test:gear": "cd packages/pi-gear && bun run test",
     "test:sandbox:macos": "cd packages/pi-gear && bun run test:sandbox:macos"
   },
