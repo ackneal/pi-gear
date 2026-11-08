@@ -23,8 +23,11 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
-      - name: Test
-        run: bun run test
+      - name: Test pi-rostrix
+        run: bun run test:rostrix
+
+      - name: Test pi-gear
+        run: bun run test:gear
 
   sandbox-macos:
     runs-on: macos-latest
