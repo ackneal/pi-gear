@@ -8,6 +8,7 @@ export * from "./core/schema.ts";
 export * from "./core/registry.ts";
 export * from "./core/resolver.ts";
 export * from "./core/activator.ts";
+export * from "./runtime/session-runner.ts";
 
 export const ROSTRIX_RUNTIME_SYMBOL = Symbol.for("pi.rostrix.runtime");
 /** Legacy compatibility alias */
