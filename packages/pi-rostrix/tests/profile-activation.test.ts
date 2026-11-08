@@ -50,6 +50,7 @@ function createMockPi(initial?: Partial<MockPiState>): { pi: ExtensionAPI; state
     setThinkingLevel: (level: ThinkingLevel) => { state.thinkingLevel = level; },
     registerMcpServer: (name: string, config: any) => { state.mcpServers.set(name, config); },
     unregisterMcpServer: (name: string) => { state.mcpServers.delete(name); },
+    registerTool: () => {},
     on: (event: string, handler: (...args: any[]) => any) => {
       const handlers = state.eventHandlers.get(event) ?? [];
       handlers.push(handler);

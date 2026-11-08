@@ -5,11 +5,15 @@ import { initRostrix, ROSTRIX_RUNTIME_SYMBOL, ProfileValidationError } from "../
 
 function createMockPi(): { pi: ExtensionAPI; shutdown: () => void } {
   const listeners = new Map<string, Array<() => void>>();
+  const tools: any[] = [];
   const pi = {
     on: (event: string, handler: () => void) => {
       const list = listeners.get(event) ?? [];
       list.push(handler);
       listeners.set(event, list);
+    },
+    registerTool: (tool: any) => {
+      tools.push(tool);
     },
   } as unknown as ExtensionAPI;
 

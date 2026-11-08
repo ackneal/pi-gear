@@ -8,14 +8,14 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { ResolvedProfile } from "../core/resolver.ts";
 
-export interface TaskUsage {
+export type SubagentUsage = {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cacheReadTokens: number;
   readonly cacheWriteTokens: number;
   readonly totalTokens: number;
   readonly cost: number;
-}
+};
 
 export interface SubagentSessionOptions {
   readonly profile: ResolvedProfile;
@@ -32,7 +32,7 @@ export interface SubagentTaskResult {
   readonly status: "completed" | "failed" | "aborted";
   readonly result?: string | undefined;
   readonly error?: string | undefined;
-  readonly usage: TaskUsage;
+  readonly usage: SubagentUsage;
   readonly turns: number;
   readonly durationMs: number;
 }
@@ -163,7 +163,7 @@ export class InProcessSubagentRunner {
 
       await session.prompt(promptToSend);
 
-      const usage: TaskUsage = {
+      const usage: SubagentUsage = {
         inputTokens,
         outputTokens,
         cacheReadTokens,
@@ -190,7 +190,7 @@ export class InProcessSubagentRunner {
         durationMs: Date.now() - startedAt,
       };
     } catch (error) {
-      const usage: TaskUsage = {
+      const usage: SubagentUsage = {
         inputTokens,
         outputTokens,
         cacheReadTokens,
