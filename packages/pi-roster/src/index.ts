@@ -1,4 +1,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { ProfileRegistry } from "./core/registry.ts";
+import type { ProfileDefinition } from "./core/schema.ts";
+
+export * from "./core/schema.ts";
+export * from "./core/registry.ts";
 
 export const ROSTER_RUNTIME_SYMBOL = Symbol.for("pi.roster.runtime");
 
@@ -9,17 +14,18 @@ export interface RosterOptions {
 export interface RosterRuntime {
   readonly version: string;
   readonly isInitialized: boolean;
-  registerProfile(profile: any): void;
-  getProfile(id: string): any;
-  getAllProfiles(): any[];
+  readonly profiles: ProfileRegistry;
+  registerProfile(profile: ProfileDefinition): void;
+  getProfile(id: string): ProfileDefinition | undefined;
+  getAllProfiles(): ProfileDefinition[];
   dispose(): void;
 }
 
 class InProcessRosterRuntime implements RosterRuntime {
   readonly version = "0.1.0";
   private _initialized = false;
-  private _profiles = new Map<string, any>();
-  private _pi: ExtensionAPI;
+  private readonly _profiles = new ProfileRegistry();
+  private readonly _pi: ExtensionAPI;
 
   constructor(pi: ExtensionAPI, options: RosterOptions = {}) {
     this._pi = pi;
@@ -33,22 +39,20 @@ class InProcessRosterRuntime implements RosterRuntime {
     return this._initialized;
   }
 
-  registerProfile(profile: any): void {
-    if (!profile || typeof profile.id !== "string") {
-      throw new Error("Invalid profile: missing string 'id'");
-    }
-    if (this._profiles.has(profile.id)) {
-      throw new Error(`Profile '${profile.id}' is already registered`);
-    }
-    this._profiles.set(profile.id, profile);
+  get profiles(): ProfileRegistry {
+    return this._profiles;
   }
 
-  getProfile(id: string): any {
+  registerProfile(profile: ProfileDefinition): void {
+    this._profiles.register(profile);
+  }
+
+  getProfile(id: string): ProfileDefinition | undefined {
     return this._profiles.get(id);
   }
 
-  getAllProfiles(): any[] {
-    return Array.from(this._profiles.values());
+  getAllProfiles(): ProfileDefinition[] {
+    return this._profiles.list();
   }
 
   dispose(): void {

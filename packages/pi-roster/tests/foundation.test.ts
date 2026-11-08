@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { initRoster, ROSTER_RUNTIME_SYMBOL } from "../src/index.ts";
+import { initRoster, ROSTER_RUNTIME_SYMBOL, ProfileValidationError } from "../src/index.ts";
 
 function createMockPi(): { pi: ExtensionAPI; shutdown: () => void } {
   const listeners = new Map<string, Array<() => void>>();
@@ -36,19 +36,19 @@ test("initRoster creates a singleton runtime and attaches to globalThis", () => 
     assert.strictEqual((globalThis as any)[ROSTER_RUNTIME_SYMBOL], runtime1);
 
     // Profile registration and retrieval
-    runtime1.registerProfile({ id: "test:agent", label: "Test Agent" });
-    assert.deepEqual(runtime1.getProfile("test:agent"), { id: "test:agent", label: "Test Agent" });
+    runtime1.registerProfile({ id: "test:agent", label: "Test Agent", description: "Test Description" });
+    assert.deepEqual(runtime1.getProfile("test:agent"), { id: "test:agent", label: "Test Agent", description: "Test Description" });
     assert.equal(runtime1.getAllProfiles().length, 1);
 
     // Duplicate registration throws
     assert.throws(() => {
-      runtime1.registerProfile({ id: "test:agent" });
+      runtime1.registerProfile({ id: "test:agent", label: "Test Agent", description: "Test Description" });
     }, /already registered/);
 
-    // Invalid profile throws
+    // Invalid profile throws ProfileValidationError
     assert.throws(() => {
       runtime1.registerProfile({} as any);
-    }, /missing string 'id'/);
+    }, ProfileValidationError);
   } finally {
     shutdown();
     assert.equal((globalThis as any)[ROSTER_RUNTIME_SYMBOL], undefined);
