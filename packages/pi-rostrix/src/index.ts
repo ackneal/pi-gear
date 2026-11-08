@@ -9,13 +9,16 @@ export * from "./core/registry.ts";
 export * from "./core/resolver.ts";
 export * from "./core/activator.ts";
 
-export const ROSTER_RUNTIME_SYMBOL = Symbol.for("pi.roster.runtime");
+export const ROSTRIX_RUNTIME_SYMBOL = Symbol.for("pi.rostrix.runtime");
+/** Legacy compatibility alias */
+export const ROSTER_RUNTIME_SYMBOL = ROSTRIX_RUNTIME_SYMBOL;
 
-export interface RosterOptions {
+export interface RostrixOptions {
   autoRegisterTools?: boolean;
 }
+export type RosterOptions = RostrixOptions;
 
-export interface RosterRuntime {
+export interface RostrixRuntime {
   readonly version: string;
   readonly isInitialized: boolean;
   readonly profiles: ProfileRegistry;
@@ -29,8 +32,9 @@ export interface RosterRuntime {
   getActiveProfile(): ResolvedProfile | undefined;
   dispose(): void;
 }
+export type RosterRuntime = RostrixRuntime;
 
-class InProcessRosterRuntime implements RosterRuntime {
+class InProcessRostrixRuntime implements RostrixRuntime {
   readonly version = "0.1.0";
   private _initialized = false;
   private readonly _profiles = new ProfileRegistry();
@@ -38,7 +42,7 @@ class InProcessRosterRuntime implements RosterRuntime {
   private readonly _activator: ProfileActivator;
   private readonly _pi: ExtensionAPI;
 
-  constructor(pi: ExtensionAPI, options: RosterOptions = {}) {
+  constructor(pi: ExtensionAPI, options: RostrixOptions = {}) {
     this._pi = pi;
     this._activator = new ProfileActivator(pi);
     this._initialized = true;
@@ -92,17 +96,20 @@ class InProcessRosterRuntime implements RosterRuntime {
     this._activator.dispose();
     this._profiles.clear();
     this._initialized = false;
-    delete (globalThis as any)[ROSTER_RUNTIME_SYMBOL];
+    delete (globalThis as any)[ROSTRIX_RUNTIME_SYMBOL];
   }
 }
 
-export function initRoster(pi: ExtensionAPI, options: RosterOptions = {}): RosterRuntime {
+export function initRostrix(pi: ExtensionAPI, options: RostrixOptions = {}): RostrixRuntime {
   const globalObj = globalThis as any;
-  if (globalObj[ROSTER_RUNTIME_SYMBOL]) {
-    return globalObj[ROSTER_RUNTIME_SYMBOL] as RosterRuntime;
+  if (globalObj[ROSTRIX_RUNTIME_SYMBOL]) {
+    return globalObj[ROSTRIX_RUNTIME_SYMBOL] as RostrixRuntime;
   }
 
-  const runtime = new InProcessRosterRuntime(pi, options);
-  globalObj[ROSTER_RUNTIME_SYMBOL] = runtime;
+  const runtime = new InProcessRostrixRuntime(pi, options);
+  globalObj[ROSTRIX_RUNTIME_SYMBOL] = runtime;
   return runtime;
 }
+
+/** Legacy compatibility alias */
+export const initRoster = initRostrix;

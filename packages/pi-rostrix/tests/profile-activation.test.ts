@@ -4,7 +4,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   ProfileActivationError,
   ProfileActivator,
-  initRoster,
+  initRostrix,
   type ResolvedProfile,
   type SupervisionWakeTrigger,
   type ThinkingLevel,
@@ -219,7 +219,7 @@ test("ProfileActivator rolls back previous state on activation failure", async (
 
 test("RosterRuntime activates registered profiles end-to-end", async () => {
   const { pi, state } = createMockPi();
-  const runtime = initRoster(pi);
+  const runtime = initRostrix(pi);
 
   try {
     runtime.registerProfile({
