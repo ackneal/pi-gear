@@ -20,13 +20,10 @@ export * from "./supervision/supervisor.ts";
 export * from "./tools/index.ts";
 
 export const ROSTRIX_RUNTIME_SYMBOL = Symbol.for("pi.rostrix.runtime");
-/** Legacy compatibility alias */
-export const ROSTER_RUNTIME_SYMBOL = ROSTRIX_RUNTIME_SYMBOL;
 
 export interface RostrixOptions {
   autoRegisterTools?: boolean;
 }
-export type RosterOptions = RostrixOptions;
 
 export interface RostrixRuntime {
   readonly version: string;
@@ -44,7 +41,6 @@ export interface RostrixRuntime {
   getActiveProfile(): ResolvedProfile | undefined;
   dispose(): void;
 }
-export type RosterRuntime = RostrixRuntime;
 
 class InProcessRostrixRuntime implements RostrixRuntime {
   readonly version = "0.1.0";
@@ -63,9 +59,11 @@ class InProcessRostrixRuntime implements RostrixRuntime {
     this._supervisor = new TaskSupervisor(this._tasks, pi);
     this._initialized = true;
 
-    // Connect supervisor to task registry completions
-    // When any task finishes or aborts, notify the supervisor
-    // (tasks can be monitored via polling or subscription)
+    this._tasks.subscribe("*", (task) => {
+      if (task.status === "completed" || task.status === "failed" || task.status === "aborted") {
+        this._supervisor.notifyTaskSettled(task);
+      }
+    });
 
     if (options.autoRegisterTools !== false) {
       registerRostrixTools({
@@ -149,6 +147,3 @@ export function initRostrix(pi: ExtensionAPI, options: RostrixOptions = {}): Ros
   globalObj[ROSTRIX_RUNTIME_SYMBOL] = runtime;
   return runtime;
 }
-
-/** Legacy compatibility alias */
-export const initRoster = initRostrix;

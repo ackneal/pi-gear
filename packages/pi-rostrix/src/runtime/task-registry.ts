@@ -270,5 +270,16 @@ export class TaskRegistry {
         }
       }
     }
+
+    const wildcardListeners = this._listeners.get("*");
+    if (wildcardListeners) {
+      for (const listener of [...wildcardListeners]) {
+        try {
+          listener(task);
+        } catch {
+          // ignore listener errors
+        }
+      }
+    }
   }
 }

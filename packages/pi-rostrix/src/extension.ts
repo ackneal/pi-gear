@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { initRoster } from "./index.ts";
+import { initRostrix } from "./index.ts";
 
-export default function rosterExtension(pi: ExtensionAPI): void {
-  initRoster(pi, { autoRegisterTools: true });
+export default function rostrixExtension(pi: ExtensionAPI): void {
+  initRostrix(pi, { autoRegisterTools: true });
 }

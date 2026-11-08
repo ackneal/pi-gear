@@ -218,7 +218,7 @@ test("ProfileActivator rolls back previous state on activation failure", async (
   assert.strictEqual(activator.activeProfile, initialProfile);
 });
 
-test("RosterRuntime activates registered profiles end-to-end", async () => {
+test("RostrixRuntime activates registered profiles end-to-end", async () => {
   const { pi, state } = createMockPi();
   const runtime = initRostrix(pi);
 
