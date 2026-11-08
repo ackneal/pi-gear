@@ -20,7 +20,7 @@ export default async function gear(pi: ExtensionAPI): Promise<void> {
   const workspace = setupWorkspace(pi, execution.filesystem, lifecycle.fff);
 
   // Initialize Rostrix runtime and register gear profiles
-  const rostrix = initRostrix(pi);
+  const rostrix = initRostrix(pi, { autoRegisterTools: false });
   for (const profile of ALL_GEAR_PROFILES) {
     if (!rostrix.getProfile(profile.id)) {
       rostrix.registerProfile(profile);
@@ -36,6 +36,6 @@ export default async function gear(pi: ExtensionAPI): Promise<void> {
   // Children share runtime services but cannot spawn another layer of subagents.
   if (child) return;
 
-  const subagents = setupSubagents(pi, workspace);
+  const subagents = setupSubagents(pi, workspace, rostrix);
   setupCommands(pi, { execution, subagents, lsp, workspace });
 }
