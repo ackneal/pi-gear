@@ -4,6 +4,7 @@ import { ProfileRegistry } from "./core/registry.ts";
 import { ProfileResolver, type ParentContextLimits, type ResolvedProfile } from "./core/resolver.ts";
 import type { ProfileDefinition } from "./core/schema.ts";
 import { TaskRegistry } from "./runtime/task-registry.ts";
+import { TaskSupervisor } from "./supervision/supervisor.ts";
 import { registerRostrixTools } from "./tools/index.ts";
 
 export * from "./core/schema.ts";
@@ -13,6 +14,9 @@ export * from "./core/activator.ts";
 export * from "./runtime/session-runner.ts";
 export * from "./runtime/task-types.ts";
 export * from "./runtime/task-registry.ts";
+export * from "./supervision/inbox.ts";
+export * from "./supervision/wake-up.ts";
+export * from "./supervision/supervisor.ts";
 export * from "./tools/index.ts";
 
 export const ROSTRIX_RUNTIME_SYMBOL = Symbol.for("pi.rostrix.runtime");
@@ -31,6 +35,7 @@ export interface RostrixRuntime {
   readonly resolver: ProfileResolver;
   readonly activator: ProfileActivator;
   readonly tasks: TaskRegistry;
+  readonly supervisor: TaskSupervisor;
   registerProfile(profile: ProfileDefinition): void;
   getProfile(id: string): ProfileDefinition | undefined;
   getAllProfiles(): ProfileDefinition[];
@@ -48,13 +53,19 @@ class InProcessRostrixRuntime implements RostrixRuntime {
   private readonly _resolver = new ProfileResolver(this._profiles);
   private readonly _activator: ProfileActivator;
   private readonly _tasks: TaskRegistry;
+  private readonly _supervisor: TaskSupervisor;
   private readonly _pi: ExtensionAPI;
 
   constructor(pi: ExtensionAPI, options: RostrixOptions = {}) {
     this._pi = pi;
     this._activator = new ProfileActivator(pi);
     this._tasks = new TaskRegistry();
+    this._supervisor = new TaskSupervisor(this._tasks, pi);
     this._initialized = true;
+
+    // Connect supervisor to task registry completions
+    // When any task finishes or aborts, notify the supervisor
+    // (tasks can be monitored via polling or subscription)
 
     if (options.autoRegisterTools !== false) {
       registerRostrixTools({
@@ -90,6 +101,10 @@ class InProcessRostrixRuntime implements RostrixRuntime {
     return this._tasks;
   }
 
+  get supervisor(): TaskSupervisor {
+    return this._supervisor;
+  }
+
   registerProfile(profile: ProfileDefinition): void {
     this._profiles.register(profile);
   }
@@ -116,6 +131,7 @@ class InProcessRostrixRuntime implements RostrixRuntime {
   }
 
   dispose(): void {
+    this._supervisor.dispose();
     this._activator.dispose();
     this._profiles.clear();
     this._initialized = false;
