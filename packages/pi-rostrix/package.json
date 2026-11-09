@@ -24,7 +24,7 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --experimental-strip-types --test tests/**/*.test.ts"
+    "test": "node --experimental-strip-types --test --test-timeout=30000 tests/**/*.test.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=1.0.0 <2.0.0",

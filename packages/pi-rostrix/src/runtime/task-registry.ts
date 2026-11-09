@@ -147,6 +147,7 @@ export class TaskRegistry {
       timeoutTimer = setTimeout(() => {
         this.cancel(taskId, `Task timed out after ${options.timeoutSeconds}s`);
       }, options.timeoutSeconds * 1000);
+      timeoutTimer.unref();
     }
 
     const runner = new InProcessSubagentRunner({
@@ -291,6 +292,7 @@ export class TaskRegistry {
           cleanup();
           resolve(this._tasks.get(taskId)!);
         }, timeoutMs);
+        timer.unref();
       }
     });
   }

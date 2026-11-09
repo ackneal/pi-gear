@@ -63,6 +63,7 @@ export class TaskSupervisor {
     this._intervalTimer = setInterval(() => {
       this._checkTasks();
     }, this._checkIntervalMs);
+    this._intervalTimer.unref();
   }
 
   private _checkTasks(): void {

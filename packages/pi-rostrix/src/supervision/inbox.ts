@@ -39,6 +39,7 @@ export class ParentInbox {
     this._timer = setTimeout(() => {
       this.flush();
     }, this._debounceMs);
+    this._timer.unref();
   }
 
   public flush(): void {
