@@ -24,11 +24,29 @@ export interface DiscoveryResult {
 }
 
 export async function discoverAllProfiles(options: DiscoverProfilesOptions = {}): Promise<DiscoveryResult> {
-  const userDir = options.userDir ?? path.join(os.homedir(), ".pi", "agent", "profiles");
-  const projectDir = options.projectDir ?? (options.cwd ? path.join(options.cwd, ".pi", "profiles") : path.join(process.cwd(), ".pi", "profiles"));
+  const userDirs = options.userDir
+    ? [options.userDir]
+    : [
+        path.join(os.homedir(), ".pi", "agent", "rostrix"),
+        path.join(os.homedir(), ".pi", "agent", "profiles"),
+      ];
 
-  const userResult = await scanDirectory(userDir, "user", options.onWarning);
-  const projectResult = await scanDirectory(projectDir, "project", options.onWarning);
+  const projectDirs = options.projectDir
+    ? [options.projectDir]
+    : [
+        options.cwd ? path.join(options.cwd, ".pi", "rostrix") : path.join(process.cwd(), ".pi", "rostrix"),
+        options.cwd ? path.join(options.cwd, ".pi", "profiles") : path.join(process.cwd(), ".pi", "profiles"),
+      ];
+
+  const userResults: DiscoveryResult[] = [];
+  for (const dir of userDirs) {
+    userResults.push(await scanDirectory(dir, "user", options.onWarning));
+  }
+
+  const projectResults: DiscoveryResult[] = [];
+  for (const dir of projectDirs) {
+    projectResults.push(await scanDirectory(dir, "project", options.onWarning));
+  }
 
   const customResults: DiscoveryResult[] = [];
   if (options.customDirs) {
@@ -37,14 +55,20 @@ export async function discoverAllProfiles(options: DiscoverProfilesOptions = {})
     }
   }
 
-  // Merge with precedence: custom > project > user
+  // Merge with precedence: custom > project > user (and primary dir > fallback dir)
   const profilesById = new Map<string, DiscoveredProfile>();
 
-  for (const item of userResult.profiles) {
-    profilesById.set(item.profile.id, item);
+  for (const result of userResults) {
+    for (const item of result.profiles) {
+      if (!profilesById.has(item.profile.id)) {
+        profilesById.set(item.profile.id, item);
+      }
+    }
   }
-  for (const item of projectResult.profiles) {
-    profilesById.set(item.profile.id, item);
+  for (const result of projectResults) {
+    for (const item of result.profiles) {
+      profilesById.set(item.profile.id, item);
+    }
   }
   for (const custom of customResults) {
     for (const item of custom.profiles) {
@@ -53,8 +77,8 @@ export async function discoverAllProfiles(options: DiscoverProfilesOptions = {})
   }
 
   const allErrors = [
-    ...userResult.errors,
-    ...projectResult.errors,
+    ...userResults.flatMap((r) => r.errors),
+    ...projectResults.flatMap((r) => r.errors),
     ...customResults.flatMap((r) => r.errors),
   ];
 

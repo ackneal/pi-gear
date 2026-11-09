@@ -13,7 +13,7 @@ export function setupInteractiveProfiles(options: SetupInteractiveOptions): void
     const available = runtime.discoveredProfiles;
     if (available.length === 0) {
       if (ctx?.ui?.notify) {
-        ctx.ui.notify("No profiles found in ~/.pi/agent/profiles or .pi/profiles", "warning");
+        ctx.ui.notify("No profiles found in ~/.pi/agent/rostrix or .pi/rostrix", "warning");
       }
       return;
     }
@@ -114,7 +114,7 @@ export function setupInteractiveProfiles(options: SetupInteractiveOptions): void
 
         if (available.length === 0) {
           if (ctx?.ui?.notify) {
-            ctx.ui.notify("No profiles found in ~/.pi/agent/profiles or .pi/profiles", "warning");
+            ctx.ui.notify("No profiles found in ~/.pi/agent/rostrix or .pi/rostrix", "warning");
           }
           return;
         }
