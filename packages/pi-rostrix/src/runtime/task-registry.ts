@@ -227,7 +227,8 @@ export class TaskRegistry {
     }
 
     // Ensure status is aborted and error is recorded if not already set
-    if (task.status !== "aborted") {
+    const currentStatus = task.status as TaskStatus;
+    if (currentStatus !== "aborted") {
       this._updateTask(taskId, {
         status: "aborted",
         finishedAt: task.finishedAt ?? Date.now(),
