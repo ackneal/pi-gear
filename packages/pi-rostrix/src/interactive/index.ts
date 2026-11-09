@@ -4,6 +4,7 @@ import type { RostrixRuntime } from "../index.ts";
 export interface SetupInteractiveOptions {
   readonly pi: ExtensionAPI;
   readonly runtime: RostrixRuntime;
+  readonly shortcut?: string | undefined;
 }
 
 function getAgentDef(item: any) {
@@ -61,9 +62,9 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
     }
   }
 
-  // 1. Shortcut: ctrl+r for one-click direct cycling
-  if (typeof (pi as any).registerShortcut === "function") {
-    (pi as any).registerShortcut("ctrl+r", {
+  // 1. Optional Shortcut: registered only if explicitly configured
+  if (options.shortcut && typeof (pi as any).registerShortcut === "function") {
+    (pi as any).registerShortcut(options.shortcut, {
       description: "Cycle agent (default -> custom agents)",
       handler: async (ctx: any) => {
         await cycleAgent(ctx);
@@ -71,7 +72,7 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
     });
   }
 
-  // 2. Commands: /agent and /profile alias for manual switching or viewing
+  // 2. Commands: /agent and /profile alias for manual switching, cycling, or viewing
   if (typeof (pi as any).registerCommand === "function") {
     const handleAgentCommand = async (args: string, ctx: any) => {
       const trimmed = (args || "").trim();
@@ -86,6 +87,11 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
         if (ctx?.ui?.notify) {
           ctx.ui.notify("Agent: default (unrestricted)");
         }
+        return;
+      }
+
+      if (trimmed === "next" || trimmed === "cycle") {
+        await cycleAgent(ctx);
         return;
       }
 

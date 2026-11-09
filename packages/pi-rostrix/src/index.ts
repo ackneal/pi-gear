@@ -35,6 +35,7 @@ export interface RostrixOptions {
   autoLoadAgents?: boolean;
   autoLoadProfiles?: boolean; // alias
   autoRegisterInteractive?: boolean;
+  shortcut?: string;
 }
 
 export interface RostrixRuntime {
@@ -101,7 +102,7 @@ class InProcessRostrixRuntime implements RostrixRuntime {
     }
 
     if (options.autoRegisterInteractive !== false) {
-      setupInteractiveAgents({ pi, runtime: this });
+      setupInteractiveAgents({ pi, runtime: this, shortcut: options.shortcut });
     }
 
     const shouldAutoLoad = (options.autoLoadAgents !== false) && (options.autoLoadProfiles !== false);

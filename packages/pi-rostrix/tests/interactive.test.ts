@@ -64,7 +64,7 @@ function createMockExtensionApi() {
 }
 
 describe("Interactive Profile Cycling & Commands", () => {
-  test("registers ctrl+r shortcut and /profile command", () => {
+  test("registers /agent and /profile command, and registers shortcut only when configured", () => {
     const { pi, registeredShortcuts, registeredCommands } = createMockExtensionApi();
     const runtime = initRostrix(pi, {
       autoRegisterTools: false,
@@ -74,15 +74,19 @@ describe("Interactive Profile Cycling & Commands", () => {
 
     setupInteractiveProfiles({ pi, runtime });
 
-    assert.ok(registeredShortcuts.has("ctrl+r"), "ctrl+r shortcut must be registered");
+    assert.equal(registeredShortcuts.size, 0, "No shortcuts registered by default");
     assert.ok(registeredCommands.has("profile"), "/profile command must be registered");
     assert.ok(registeredCommands.has("agent"), "/agent alias command must be registered");
+
+    // When shortcut is explicitly passed
+    setupInteractiveProfiles({ pi, runtime, shortcut: "alt+a" });
+    assert.ok(registeredShortcuts.has("alt+a"), "Explicit shortcut must be registered");
 
     runtime.dispose();
   });
 
-  test("ctrl+r cycles strictly through file-discovered profiles and default, ignoring api-registered profiles", async () => {
-    const { pi, mockCtx, registeredShortcuts, statuses, notifications } = createMockExtensionApi();
+  test("/agent next or shortcut cycles strictly through file-discovered agents and default, ignoring api-registered agents", async () => {
+    const { pi, mockCtx, registeredCommands, statuses, notifications } = createMockExtensionApi();
     const runtime = initRostrix(pi, {
       autoRegisterTools: false,
       autoLoadProfiles: false,
@@ -130,14 +134,14 @@ describe("Interactive Profile Cycling & Commands", () => {
     runtime.registerAgent(reviewerAgent);
     runtime.registerAgent(analystAgent);
 
-    const shortcut = registeredShortcuts.get("ctrl+r");
-    assert.ok(shortcut);
+    const cmd = registeredCommands.get("agent");
+    assert.ok(cmd);
 
     // Initial state: default (activeProfile undefined)
     assert.equal(runtime.getActiveProfile(), undefined);
 
     // Press 1: cycles to custom-reviewer
-    await shortcut.handler(mockCtx);
+    await cmd.handler("next", mockCtx);
     assert.equal(runtime.getActiveProfile()?.id, "custom-reviewer");
     assert.equal(statuses.get("rostrix:profile"), "👤 Code Reviewer");
     assert.ok(notifications.some((n) => n.message.includes("Code Reviewer")));
@@ -145,13 +149,13 @@ describe("Interactive Profile Cycling & Commands", () => {
     assert.deepEqual(pi.getActiveTools().sort(), ["bash", "read"].sort());
 
     // Press 2: cycles to custom-analyst (SKIPPING gear:worker!)
-    await shortcut.handler(mockCtx);
+    await cmd.handler("next", mockCtx);
     assert.equal(runtime.getActiveProfile()?.id, "custom-analyst");
     assert.equal(statuses.get("rostrix:profile"), "👤 Data Analyst");
     assert.deepEqual(pi.getActiveTools(), ["read"]);
 
     // Press 3: cycles back to default
-    await shortcut.handler(mockCtx);
+    await cmd.handler("next", mockCtx);
     assert.equal(runtime.getActiveProfile(), undefined);
     assert.equal(statuses.get("rostrix:profile"), "");
     assert.ok(notifications.some((n) => n.message.includes("default (unrestricted)")));
@@ -161,8 +165,8 @@ describe("Interactive Profile Cycling & Commands", () => {
     runtime.dispose();
   });
 
-  test("ctrl+r notifies when no directory profiles are found", async () => {
-    const { pi, mockCtx, registeredShortcuts, notifications } = createMockExtensionApi();
+  test("/agent next notifies when no directory agents are found", async () => {
+    const { pi, mockCtx, registeredCommands, notifications } = createMockExtensionApi();
     const runtime = initRostrix(pi, {
       autoRegisterTools: false,
       autoLoadProfiles: false,
@@ -171,8 +175,9 @@ describe("Interactive Profile Cycling & Commands", () => {
 
     setupInteractiveProfiles({ pi, runtime });
 
-    const shortcut = registeredShortcuts.get("ctrl+r");
-    await shortcut.handler(mockCtx);
+    const cmd = registeredCommands.get("agent");
+    assert.ok(cmd);
+    await cmd.handler("next", mockCtx);
 
     assert.ok(notifications.some((n) => (n.message.includes("No agents found") || n.message.includes("No profiles found")) && n.type === "warning"));
     assert.equal(runtime.getActiveProfile(), undefined);
