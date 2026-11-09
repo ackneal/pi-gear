@@ -33,7 +33,6 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
       runtime.deactivateAgent();
       if (ctx?.ui?.setStatus) {
         ctx.ui.setStatus("rostrix:agent", "");
-        ctx.ui.setStatus("rostrix:profile", "");
       }
       if (ctx?.ui?.notify) {
         ctx.ui.notify("Agent: default (unrestricted)");
@@ -50,7 +49,6 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
       const label = def?.label || def?.id || nextId;
       if (ctx?.ui?.setStatus) {
         ctx.ui.setStatus("rostrix:agent", `👤 ${label}`);
-        ctx.ui.setStatus("rostrix:profile", `👤 ${label}`);
       }
       if (ctx?.ui?.notify) {
         ctx.ui.notify(`Agent: ${label}`);
@@ -72,26 +70,27 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
     });
   }
 
-  // 2. Commands: /agent and /profile alias for manual switching, cycling, or viewing
+  // 2. Command: /agent (and /profile alias) for interactive selection or direct switching
   if (typeof (pi as any).registerCommand === "function") {
     const handleAgentCommand = async (args: string, ctx: any) => {
       const trimmed = (args || "").trim();
       const available = runtime.discoveredAgents;
 
-      if (trimmed === "default" || trimmed === "off") {
-        runtime.deactivateAgent();
-        if (ctx?.ui?.setStatus) {
-          ctx.ui.setStatus("rostrix:agent", "");
-          ctx.ui.setStatus("rostrix:profile", "");
-        }
+      if (available.length === 0) {
         if (ctx?.ui?.notify) {
-          ctx.ui.notify("Agent: default (unrestricted)");
+          ctx.ui.notify("No agents found in ~/.pi/agent/rostrix or .pi/rostrix", "warning");
         }
         return;
       }
 
-      if (trimmed === "next" || trimmed === "cycle") {
-        await cycleAgent(ctx);
+      if (trimmed === "default" || trimmed === "off") {
+        runtime.deactivateAgent();
+        if (ctx?.ui?.setStatus) {
+          ctx.ui.setStatus("rostrix:agent", "");
+        }
+        if (ctx?.ui?.notify) {
+          ctx.ui.notify("Agent: default (unrestricted)");
+        }
         return;
       }
 
@@ -113,7 +112,6 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
           const label = def.label || def.id;
           if (ctx?.ui?.setStatus) {
             ctx.ui.setStatus("rostrix:agent", `👤 ${label}`);
-            ctx.ui.setStatus("rostrix:profile", `👤 ${label}`);
           }
           if (ctx?.ui?.notify) {
             ctx.ui.notify(`Agent: ${label}`);
@@ -126,16 +124,10 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
         return;
       }
 
-      if (available.length === 0) {
-        if (ctx?.ui?.notify) {
-          ctx.ui.notify("No agents found in ~/.pi/agent/rostrix or .pi/rostrix", "warning");
-        }
-        return;
-      }
-
+      // Default: no arguments -> open interactive selector
       if (ctx?.hasUI && ctx?.ui?.select) {
         const activeId = runtime.getActiveAgent()?.id;
-        const options = [
+        const optionsList = [
           `default ${!activeId ? "(active)" : ""}`.trim(),
           ...available.map((a) => {
             const def = getAgentDef(a);
@@ -143,14 +135,13 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
           }),
         ];
 
-        const selected = await ctx.ui.select("Select Active Agent", options);
+        const selected = await ctx.ui.select("Select Active Agent", optionsList);
         if (!selected) return;
 
         if (selected.startsWith("default")) {
           runtime.deactivateAgent();
           if (ctx?.ui?.setStatus) {
             ctx.ui.setStatus("rostrix:agent", "");
-            ctx.ui.setStatus("rostrix:profile", "");
           }
           if (ctx?.ui?.notify) {
             ctx.ui.notify("Agent: default (unrestricted)");
@@ -164,7 +155,6 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
             const label = def.label || def.id;
             if (ctx?.ui?.setStatus) {
               ctx.ui.setStatus("rostrix:agent", `👤 ${label}`);
-              ctx.ui.setStatus("rostrix:profile", `👤 ${label}`);
             }
             if (ctx?.ui?.notify) {
               ctx.ui.notify(`Agent: ${label}`);
@@ -175,12 +165,12 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
     };
 
     (pi as any).registerCommand("agent", {
-      description: "Switch or view active agents",
+      description: "Select or switch active agent",
       handler: handleAgentCommand,
     });
 
     (pi as any).registerCommand("profile", {
-      description: "Switch or view active agents (alias for /agent)",
+      description: "Select or switch active agent (alias for /agent)",
       handler: handleAgentCommand,
     });
   }
