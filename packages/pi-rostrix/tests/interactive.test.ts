@@ -76,6 +76,7 @@ describe("Interactive Profile Cycling & Commands", () => {
 
     assert.ok(registeredShortcuts.has("ctrl+r"), "ctrl+r shortcut must be registered");
     assert.ok(registeredCommands.has("profile"), "/profile command must be registered");
+    assert.ok(registeredCommands.has("agent"), "/agent alias command must be registered");
 
     runtime.dispose();
   });
