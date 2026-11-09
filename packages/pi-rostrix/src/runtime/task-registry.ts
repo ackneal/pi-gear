@@ -1,5 +1,5 @@
 import type { TaskFilter, TaskRecord, TaskStatus, TaskUsage } from "./task-types.ts";
-import type { ResolvedProfile } from "../core/resolver.ts";
+import type { ResolvedAgent } from "../core/resolver.ts";
 import { InProcessSubagentRunner } from "./session-runner.ts";
 
 export interface TaskRegistryOptions {
@@ -7,7 +7,8 @@ export interface TaskRegistryOptions {
 }
 
 export interface SpawnTaskOptions {
-  readonly profile: ResolvedProfile;
+  readonly agent?: ResolvedAgent | undefined;
+  readonly profile?: ResolvedAgent | undefined; // alias
   readonly task: string;
   readonly targetFiles?: readonly string[] | undefined;
   readonly parentTaskId?: string | undefined;
@@ -46,8 +47,10 @@ export class TaskRegistry {
     const all = Array.from(this._tasks.values());
     if (!filter) return all;
 
+    const filterAgentId = filter.agentId ?? filter.profileId;
+
     return all.filter((t) => {
-      if (filter.profileId && t.profileId !== filter.profileId) return false;
+      if (filterAgentId && t.agentId !== filterAgentId && t.profileId !== filterAgentId) return false;
       if (filter.parentTaskId !== undefined && t.parentTaskId !== filter.parentTaskId) return false;
       if (filter.status) {
         if (Array.isArray(filter.status)) {
@@ -60,11 +63,11 @@ export class TaskRegistry {
     });
   }
 
-  public getRunningCount(profileId?: string): number {
+  public getRunningCount(agentId?: string): number {
     let count = 0;
     for (const t of this._tasks.values()) {
       if (t.status === "running") {
-        if (!profileId || t.profileId === profileId) {
+        if (!agentId || t.agentId === agentId || t.profileId === agentId) {
           count++;
         }
       }
@@ -73,13 +76,16 @@ export class TaskRegistry {
   }
 
   public spawn(options: SpawnTaskOptions): TaskRecord {
-    const profile = options.profile;
+    const agent = options.agent ?? options.profile;
+    if (!agent) {
+      throw new Error("spawn requires an agent or profile option");
+    }
     const depth = options.depth ?? 0;
 
     // Check depth restriction
-    const maxDepth = profile.subagents?.maxDepth ?? 2;
+    const maxDepth = agent.subagents?.maxDepth ?? 2;
     if (depth >= maxDepth) {
-      throw new Error(`Exceeded maximum delegation depth of ${maxDepth} for profile ${profile.id}`);
+      throw new Error(`Exceeded maximum delegation depth of ${maxDepth} for agent ${agent.id}`);
     }
 
     // Check concurrency limits
@@ -88,10 +94,10 @@ export class TaskRegistry {
       throw new Error(`Global concurrent task limit of ${this._maxGlobalConcurrent} reached`);
     }
 
-    const maxConcurrentForProfile = profile.subagents?.maxConcurrent ?? 2;
-    const currentProfileRunning = this.getRunningCount(profile.id);
-    if (currentProfileRunning >= maxConcurrentForProfile) {
-      throw new Error(`Profile ${profile.id} concurrent limit of ${maxConcurrentForProfile} reached`);
+    const maxConcurrentForAgent = agent.subagents?.maxConcurrent ?? 2;
+    const currentAgentRunning = this.getRunningCount(agent.id);
+    if (currentAgentRunning >= maxConcurrentForAgent) {
+      throw new Error(`Agent ${agent.id} concurrent limit of ${maxConcurrentForAgent} reached`);
     }
 
     // Check targetFiles write scope collision with running tasks
@@ -113,7 +119,8 @@ export class TaskRegistry {
 
     const taskRecord: TaskRecord = {
       id: taskId,
-      profileId: profile.id,
+      agentId: agent.id,
+      profileId: agent.id,
       task: options.task,
       parentTaskId: options.parentTaskId,
       depth,
@@ -151,7 +158,7 @@ export class TaskRegistry {
     }
 
     const runner = new InProcessSubagentRunner({
-      profile,
+      agent,
       cwd: options.cwd,
       model: options.model,
       thinkingLevel: options.thinkingLevel,

@@ -1,12 +1,13 @@
 {
   "name": "pi-rostrix",
   "version": "0.1.0",
-  "description": "Rostrix: Agent Profile, Composition, Delegation & Supervision System for Pi.",
+  "description": "Rostrix: Agent Management, Composition, Delegation & Supervision System for Pi.",
   "keywords": [
     "pi-package",
     "pi-extension",
     "pi-agent",
     "rostrix",
+    "agent",
     "agent-profile",
     "delegation",
     "supervision",

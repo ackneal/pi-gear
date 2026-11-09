@@ -1,19 +1,19 @@
 import {
-  type ProfileDefinition,
-  type ProfileMcpServer,
+  type AgentDefinition,
+  type AgentMcpServer,
   type SupervisionWakeTrigger,
   type ThinkingLevel,
 } from "./schema.ts";
-import type { ProfileRegistry } from "./registry.ts";
+import type { AgentRegistry } from "./registry.ts";
 
-export class ProfileInheritanceError extends Error {
+export class AgentInheritanceError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "ProfileInheritanceError";
+    this.name = "AgentInheritanceError";
   }
 }
 
-export interface ResolvedProfile {
+export interface ResolvedAgent {
   readonly id: string;
   readonly label: string;
   readonly description: string;
@@ -22,7 +22,7 @@ export interface ResolvedProfile {
   readonly promptGuidelines: readonly string[];
   readonly allowedTools?: readonly string[] | undefined;
   readonly deniedTools: readonly string[];
-  readonly mcpServers: Readonly<Record<string, ProfileMcpServer>>;
+  readonly mcpServers: Readonly<Record<string, AgentMcpServer>>;
   readonly allowedSkills?: readonly string[] | undefined;
   readonly deniedSkills: readonly string[];
   readonly model?: {
@@ -31,6 +31,7 @@ export interface ResolvedProfile {
     readonly thinkingLevel?: ThinkingLevel | undefined;
   } | undefined;
   readonly subagents: {
+    readonly allowedAgents?: readonly string[] | undefined;
     readonly allowedProfiles?: readonly string[] | undefined;
     readonly maxDepth: number;
     readonly maxConcurrent: number;
@@ -44,6 +45,7 @@ export interface ResolvedProfile {
 
 export interface ParentContextLimits {
   readonly activeTools?: readonly string[] | undefined;
+  readonly allowedAgents?: readonly string[] | undefined;
   readonly allowedProfiles?: readonly string[] | undefined;
   readonly currentDepth?: number | undefined;
 }
@@ -65,15 +67,15 @@ export function isToolAllowed(name: string, allow?: readonly string[] | undefine
   return allow.some((pat) => matchesPattern(name, pat));
 }
 
-export class ProfileResolver {
-  private readonly _registry: ProfileRegistry;
+export class AgentResolver {
+  private readonly _registry: AgentRegistry;
 
-  constructor(registry: ProfileRegistry) {
+  constructor(registry: AgentRegistry) {
     this._registry = registry;
   }
 
-  resolve(profileId: string, parentLimits?: ParentContextLimits | undefined): ResolvedProfile {
-    const chain = this._resolveInheritanceChain(profileId);
+  resolve(agentId: string, parentLimits?: ParentContextLimits | undefined): ResolvedAgent {
+    const chain = this._resolveInheritanceChain(agentId);
     let resolved = this._mergeChain(chain);
 
     if (parentLimits) {
@@ -83,31 +85,31 @@ export class ProfileResolver {
     return Object.freeze(resolved);
   }
 
-  private _resolveInheritanceChain(profileId: string): ProfileDefinition[] {
-    const chain: ProfileDefinition[] = [];
+  private _resolveInheritanceChain(agentId: string): AgentDefinition[] {
+    const chain: AgentDefinition[] = [];
     const visited = new Set<string>();
-    let currentId: string | undefined = profileId;
+    let currentId: string | undefined = agentId;
 
     while (currentId) {
       if (visited.has(currentId)) {
         const cycle = [...Array.from(visited), currentId].join(" -> ");
-        throw new ProfileInheritanceError(`Circular profile inheritance detected: ${cycle}`);
+        throw new AgentInheritanceError(`Circular agent inheritance detected: ${cycle}`);
       }
       visited.add(currentId);
 
-      const profile = this._registry.get(currentId);
-      if (!profile) {
-        throw new ProfileInheritanceError(`Profile '${currentId}' not found in registry`);
+      const agent = this._registry.get(currentId);
+      if (!agent) {
+        throw new AgentInheritanceError(`Agent '${currentId}' not found in registry`);
       }
 
-      chain.unshift(profile);
-      currentId = profile.extends;
+      chain.unshift(agent);
+      currentId = agent.extends;
     }
 
     return chain;
   }
 
-  private _mergeChain(chain: ProfileDefinition[]): ResolvedProfile {
+  private _mergeChain(chain: AgentDefinition[]): ResolvedAgent {
     const target = chain.at(-1)!;
     let systemPrompt: string | undefined;
     const appendPrompts: string[] = [];
@@ -115,7 +117,7 @@ export class ProfileResolver {
 
     let allowedTools: string[] | undefined;
     const deniedTools: string[] = [];
-    const mcpServers: Record<string, ProfileMcpServer> = {};
+    const mcpServers: Record<string, AgentMcpServer> = {};
 
     let allowedSkills: string[] | undefined;
     const deniedSkills: string[] = [];
@@ -124,7 +126,7 @@ export class ProfileResolver {
     let fallbackModel: string | undefined;
     let thinkingLevel: ThinkingLevel | undefined;
 
-    let allowedProfiles: string[] | undefined;
+    let allowedAgents: string[] | undefined;
     let maxDepth: number | undefined;
     let maxConcurrent: number | undefined;
 
@@ -132,83 +134,84 @@ export class ProfileResolver {
     let reviewIntervalSeconds: number | undefined;
     let maxDurationSeconds: number | undefined;
 
-    for (const profile of chain) {
-      if (profile.prompt?.systemPrompt !== undefined) {
-        systemPrompt = profile.prompt.systemPrompt;
+    for (const agent of chain) {
+      if (agent.prompt?.systemPrompt !== undefined) {
+        systemPrompt = agent.prompt.systemPrompt;
       }
-      if (profile.prompt?.appendPrompt) {
-        appendPrompts.push(profile.prompt.appendPrompt);
+      if (agent.prompt?.appendPrompt) {
+        appendPrompts.push(agent.prompt.appendPrompt);
       }
-      if (profile.prompt?.guidelines) {
-        guidelines.push(...profile.prompt.guidelines);
+      if (agent.prompt?.guidelines) {
+        guidelines.push(...agent.prompt.guidelines);
       }
 
-      if (profile.tools?.allow !== undefined) {
+      if (agent.tools?.allow !== undefined) {
         if (allowedTools === undefined) {
-          allowedTools = [...profile.tools.allow];
+          allowedTools = [...agent.tools.allow];
         } else {
-          allowedTools = allowedTools.filter((t) => profile.tools!.allow!.some((pat) => matchesPattern(t, pat)));
+          allowedTools = allowedTools.filter((t) => agent.tools!.allow!.some((pat) => matchesPattern(t, pat)));
         }
       }
-      if (profile.tools?.deny) {
-        deniedTools.push(...profile.tools.deny);
+      if (agent.tools?.deny) {
+        deniedTools.push(...agent.tools.deny);
       }
 
-      if (profile.mcpServers) {
-        for (const [name, config] of Object.entries(profile.mcpServers)) {
+      if (agent.mcpServers) {
+        for (const [name, config] of Object.entries(agent.mcpServers)) {
           mcpServers[name] = { ...mcpServers[name], ...config };
         }
       }
 
-      if (profile.skills?.allow !== undefined) {
+      if (agent.skills?.allow !== undefined) {
         if (allowedSkills === undefined) {
-          allowedSkills = [...profile.skills.allow];
+          allowedSkills = [...agent.skills.allow];
         } else {
-          allowedSkills = allowedSkills.filter((s) => profile.skills!.allow!.includes(s));
+          allowedSkills = allowedSkills.filter((s) => agent.skills!.allow!.includes(s));
         }
       }
-      if (profile.skills?.deny) {
-        deniedSkills.push(...profile.skills.deny);
+      if (agent.skills?.deny) {
+        deniedSkills.push(...agent.skills.deny);
       }
 
-      if (profile.model?.preferred !== undefined) {
-        preferredModel = profile.model.preferred;
+      if (agent.model?.preferred !== undefined) {
+        preferredModel = agent.model.preferred;
       }
-      if (profile.model?.fallback !== undefined) {
-        fallbackModel = profile.model.fallback;
+      if (agent.model?.fallback !== undefined) {
+        fallbackModel = agent.model.fallback;
       }
-      if (profile.model?.thinkingLevel !== undefined) {
-        thinkingLevel = profile.model.thinkingLevel;
+      if (agent.model?.thinkingLevel !== undefined) {
+        thinkingLevel = agent.model.thinkingLevel;
       }
 
-      if (profile.subagents?.allowedProfiles !== undefined) {
-        if (allowedProfiles === undefined) {
-          allowedProfiles = [...profile.subagents.allowedProfiles];
+      const rawAllowedAgents = agent.subagents?.allowedAgents ?? agent.subagents?.allowedProfiles;
+      if (rawAllowedAgents !== undefined) {
+        if (allowedAgents === undefined) {
+          allowedAgents = [...rawAllowedAgents];
         } else {
-          allowedProfiles = allowedProfiles.filter((p) => profile.subagents!.allowedProfiles!.includes(p));
+          allowedAgents = allowedAgents.filter((p) => rawAllowedAgents.includes(p));
         }
       }
-      if (profile.subagents?.maxDepth !== undefined) {
-        maxDepth = maxDepth !== undefined ? Math.min(maxDepth, profile.subagents.maxDepth) : profile.subagents.maxDepth;
+      if (agent.subagents?.maxDepth !== undefined) {
+        maxDepth = maxDepth !== undefined ? Math.min(maxDepth, agent.subagents.maxDepth) : agent.subagents.maxDepth;
       }
-      if (profile.subagents?.maxConcurrent !== undefined) {
-        maxConcurrent = maxConcurrent !== undefined ? Math.min(maxConcurrent, profile.subagents.maxConcurrent) : profile.subagents.maxConcurrent;
+      if (agent.subagents?.maxConcurrent !== undefined) {
+        maxConcurrent = maxConcurrent !== undefined ? Math.min(maxConcurrent, agent.subagents.maxConcurrent) : agent.subagents.maxConcurrent;
       }
 
-      if (profile.supervision?.wakeOn) {
-        for (const trigger of profile.supervision.wakeOn) {
+      if (agent.supervision?.wakeOn) {
+        for (const trigger of agent.supervision.wakeOn) {
           wakeOn.add(trigger);
         }
       }
-      if (profile.supervision?.reviewIntervalSeconds !== undefined) {
+      if (agent.supervision?.reviewIntervalSeconds !== undefined) {
         reviewIntervalSeconds = reviewIntervalSeconds !== undefined
-          ? Math.min(reviewIntervalSeconds, profile.supervision.reviewIntervalSeconds)
-          : profile.supervision.reviewIntervalSeconds;
+          ? Math.min(reviewIntervalSeconds, agent.supervision.reviewIntervalSeconds)
+          : agent.supervision.reviewIntervalSeconds;
       }
-      if (profile.supervision?.maxDurationSeconds !== undefined) {
+      if (agent.supervision?.maxDurationSeconds !== undefined) {
         maxDurationSeconds = maxDurationSeconds !== undefined
-          ? Math.min(maxDurationSeconds, profile.supervision.maxDurationSeconds)
-          : profile.supervision.maxDurationSeconds;
+          ? Math.min(maxDurationSeconds, agent.supervision.maxDurationSeconds)
+          : agent.supervision.maxDurationSeconds;
       }
     }
 
@@ -241,7 +244,7 @@ export class ProfileResolver {
       deniedSkills: Object.freeze(deniedSkills),
       ...(modelConfig ? { model: Object.freeze(modelConfig) } : {}),
       subagents: Object.freeze({
-        ...(allowedProfiles !== undefined ? { allowedProfiles: Object.freeze(allowedProfiles) } : {}),
+        ...(allowedAgents !== undefined ? { allowedAgents: Object.freeze(allowedAgents), allowedProfiles: Object.freeze(allowedAgents) } : {}),
         maxDepth: maxDepth ?? 2,
         maxConcurrent: maxConcurrent ?? 2,
       }),
@@ -253,7 +256,7 @@ export class ProfileResolver {
     };
   }
 
-  private _applyParentLimits(resolved: ResolvedProfile, parentLimits: ParentContextLimits): ResolvedProfile {
+  private _applyParentLimits(resolved: ResolvedAgent, parentLimits: ParentContextLimits): ResolvedAgent {
     let effectiveAllowedTools = resolved.allowedTools;
 
     if (parentLimits.activeTools !== undefined) {
@@ -272,13 +275,14 @@ export class ProfileResolver {
       }
     }
 
-    let effectiveAllowedProfiles = resolved.subagents.allowedProfiles;
-    if (parentLimits.allowedProfiles !== undefined) {
-      if (effectiveAllowedProfiles === undefined) {
-        effectiveAllowedProfiles = Object.freeze([...parentLimits.allowedProfiles]);
+    const parentAllowed = parentLimits.allowedAgents ?? parentLimits.allowedProfiles;
+    let effectiveAllowedAgents = resolved.subagents.allowedAgents ?? resolved.subagents.allowedProfiles;
+    if (parentAllowed !== undefined) {
+      if (effectiveAllowedAgents === undefined) {
+        effectiveAllowedAgents = Object.freeze([...parentAllowed]);
       } else {
-        effectiveAllowedProfiles = Object.freeze(
-          effectiveAllowedProfiles.filter((p) => parentLimits.allowedProfiles!.includes(p)),
+        effectiveAllowedAgents = Object.freeze(
+          effectiveAllowedAgents.filter((p) => parentAllowed!.includes(p)),
         );
       }
     }
@@ -293,9 +297,16 @@ export class ProfileResolver {
       ...(effectiveAllowedTools !== undefined ? { allowedTools: effectiveAllowedTools } : {}),
       subagents: Object.freeze({
         ...resolved.subagents,
-        ...(effectiveAllowedProfiles !== undefined ? { allowedProfiles: effectiveAllowedProfiles } : {}),
+        ...(effectiveAllowedAgents !== undefined ? { allowedAgents: effectiveAllowedAgents, allowedProfiles: effectiveAllowedAgents } : {}),
         maxDepth: remainingDepth,
       }),
     };
   }
 }
+
+// Aliases for compatibility
+export const ProfileInheritanceError = AgentInheritanceError;
+export type ProfileInheritanceError = AgentInheritanceError;
+export type ResolvedProfile = ResolvedAgent;
+export const ProfileResolver = AgentResolver;
+export type ProfileResolver = AgentResolver;

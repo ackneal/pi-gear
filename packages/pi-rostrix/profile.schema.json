@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "RostrixProfile",
-  "description": "JSON Schema for Rostrix Agent Profile definitions",
+  "title": "RostrixAgent",
+  "description": "JSON Schema for Rostrix Agent definitions",
   "type": "object",
   "required": [
     "id",
@@ -12,7 +12,7 @@
     "id": {
       "type": "string",
       "minLength": 1,
-      "description": "Unique identifier for this profile (e.g. 'worker' or 'gear:worker')"
+      "description": "Unique identifier for this agent (e.g. 'worker' or 'gear:worker')"
     },
     "label": {
       "type": "string",
@@ -27,7 +27,7 @@
     "extends": {
       "type": "string",
       "minLength": 1,
-      "description": "Parent profile ID for inheritance"
+      "description": "Parent agent ID for inheritance"
     },
     "prompt": {
       "type": "object",
@@ -178,12 +178,19 @@
     "subagents": {
       "type": "object",
       "properties": {
+        "allowedAgents": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Agents this agent is permitted to delegate to"
+        },
         "allowedProfiles": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "Profiles this agent is permitted to delegate to"
+          "description": "Alias for allowedAgents"
         },
         "maxDepth": {
           "type": "integer",

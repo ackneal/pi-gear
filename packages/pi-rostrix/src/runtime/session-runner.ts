@@ -6,7 +6,7 @@ import {
   type ModelRuntime,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { ResolvedProfile } from "../core/resolver.ts";
+import type { ResolvedAgent } from "../core/resolver.ts";
 
 export type SubagentUsage = {
   readonly inputTokens: number;
@@ -18,7 +18,8 @@ export type SubagentUsage = {
 };
 
 export interface SubagentSessionOptions {
-  readonly profile: ResolvedProfile;
+  readonly agent?: ResolvedAgent | undefined;
+  readonly profile?: ResolvedAgent | undefined; // alias
   readonly cwd?: string | undefined;
   readonly model?: string | undefined;
   readonly thinkingLevel?: import("../core/schema.ts").ThinkingLevel | undefined;
@@ -40,11 +41,15 @@ export interface SubagentTaskResult {
 }
 
 export class InProcessSubagentRunner {
-  private readonly _profile: ResolvedProfile;
+  private readonly _agent: ResolvedAgent;
   private readonly _options: SubagentSessionOptions;
 
   constructor(options: SubagentSessionOptions) {
-    this._profile = options.profile;
+    const resolved = options.agent ?? options.profile;
+    if (!resolved) {
+      throw new Error("InProcessSubagentRunner requires an agent or profile option");
+    }
+    this._agent = resolved;
     this._options = options;
   }
 
@@ -61,8 +66,8 @@ export class InProcessSubagentRunner {
     const cwd = this._options.cwd ?? (this._options.parentSession ? (this._options.parentSession as any)._cwd : process.cwd());
 
     // Resolve tools allowlist
-    const toolsAllowlist = this._profile.allowedTools
-      ? Array.from(this._profile.allowedTools)
+    const toolsAllowlist = this._agent.allowedTools
+      ? Array.from(this._agent.allowedTools)
       : undefined;
 
     // Use in-memory session manager so no session JSONL files pollute the disk
@@ -72,8 +77,8 @@ export class InProcessSubagentRunner {
 
     let sessionResult;
     try {
-      const thinkingLevel = this._options.thinkingLevel ?? this._profile.model?.thinkingLevel;
-      const modelStr = this._options.model ?? this._profile.model?.preferred;
+      const thinkingLevel = this._options.thinkingLevel ?? this._agent.model?.thinkingLevel;
+      const modelStr = this._options.model ?? this._agent.model?.preferred;
 
       let resolvedModelInstance: any = undefined;
       if (modelStr && modelRuntime) {
@@ -91,7 +96,7 @@ export class InProcessSubagentRunner {
         ...(modelRuntime ? { modelRuntime } : {}),
         ...(resolvedModelInstance ? { model: resolvedModelInstance } : {}),
         ...(toolsAllowlist ? { tools: toolsAllowlist } : {}),
-        ...(this._profile.deniedTools.length > 0 ? { excludeTools: Array.from(this._profile.deniedTools) } : {}),
+        ...(this._agent.deniedTools.length > 0 ? { excludeTools: Array.from(this._agent.deniedTools) } : {}),
         ...(this._options.customTools ? { customTools: this._options.customTools } : {}),
         ...(thinkingLevel ? { thinkingLevel } : {}),
       });
@@ -173,14 +178,14 @@ export class InProcessSubagentRunner {
       let promptToSend = taskPrompt;
       const promptAdditions: string[] = [];
 
-      if (this._profile.systemPrompt) {
-        promptAdditions.push(this._profile.systemPrompt);
+      if (this._agent.systemPrompt) {
+        promptAdditions.push(this._agent.systemPrompt);
       }
-      if (this._profile.appendPrompt) {
-        promptAdditions.push(this._profile.appendPrompt);
+      if (this._agent.appendPrompt) {
+        promptAdditions.push(this._agent.appendPrompt);
       }
-      if (this._profile.promptGuidelines.length > 0) {
-        promptAdditions.push("Guidelines:\n" + this._profile.promptGuidelines.map((g) => `- ${g}`).join("\n"));
+      if (this._agent.promptGuidelines.length > 0) {
+        promptAdditions.push("Guidelines:\n" + this._agent.promptGuidelines.map((g) => `- ${g}`).join("\n"));
       }
 
       if (promptAdditions.length > 0) {

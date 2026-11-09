@@ -6,50 +6,57 @@ export interface SetupInteractiveOptions {
   readonly runtime: RostrixRuntime;
 }
 
-export function setupInteractiveProfiles(options: SetupInteractiveOptions): void {
+function getAgentDef(item: any) {
+  return item?.agent ?? item?.profile;
+}
+
+export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
   const { pi, runtime } = options;
 
-  async function cycleProfile(ctx: any): Promise<void> {
-    const available = runtime.discoveredProfiles;
+  async function cycleAgent(ctx: any): Promise<void> {
+    const available = runtime.discoveredAgents;
     if (available.length === 0) {
       if (ctx?.ui?.notify) {
-        ctx.ui.notify("No profiles found in ~/.pi/agent/rostrix or .pi/rostrix", "warning");
+        ctx.ui.notify("No profiles found (or custom agents) in ~/.pi/agent/rostrix or .pi/rostrix", "warning");
       }
       return;
     }
 
-    const cycleList: (string | undefined)[] = [undefined, ...available.map((p) => p.profile.id)];
-    const currentId = runtime.getActiveProfile()?.id;
+    const cycleList: (string | undefined)[] = [undefined, ...available.map((a) => getAgentDef(a)?.id).filter(Boolean)];
+    const currentId = runtime.getActiveAgent()?.id;
     const currentIndex = currentId ? cycleList.indexOf(currentId) : 0;
     const nextIndex = (currentIndex + 1) % cycleList.length;
     const nextId = cycleList[nextIndex];
 
     if (nextId === undefined) {
-      runtime.deactivateProfile();
+      runtime.deactivateAgent();
       if (ctx?.ui?.setStatus) {
+        ctx.ui.setStatus("rostrix:agent", "");
         ctx.ui.setStatus("rostrix:profile", "");
       }
       if (ctx?.ui?.notify) {
-        ctx.ui.notify("Profile: default (unrestricted)");
+        ctx.ui.notify("Agent: default (unrestricted)");
       }
       return;
     }
 
-    const found = available.find((p) => p.profile.id === nextId);
+    const found = available.find((a) => getAgentDef(a)?.id === nextId);
     if (!found) return;
+    const def = getAgentDef(found);
 
     try {
-      await runtime.activateProfile(nextId);
-      const label = found.profile.label || found.profile.id;
+      await runtime.activateAgent(nextId);
+      const label = def?.label || def?.id || nextId;
       if (ctx?.ui?.setStatus) {
+        ctx.ui.setStatus("rostrix:agent", `👤 ${label}`);
         ctx.ui.setStatus("rostrix:profile", `👤 ${label}`);
       }
       if (ctx?.ui?.notify) {
-        ctx.ui.notify(`Profile: ${label}`);
+        ctx.ui.notify(`Agent: ${label}`);
       }
     } catch (err) {
       if (ctx?.ui?.notify) {
-        ctx.ui.notify(`Failed to switch profile: ${err instanceof Error ? err.message : String(err)}`, "error");
+        ctx.ui.notify(`Failed to switch agent: ${err instanceof Error ? err.message : String(err)}`, "error");
       }
     }
   }
@@ -57,34 +64,35 @@ export function setupInteractiveProfiles(options: SetupInteractiveOptions): void
   // 1. Shortcut: ctrl+r for one-click direct cycling
   if (typeof (pi as any).registerShortcut === "function") {
     (pi as any).registerShortcut("ctrl+r", {
-      description: "Cycle agent profile (default -> custom profiles)",
+      description: "Cycle agent (default -> custom agents)",
       handler: async (ctx: any) => {
-        await cycleProfile(ctx);
+        await cycleAgent(ctx);
       },
     });
   }
 
-  // 2. Command: /profile and /agent alias for manual switching or viewing
+  // 2. Commands: /agent and /profile alias for manual switching or viewing
   if (typeof (pi as any).registerCommand === "function") {
-    const handleProfileCommand = async (args: string, ctx: any) => {
+    const handleAgentCommand = async (args: string, ctx: any) => {
       const trimmed = (args || "").trim();
-      const available = runtime.discoveredProfiles;
+      const available = runtime.discoveredAgents;
 
       if (trimmed === "default" || trimmed === "off") {
-        runtime.deactivateProfile();
+        runtime.deactivateAgent();
         if (ctx?.ui?.setStatus) {
+          ctx.ui.setStatus("rostrix:agent", "");
           ctx.ui.setStatus("rostrix:profile", "");
         }
         if (ctx?.ui?.notify) {
-          ctx.ui.notify("Profile: default (unrestricted)");
+          ctx.ui.notify("Agent: default (unrestricted)");
         }
         return;
       }
 
       if (trimmed.length > 0) {
-        const target = available.find((p) => p.profile.id === trimmed);
+        const target = available.find((a) => getAgentDef(a)?.id === trimmed);
         if (!target) {
-          const errorMsg = `Profile '${trimmed}' not found in scanned directories.`;
+          const errorMsg = `Agent '${trimmed}' not found in scanned directories.`;
           if (ctx?.ui?.notify) {
             ctx.ui.notify(errorMsg, "error");
           } else if (typeof (pi as any).sendMessage === "function") {
@@ -93,18 +101,20 @@ export function setupInteractiveProfiles(options: SetupInteractiveOptions): void
           return;
         }
 
+        const def = getAgentDef(target);
         try {
-          await runtime.activateProfile(target.profile.id);
-          const label = target.profile.label || target.profile.id;
+          await runtime.activateAgent(def.id);
+          const label = def.label || def.id;
           if (ctx?.ui?.setStatus) {
+            ctx.ui.setStatus("rostrix:agent", `👤 ${label}`);
             ctx.ui.setStatus("rostrix:profile", `👤 ${label}`);
           }
           if (ctx?.ui?.notify) {
-            ctx.ui.notify(`Profile: ${label}`);
+            ctx.ui.notify(`Agent: ${label}`);
           }
         } catch (err) {
           if (ctx?.ui?.notify) {
-            ctx.ui.notify(`Failed to switch profile: ${err instanceof Error ? err.message : String(err)}`, "error");
+            ctx.ui.notify(`Failed to switch agent: ${err instanceof Error ? err.message : String(err)}`, "error");
           }
         }
         return;
@@ -112,56 +122,63 @@ export function setupInteractiveProfiles(options: SetupInteractiveOptions): void
 
       if (available.length === 0) {
         if (ctx?.ui?.notify) {
-          ctx.ui.notify("No profiles found in ~/.pi/agent/rostrix or .pi/rostrix", "warning");
+          ctx.ui.notify("No profiles found (or custom agents) in ~/.pi/agent/rostrix or .pi/rostrix", "warning");
         }
         return;
       }
 
       if (ctx?.hasUI && ctx?.ui?.select) {
-        const activeId = runtime.getActiveProfile()?.id;
+        const activeId = runtime.getActiveAgent()?.id;
         const options = [
           `default ${!activeId ? "(active)" : ""}`.trim(),
-          ...available.map((p) =>
-            `${p.profile.id} - ${p.profile.label || p.profile.id} ${p.profile.id === activeId ? "(active)" : ""}`.trim(),
-          ),
+          ...available.map((a) => {
+            const def = getAgentDef(a);
+            return `${def.id} - ${def.label || def.id} ${def.id === activeId ? "(active)" : ""}`.trim();
+          }),
         ];
 
-        const selected = await ctx.ui.select("Select Active Profile", options);
+        const selected = await ctx.ui.select("Select Active Agent", options);
         if (!selected) return;
 
         if (selected.startsWith("default")) {
-          runtime.deactivateProfile();
+          runtime.deactivateAgent();
           if (ctx?.ui?.setStatus) {
+            ctx.ui.setStatus("rostrix:agent", "");
             ctx.ui.setStatus("rostrix:profile", "");
           }
           if (ctx?.ui?.notify) {
-            ctx.ui.notify("Profile: default (unrestricted)");
+            ctx.ui.notify("Agent: default (unrestricted)");
           }
         } else {
           const selectedId = selected.split(" - ")[0].replace(" (active)", "").trim();
-          const target = available.find((p) => p.profile.id === selectedId);
+          const target = available.find((a) => getAgentDef(a)?.id === selectedId);
           if (target) {
-            await runtime.activateProfile(target.profile.id);
-            const label = target.profile.label || target.profile.id;
+            const def = getAgentDef(target);
+            await runtime.activateAgent(def.id);
+            const label = def.label || def.id;
             if (ctx?.ui?.setStatus) {
+              ctx.ui.setStatus("rostrix:agent", `👤 ${label}`);
               ctx.ui.setStatus("rostrix:profile", `👤 ${label}`);
             }
             if (ctx?.ui?.notify) {
-              ctx.ui.notify(`Profile: ${label}`);
+              ctx.ui.notify(`Agent: ${label}`);
             }
           }
         }
       }
     };
 
-    (pi as any).registerCommand("profile", {
-      description: "Switch or view agent profiles",
-      handler: handleProfileCommand,
+    (pi as any).registerCommand("agent", {
+      description: "Switch or view active agents",
+      handler: handleAgentCommand,
     });
 
-    (pi as any).registerCommand("agent", {
-      description: "Switch or view agent profiles (alias for /profile)",
-      handler: handleProfileCommand,
+    (pi as any).registerCommand("profile", {
+      description: "Switch or view active agents (alias for /agent)",
+      handler: handleAgentCommand,
     });
   }
 }
+
+// Alias for compatibility
+export const setupInteractiveProfiles = setupInteractiveAgents;

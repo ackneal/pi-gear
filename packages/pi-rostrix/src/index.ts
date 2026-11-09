@@ -1,10 +1,15 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { ProfileActivator } from "./core/activator.ts";
-import { ProfileRegistry } from "./core/registry.ts";
-import { ProfileResolver, type ParentContextLimits, type ResolvedProfile } from "./core/resolver.ts";
-import type { ProfileDefinition } from "./core/schema.ts";
-import { discoverAllProfiles, type DiscoveredProfile, type DiscoverProfilesOptions, type DiscoveryResult } from "./loader/discovery.ts";
-import { setupInteractiveProfiles } from "./interactive/index.ts";
+import { AgentActivator } from "./core/activator.ts";
+import { AgentRegistry } from "./core/registry.ts";
+import { AgentResolver, type ParentContextLimits, type ResolvedAgent } from "./core/resolver.ts";
+import type { AgentDefinition } from "./core/schema.ts";
+import {
+  discoverAllAgents,
+  type DiscoveredAgent,
+  type DiscoverAgentsOptions,
+  type AgentDiscoveryResult,
+} from "./loader/discovery.ts";
+import { setupInteractiveAgents } from "./interactive/index.ts";
 import { TaskRegistry } from "./runtime/task-registry.ts";
 import { TaskSupervisor } from "./supervision/supervisor.ts";
 import { registerRostrixTools } from "./tools/index.ts";
@@ -27,44 +32,55 @@ export const ROSTRIX_RUNTIME_SYMBOL = Symbol.for("pi.rostrix.runtime");
 
 export interface RostrixOptions {
   autoRegisterTools?: boolean;
-  autoLoadProfiles?: boolean;
+  autoLoadAgents?: boolean;
+  autoLoadProfiles?: boolean; // alias
   autoRegisterInteractive?: boolean;
 }
 
 export interface RostrixRuntime {
   readonly version: string;
   readonly isInitialized: boolean;
-  readonly profiles: ProfileRegistry;
-  readonly resolver: ProfileResolver;
-  readonly activator: ProfileActivator;
+  readonly agents: AgentRegistry;
+  readonly profiles: AgentRegistry; // alias
+  readonly resolver: AgentResolver;
+  readonly activator: AgentActivator;
   readonly tasks: TaskRegistry;
   readonly supervisor: TaskSupervisor;
-  readonly discoveredProfiles: readonly DiscoveredProfile[];
-  registerProfile(profile: ProfileDefinition): void;
-  getProfile(id: string): ProfileDefinition | undefined;
-  getAllProfiles(): ProfileDefinition[];
-  resolveProfile(id: string, limits?: ParentContextLimits | undefined): ResolvedProfile;
-  activateProfile(id: string): Promise<void>;
-  deactivateProfile(): void;
-  getActiveProfile(): ResolvedProfile | undefined;
-  loadDiscoveredProfiles(options?: DiscoverProfilesOptions): Promise<DiscoveryResult>;
+  readonly discoveredAgents: readonly DiscoveredAgent[];
+  readonly discoveredProfiles: readonly DiscoveredAgent[]; // alias
+  registerAgent(agent: AgentDefinition): void;
+  registerProfile(profile: AgentDefinition): void; // alias
+  getAgent(id: string): AgentDefinition | undefined;
+  getProfile(id: string): AgentDefinition | undefined; // alias
+  getAllAgents(): AgentDefinition[];
+  getAllProfiles(): AgentDefinition[]; // alias
+  resolveAgent(id: string, limits?: ParentContextLimits | undefined): ResolvedAgent;
+  resolveProfile(id: string, limits?: ParentContextLimits | undefined): ResolvedAgent; // alias
+  activateAgent(id: string): Promise<void>;
+  activateProfile(id: string): Promise<void>; // alias
+  deactivateAgent(): void;
+  deactivateProfile(): void; // alias
+  getActiveAgent(): ResolvedAgent | undefined;
+  getActiveProfile(): ResolvedAgent | undefined; // alias
+  loadDiscoveredAgents(options?: DiscoverAgentsOptions): Promise<AgentDiscoveryResult>;
+  loadDiscoveredProfiles(options?: DiscoverAgentsOptions): Promise<AgentDiscoveryResult>; // alias
   dispose(): void;
 }
 
 class InProcessRostrixRuntime implements RostrixRuntime {
   readonly version = "0.1.0";
   private _initialized = false;
-  private readonly _profiles = new ProfileRegistry();
-  private readonly _resolver = new ProfileResolver(this._profiles);
-  private readonly _activator: ProfileActivator;
+  private readonly _agents = new AgentRegistry();
+  private readonly _resolver = new AgentResolver(this._agents);
+  private readonly _activator: AgentActivator;
   private readonly _tasks: TaskRegistry;
   private readonly _supervisor: TaskSupervisor;
   private readonly _pi: ExtensionAPI;
-  private _discoveredProfiles: DiscoveredProfile[] = [];
+  private _discoveredAgents: DiscoveredAgent[] = [];
 
   constructor(pi: ExtensionAPI, options: RostrixOptions = {}) {
     this._pi = pi;
-    this._activator = new ProfileActivator(pi);
+    this._activator = new AgentActivator(pi);
     this._tasks = new TaskRegistry();
     this._supervisor = new TaskSupervisor(this._tasks, pi);
     this._initialized = true;
@@ -79,17 +95,18 @@ class InProcessRostrixRuntime implements RostrixRuntime {
       registerRostrixTools({
         pi,
         taskRegistry: this._tasks,
-        profileRegistry: this._profiles,
-        profileResolver: this._resolver,
+        agentRegistry: this._agents,
+        agentResolver: this._resolver,
       });
     }
 
     if (options.autoRegisterInteractive !== false) {
-      setupInteractiveProfiles({ pi, runtime: this });
+      setupInteractiveAgents({ pi, runtime: this });
     }
 
-    if (options.autoLoadProfiles !== false) {
-      this.loadDiscoveredProfiles().catch(() => {});
+    const shouldAutoLoad = (options.autoLoadAgents !== false) && (options.autoLoadProfiles !== false);
+    if (shouldAutoLoad) {
+      this.loadDiscoveredAgents().catch(() => {});
     }
 
     pi.on("session_shutdown", () => {
@@ -101,15 +118,19 @@ class InProcessRostrixRuntime implements RostrixRuntime {
     return this._initialized;
   }
 
-  get profiles(): ProfileRegistry {
-    return this._profiles;
+  get agents(): AgentRegistry {
+    return this._agents;
   }
 
-  get resolver(): ProfileResolver {
+  get profiles(): AgentRegistry {
+    return this._agents;
+  }
+
+  get resolver(): AgentResolver {
     return this._resolver;
   }
 
-  get activator(): ProfileActivator {
+  get activator(): AgentActivator {
     return this._activator;
   }
 
@@ -121,55 +142,104 @@ class InProcessRostrixRuntime implements RostrixRuntime {
     return this._supervisor;
   }
 
-  get discoveredProfiles(): readonly DiscoveredProfile[] {
-    return this._discoveredProfiles;
+  get discoveredAgents(): readonly DiscoveredAgent[] {
+    return this._discoveredAgents;
   }
 
-  registerProfile(profile: ProfileDefinition): void {
-    this._profiles.register(profile);
+  get discoveredProfiles(): readonly DiscoveredAgent[] {
+    return this._discoveredAgents;
   }
 
-  getProfile(id: string): ProfileDefinition | undefined {
-    return this._profiles.get(id);
+  get _discoveredProfiles(): DiscoveredAgent[] {
+    return this._discoveredAgents;
   }
 
-  getAllProfiles(): ProfileDefinition[] {
-    return this._profiles.list();
+  set _discoveredProfiles(profiles: any[]) {
+    this._discoveredAgents = profiles.map((p) => ({
+      agent: p.agent ?? p.profile,
+      profile: p.profile ?? p.agent,
+      filePath: p.filePath,
+      scope: p.scope,
+    }));
   }
 
-  resolveProfile(id: string, limits?: ParentContextLimits | undefined): ResolvedProfile {
+  registerAgent(agent: AgentDefinition): void {
+    this._agents.register(agent);
+  }
+
+  registerProfile(profile: AgentDefinition): void {
+    this._agents.register(profile);
+  }
+
+  getAgent(id: string): AgentDefinition | undefined {
+    return this._agents.get(id);
+  }
+
+  getProfile(id: string): AgentDefinition | undefined {
+    return this._agents.get(id);
+  }
+
+  getAllAgents(): AgentDefinition[] {
+    return this._agents.list();
+  }
+
+  getAllProfiles(): AgentDefinition[] {
+    return this._agents.list();
+  }
+
+  resolveAgent(id: string, limits?: ParentContextLimits | undefined): ResolvedAgent {
     return this._resolver.resolve(id, limits);
   }
 
-  async activateProfile(id: string): Promise<void> {
-    const resolved = this.resolveProfile(id);
+  resolveProfile(id: string, limits?: ParentContextLimits | undefined): ResolvedAgent {
+    return this._resolver.resolve(id, limits);
+  }
+
+  async activateAgent(id: string): Promise<void> {
+    const resolved = this.resolveAgent(id);
     await this._activator.activate(resolved);
   }
 
-  deactivateProfile(): void {
+  async activateProfile(id: string): Promise<void> {
+    await this.activateAgent(id);
+  }
+
+  deactivateAgent(): void {
     this._activator.deactivate();
   }
 
-  getActiveProfile(): ResolvedProfile | undefined {
-    return this._activator.activeProfile;
+  deactivateProfile(): void {
+    this.deactivateAgent();
   }
 
-  async loadDiscoveredProfiles(options?: DiscoverProfilesOptions): Promise<DiscoveryResult> {
-    const result = await discoverAllProfiles(options);
-    this._discoveredProfiles = [...result.profiles];
+  getActiveAgent(): ResolvedAgent | undefined {
+    return this._activator.activeAgent;
+  }
 
-    for (const item of result.profiles) {
-      this._profiles.register(item.profile);
+  getActiveProfile(): ResolvedAgent | undefined {
+    return this._activator.activeAgent;
+  }
+
+  async loadDiscoveredAgents(options?: DiscoverAgentsOptions): Promise<AgentDiscoveryResult> {
+    const result = await discoverAllAgents(options);
+    this._discoveredAgents = [...result.agents];
+
+    for (const item of result.agents) {
+      this._agents.register(item.agent);
     }
 
     return result;
   }
 
+  async loadDiscoveredProfiles(options?: DiscoverAgentsOptions): Promise<AgentDiscoveryResult> {
+    return this.loadDiscoveredAgents(options);
+  }
+
   dispose(): void {
     this._supervisor.dispose();
     this._activator.dispose();
-    this._profiles.clear();
-    this._discoveredProfiles = [];
+    this._agents.clear();
+    this._discoveredAgents = [];
     this._initialized = false;
     delete (globalThis as any)[ROSTRIX_RUNTIME_SYMBOL];
   }

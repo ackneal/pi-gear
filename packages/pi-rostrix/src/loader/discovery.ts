@@ -1,16 +1,18 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
-import type { ProfileDefinition } from "../core/schema.ts";
-import { parseProfileJson, parseProfileMarkdown, ProfileParseError } from "./parser.ts";
+import type { AgentDefinition } from "../core/schema.ts";
+import { parseAgentJson, parseAgentMarkdown, AgentParseError } from "./parser.ts";
 
-export interface DiscoveredProfile {
-  readonly profile: ProfileDefinition;
+export interface DiscoveredAgent {
+  readonly agent: AgentDefinition;
+  // Alias for backward compatibility
+  readonly profile: AgentDefinition;
   readonly filePath: string;
   readonly scope: "user" | "project" | "custom";
 }
 
-export interface DiscoverProfilesOptions {
+export interface DiscoverAgentsOptions {
   readonly cwd?: string | undefined;
   readonly userDir?: string | undefined;
   readonly projectDir?: string | undefined;
@@ -18,12 +20,14 @@ export interface DiscoverProfilesOptions {
   readonly onWarning?: ((warning: string) => void) | undefined;
 }
 
-export interface DiscoveryResult {
-  readonly profiles: DiscoveredProfile[];
+export interface AgentDiscoveryResult {
+  readonly agents: DiscoveredAgent[];
+  // Alias for backward compatibility
+  readonly profiles: DiscoveredAgent[];
   readonly errors: { filePath: string; error: string }[];
 }
 
-export async function discoverAllProfiles(options: DiscoverProfilesOptions = {}): Promise<DiscoveryResult> {
+export async function discoverAllAgents(options: DiscoverAgentsOptions = {}): Promise<AgentDiscoveryResult> {
   const userDirs = options.userDir
     ? [options.userDir]
     : [
@@ -38,17 +42,17 @@ export async function discoverAllProfiles(options: DiscoverProfilesOptions = {})
         options.cwd ? path.join(options.cwd, ".pi", "profiles") : path.join(process.cwd(), ".pi", "profiles"),
       ];
 
-  const userResults: DiscoveryResult[] = [];
+  const userResults: AgentDiscoveryResult[] = [];
   for (const dir of userDirs) {
     userResults.push(await scanDirectory(dir, "user", options.onWarning));
   }
 
-  const projectResults: DiscoveryResult[] = [];
+  const projectResults: AgentDiscoveryResult[] = [];
   for (const dir of projectDirs) {
     projectResults.push(await scanDirectory(dir, "project", options.onWarning));
   }
 
-  const customResults: DiscoveryResult[] = [];
+  const customResults: AgentDiscoveryResult[] = [];
   if (options.customDirs) {
     for (const dir of options.customDirs) {
       customResults.push(await scanDirectory(dir, "custom", options.onWarning));
@@ -56,23 +60,23 @@ export async function discoverAllProfiles(options: DiscoverProfilesOptions = {})
   }
 
   // Merge with precedence: custom > project > user (and primary dir > fallback dir)
-  const profilesById = new Map<string, DiscoveredProfile>();
+  const agentsById = new Map<string, DiscoveredAgent>();
 
   for (const result of userResults) {
-    for (const item of result.profiles) {
-      if (!profilesById.has(item.profile.id)) {
-        profilesById.set(item.profile.id, item);
+    for (const item of result.agents) {
+      if (!agentsById.has(item.agent.id)) {
+        agentsById.set(item.agent.id, item);
       }
     }
   }
   for (const result of projectResults) {
-    for (const item of result.profiles) {
-      profilesById.set(item.profile.id, item);
+    for (const item of result.agents) {
+      agentsById.set(item.agent.id, item);
     }
   }
   for (const custom of customResults) {
-    for (const item of custom.profiles) {
-      profilesById.set(item.profile.id, item);
+    for (const item of custom.agents) {
+      agentsById.set(item.agent.id, item);
     }
   }
 
@@ -82,8 +86,11 @@ export async function discoverAllProfiles(options: DiscoverProfilesOptions = {})
     ...customResults.flatMap((r) => r.errors),
   ];
 
+  const agentList = Array.from(agentsById.values());
+
   return {
-    profiles: Array.from(profilesById.values()),
+    agents: agentList,
+    profiles: agentList,
     errors: allErrors,
   };
 }
@@ -92,15 +99,15 @@ export async function scanDirectory(
   dirPath: string,
   scope: "user" | "project" | "custom",
   onWarning?: ((warning: string) => void) | undefined,
-): Promise<DiscoveryResult> {
-  const profiles: DiscoveredProfile[] = [];
+): Promise<AgentDiscoveryResult> {
+  const agents: DiscoveredAgent[] = [];
   const errors: { filePath: string; error: string }[] = [];
 
   let entries: string[];
   try {
     entries = await collectCandidateFiles(dirPath);
   } catch {
-    return { profiles, errors };
+    return { agents, profiles: agents, errors };
   }
 
   for (const filePath of entries) {
@@ -109,25 +116,25 @@ export async function scanDirectory(
 
     try {
       const content = await fs.readFile(filePath, "utf-8");
-      let profile: ProfileDefinition;
+      let agent: AgentDefinition;
 
       if (ext === ".md") {
-        profile = parseProfileMarkdown(content, { filePath, fallbackId });
+        agent = parseAgentMarkdown(content, { filePath, fallbackId });
       } else if (ext === ".json") {
-        profile = parseProfileJson(content, { filePath, fallbackId });
+        agent = parseAgentJson(content, { filePath, fallbackId });
       } else {
         continue;
       }
 
-      profiles.push({ profile, filePath, scope });
+      agents.push({ agent, profile: agent, filePath, scope });
     } catch (err) {
-      const msg = err instanceof ProfileParseError ? err.message : String(err);
+      const msg = err instanceof AgentParseError ? err.message : String(err);
       errors.push({ filePath, error: msg });
-      onWarning?.(`Failed to load profile from ${filePath}: ${msg}`);
+      onWarning?.(`Failed to load agent from ${filePath}: ${msg}`);
     }
   }
 
-  return { profiles, errors };
+  return { agents, profiles: agents, errors };
 }
 
 async function collectCandidateFiles(dirPath: string): Promise<string[]> {
@@ -159,3 +166,9 @@ async function collectCandidateFiles(dirPath: string): Promise<string[]> {
   await traverse(dirPath);
   return files.sort();
 }
+
+// Aliases for compatibility
+export type DiscoveredProfile = DiscoveredAgent;
+export type DiscoverProfilesOptions = DiscoverAgentsOptions;
+export type DiscoveryResult = AgentDiscoveryResult;
+export const discoverAllProfiles = discoverAllAgents;

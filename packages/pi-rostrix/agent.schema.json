@@ -1,0 +1,244 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RostrixAgent",
+  "description": "JSON Schema for Rostrix Agent definitions",
+  "type": "object",
+  "required": [
+    "id",
+    "label",
+    "description"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique identifier for this agent (e.g. 'worker' or 'gear:worker')"
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable display label"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Description for the model when selecting an agent"
+    },
+    "extends": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Parent agent ID for inheritance"
+    },
+    "prompt": {
+      "type": "object",
+      "properties": {
+        "systemPrompt": {
+          "type": "string",
+          "description": "Base system prompt or prefix"
+        },
+        "appendPrompt": {
+          "type": "string",
+          "description": "Appended system instructions"
+        },
+        "guidelines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Additional rules appended to prompt guidelines"
+        }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "properties": {
+        "allow": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Allowlist of tool names or wildcard patterns"
+        },
+        "deny": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Denylist of tool names or wildcard patterns (takes precedence over allow)"
+        }
+      }
+    },
+    "mcpServers": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "env": {
+              "type": "object",
+              "patternProperties": {
+                "^.*$": {
+                  "type": "string"
+                }
+              }
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "headers": {
+              "type": "object",
+              "patternProperties": {
+                "^.*$": {
+                  "type": "string"
+                }
+              }
+            },
+            "timeout": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "skills": {
+      "type": "object",
+      "properties": {
+        "allow": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deny": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "properties": {
+        "preferred": {
+          "type": "string",
+          "description": "Preferred model identifier (e.g. anthropic/claude-sonnet-4-5)"
+        },
+        "fallback": {
+          "type": "string",
+          "description": "Fallback model identifier"
+        },
+        "thinkingLevel": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "off"
+            },
+            {
+              "type": "string",
+              "const": "minimal"
+            },
+            {
+              "type": "string",
+              "const": "low"
+            },
+            {
+              "type": "string",
+              "const": "medium"
+            },
+            {
+              "type": "string",
+              "const": "high"
+            },
+            {
+              "type": "string",
+              "const": "xhigh"
+            },
+            {
+              "type": "string",
+              "const": "max"
+            }
+          ]
+        }
+      }
+    },
+    "subagents": {
+      "type": "object",
+      "properties": {
+        "allowedAgents": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Agents this agent is permitted to delegate to"
+        },
+        "allowedProfiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Alias for allowedAgents"
+        },
+        "maxDepth": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum nested delegation depth (default 2)"
+        },
+        "maxConcurrent": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum concurrent subagents spawned by this agent"
+        }
+      }
+    },
+    "supervision": {
+      "type": "object",
+      "properties": {
+        "wakeOn": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "completed"
+              },
+              {
+                "type": "string",
+                "const": "failed"
+              },
+              {
+                "type": "string",
+                "const": "stalled"
+              },
+              {
+                "type": "string",
+                "const": "needs_input"
+              }
+            ]
+          }
+        },
+        "reviewIntervalSeconds": {
+          "type": "number",
+          "minimum": 1
+        },
+        "maxDurationSeconds": {
+          "type": "number",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

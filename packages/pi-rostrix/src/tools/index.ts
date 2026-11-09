@@ -1,35 +1,52 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { TaskRegistry } from "../runtime/task-registry.ts";
-import type { ProfileRegistry } from "../core/registry.ts";
-import type { ProfileResolver } from "../core/resolver.ts";
+import type { AgentRegistry } from "../core/registry.ts";
+import type { AgentResolver } from "../core/resolver.ts";
 
 export interface RegisterToolsOptions {
   readonly pi: ExtensionAPI;
   readonly taskRegistry: TaskRegistry;
-  readonly profileRegistry: ProfileRegistry;
-  readonly profileResolver: ProfileResolver;
+  readonly agentRegistry?: AgentRegistry | undefined;
+  readonly agentResolver?: AgentResolver | undefined;
+  // Aliases for compatibility
+  readonly profileRegistry?: AgentRegistry | undefined;
+  readonly profileResolver?: AgentResolver | undefined;
   readonly cwd?: string | undefined;
 }
 
 export function registerRostrixTools(options: RegisterToolsOptions): void {
-  const { pi, taskRegistry, profileRegistry, profileResolver, cwd } = options;
+  const { pi, taskRegistry, cwd } = options;
+  const agentResolver = options.agentResolver ?? options.profileResolver;
+  if (!agentResolver) {
+    throw new Error("registerRostrixTools requires an agentResolver or profileResolver");
+  }
 
   // 1. delegate tool
   pi.registerTool({
     name: "delegate",
     label: "Delegate Subtask",
-    description: "Delegate a subtask to an agent profile.",
+    description: "Delegate a subtask to an agent.",
     parameters: Type.Object({
-      profile: Type.String({ description: "ID of the agent profile to execute the task" }),
+      agent: Type.Optional(Type.String({ description: "ID of the agent to execute the task" })),
+      profile: Type.Optional(Type.String({ description: "Alias for agent ID" })),
       task: Type.String({ description: "The instructions and task prompt for the subagent" }),
       targetFiles: Type.Optional(Type.Array(Type.String(), { description: "Files the subagent is responsible for modifying" })),
       timeoutSeconds: Type.Optional(Type.Number({ description: "Optional execution timeout in seconds" })),
     }),
-    execute: async (_toolCallId, params) => {
-      const resolved = profileResolver.resolve(params.profile);
+    execute: async (_toolCallId, params): Promise<{ isError?: boolean; content: { type: "text"; text: string }[]; details: Record<string, unknown> }> => {
+      const targetAgentId = params.agent ?? params.profile;
+      if (!targetAgentId) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "delegate requires either an 'agent' or 'profile' parameter" }],
+          details: { missingAgent: true },
+        };
+      }
+
+      const resolved = agentResolver.resolve(targetAgentId);
       const taskRecord = taskRegistry.spawn({
-        profile: resolved,
+        agent: resolved,
         task: params.task,
         targetFiles: params.targetFiles,
         timeoutSeconds: params.timeoutSeconds,
@@ -43,6 +60,7 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
             text: JSON.stringify({
               taskId: taskRecord.id,
               status: taskRecord.status,
+              agent: taskRecord.agentId,
               profile: taskRecord.profileId,
               targetFiles: taskRecord.targetFiles,
             }, null, 2),
@@ -60,7 +78,8 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
     description: "Query the status of delegated tasks.",
     parameters: Type.Object({
       taskId: Type.Optional(Type.String({ description: "Specific task ID to query" })),
-      profile: Type.Optional(Type.String({ description: "Filter tasks by profile ID" })),
+      agent: Type.Optional(Type.String({ description: "Filter tasks by agent ID" })),
+      profile: Type.Optional(Type.String({ description: "Alias for agent ID filter" })),
     }),
     execute: async (_toolCallId, params): Promise<{ isError?: boolean; content: { type: "text"; text: string }[]; details: Record<string, unknown> }> => {
       if (params.taskId) {
@@ -78,6 +97,7 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
               type: "text",
               text: JSON.stringify({
                 id: task.id,
+                agent: task.agentId,
                 profile: task.profileId,
                 status: task.status,
                 revision: task.revision,
@@ -92,7 +112,8 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
         };
       }
 
-      const tasks = taskRegistry.listTasks(params.profile ? { profileId: params.profile } : undefined);
+      const targetFilter = params.agent ?? params.profile;
+      const tasks = taskRegistry.listTasks(targetFilter ? { agentId: targetFilter } : undefined);
       return {
         content: [
           {
@@ -100,6 +121,7 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
             text: JSON.stringify(
               tasks.map((t) => ({
                 id: t.id,
+                agent: t.agentId,
                 profile: t.profileId,
                 status: t.status,
                 revision: t.revision,
@@ -186,4 +208,3 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
     },
   });
 }
-
