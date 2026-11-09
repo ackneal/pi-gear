@@ -17,7 +17,7 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
     const available = runtime.discoveredAgents;
     if (available.length === 0) {
       if (ctx?.ui?.notify) {
-        ctx.ui.notify("No profiles found (or custom agents) in ~/.pi/agent/rostrix or .pi/rostrix", "warning");
+        ctx.ui.notify("No agents found in ~/.pi/agent/rostrix or .pi/rostrix", "warning");
       }
       return;
     }
@@ -122,7 +122,7 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
 
       if (available.length === 0) {
         if (ctx?.ui?.notify) {
-          ctx.ui.notify("No profiles found (or custom agents) in ~/.pi/agent/rostrix or .pi/rostrix", "warning");
+          ctx.ui.notify("No agents found in ~/.pi/agent/rostrix or .pi/rostrix", "warning");
         }
         return;
       }

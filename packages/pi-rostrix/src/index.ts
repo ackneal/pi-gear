@@ -150,19 +150,6 @@ class InProcessRostrixRuntime implements RostrixRuntime {
     return this._discoveredAgents;
   }
 
-  get _discoveredProfiles(): DiscoveredAgent[] {
-    return this._discoveredAgents;
-  }
-
-  set _discoveredProfiles(profiles: any[]) {
-    this._discoveredAgents = profiles.map((p) => ({
-      agent: p.agent ?? p.profile,
-      profile: p.profile ?? p.agent,
-      filePath: p.filePath,
-      scope: p.scope,
-    }));
-  }
-
   registerAgent(agent: AgentDefinition): void {
     this._agents.register(agent);
   }

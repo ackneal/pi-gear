@@ -98,32 +98,37 @@ describe("Interactive Profile Cycling & Commands", () => {
       description: "Background worker subagent",
     });
 
-    // 2. Mock discovered file profiles (e.g. from ~/.pi/agent/profiles)
-    (runtime as any)._discoveredProfiles = [
+    // 2. Mock discovered file profiles (e.g. from ~/.pi/agent/rostrix)
+    const reviewerAgent = {
+      id: "custom-reviewer",
+      label: "Code Reviewer",
+      description: "Read-only reviewer",
+      tools: { allow: ["read", "bash"], deny: ["edit", "write"] },
+    };
+    const analystAgent = {
+      id: "custom-analyst",
+      label: "Data Analyst",
+      description: "Metrics analyst",
+      tools: { allow: ["read"] },
+    };
+
+    (runtime as any)._discoveredAgents = [
       {
-        profile: {
-          id: "custom-reviewer",
-          label: "Code Reviewer",
-          description: "Read-only reviewer",
-          tools: { allow: ["read", "bash"], deny: ["edit", "write"] },
-        },
+        agent: reviewerAgent,
+        profile: reviewerAgent,
         filePath: "/user/profiles/reviewer.md",
         scope: "user",
       },
       {
-        profile: {
-          id: "custom-analyst",
-          label: "Data Analyst",
-          description: "Metrics analyst",
-          tools: { allow: ["read"] },
-        },
+        agent: analystAgent,
+        profile: analystAgent,
         filePath: "/user/profiles/analyst.md",
         scope: "user",
       },
     ];
-    // Register them in profile registry so resolver can find them
-    runtime.registerProfile((runtime as any)._discoveredProfiles[0].profile);
-    runtime.registerProfile((runtime as any)._discoveredProfiles[1].profile);
+    // Register them in registry so resolver can find them
+    runtime.registerAgent(reviewerAgent);
+    runtime.registerAgent(analystAgent);
 
     const shortcut = registeredShortcuts.get("ctrl+r");
     assert.ok(shortcut);
@@ -169,7 +174,7 @@ describe("Interactive Profile Cycling & Commands", () => {
     const shortcut = registeredShortcuts.get("ctrl+r");
     await shortcut.handler(mockCtx);
 
-    assert.ok(notifications.some((n) => n.message.includes("No profiles found") && n.type === "warning"));
+    assert.ok(notifications.some((n) => (n.message.includes("No agents found") || n.message.includes("No profiles found")) && n.type === "warning"));
     assert.equal(runtime.getActiveProfile(), undefined);
 
     runtime.dispose();
@@ -191,8 +196,8 @@ describe("Interactive Profile Cycling & Commands", () => {
       description: "Documentation specialist",
       tools: { allow: ["read", "write"] },
     };
-    (runtime as any)._discoveredProfiles = [
-      { profile: profileDef, filePath: "/profiles/doc-writer.md", scope: "project" },
+    (runtime as any)._discoveredAgents = [
+      { agent: profileDef, profile: profileDef, filePath: "/profiles/doc-writer.md", scope: "project" },
     ];
     runtime.registerProfile(profileDef);
 

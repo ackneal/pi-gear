@@ -260,7 +260,6 @@ export class AgentResolver {
     let effectiveAllowedTools = resolved.allowedTools;
 
     if (parentLimits.activeTools !== undefined) {
-      const parentSet = new Set(parentLimits.activeTools);
       if (effectiveAllowedTools === undefined) {
         effectiveAllowedTools = Object.freeze(
           parentLimits.activeTools.filter((tool) => isToolAllowed(tool, undefined, resolved.deniedTools)),
