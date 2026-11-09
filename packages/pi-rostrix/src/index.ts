@@ -3,6 +3,8 @@ import { ProfileActivator } from "./core/activator.ts";
 import { ProfileRegistry } from "./core/registry.ts";
 import { ProfileResolver, type ParentContextLimits, type ResolvedProfile } from "./core/resolver.ts";
 import type { ProfileDefinition } from "./core/schema.ts";
+import { discoverAllProfiles, type DiscoveredProfile, type DiscoverProfilesOptions, type DiscoveryResult } from "./loader/discovery.ts";
+import { setupInteractiveProfiles } from "./interactive/index.ts";
 import { TaskRegistry } from "./runtime/task-registry.ts";
 import { TaskSupervisor } from "./supervision/supervisor.ts";
 import { registerRostrixTools } from "./tools/index.ts";
@@ -11,6 +13,8 @@ export * from "./core/schema.ts";
 export * from "./core/registry.ts";
 export * from "./core/resolver.ts";
 export * from "./core/activator.ts";
+export * from "./loader/index.ts";
+export * from "./interactive/index.ts";
 export * from "./runtime/session-runner.ts";
 export * from "./runtime/task-types.ts";
 export * from "./runtime/task-registry.ts";
@@ -23,6 +27,8 @@ export const ROSTRIX_RUNTIME_SYMBOL = Symbol.for("pi.rostrix.runtime");
 
 export interface RostrixOptions {
   autoRegisterTools?: boolean;
+  autoLoadProfiles?: boolean;
+  autoRegisterInteractive?: boolean;
 }
 
 export interface RostrixRuntime {
@@ -33,12 +39,15 @@ export interface RostrixRuntime {
   readonly activator: ProfileActivator;
   readonly tasks: TaskRegistry;
   readonly supervisor: TaskSupervisor;
+  readonly discoveredProfiles: readonly DiscoveredProfile[];
   registerProfile(profile: ProfileDefinition): void;
   getProfile(id: string): ProfileDefinition | undefined;
   getAllProfiles(): ProfileDefinition[];
   resolveProfile(id: string, limits?: ParentContextLimits | undefined): ResolvedProfile;
   activateProfile(id: string): Promise<void>;
+  deactivateProfile(): void;
   getActiveProfile(): ResolvedProfile | undefined;
+  loadDiscoveredProfiles(options?: DiscoverProfilesOptions): Promise<DiscoveryResult>;
   dispose(): void;
 }
 
@@ -51,6 +60,7 @@ class InProcessRostrixRuntime implements RostrixRuntime {
   private readonly _tasks: TaskRegistry;
   private readonly _supervisor: TaskSupervisor;
   private readonly _pi: ExtensionAPI;
+  private _discoveredProfiles: DiscoveredProfile[] = [];
 
   constructor(pi: ExtensionAPI, options: RostrixOptions = {}) {
     this._pi = pi;
@@ -72,6 +82,14 @@ class InProcessRostrixRuntime implements RostrixRuntime {
         profileRegistry: this._profiles,
         profileResolver: this._resolver,
       });
+    }
+
+    if (options.autoRegisterInteractive !== false) {
+      setupInteractiveProfiles({ pi, runtime: this });
+    }
+
+    if (options.autoLoadProfiles !== false) {
+      this.loadDiscoveredProfiles().catch(() => {});
     }
 
     pi.on("session_shutdown", () => {
@@ -103,6 +121,10 @@ class InProcessRostrixRuntime implements RostrixRuntime {
     return this._supervisor;
   }
 
+  get discoveredProfiles(): readonly DiscoveredProfile[] {
+    return this._discoveredProfiles;
+  }
+
   registerProfile(profile: ProfileDefinition): void {
     this._profiles.register(profile);
   }
@@ -124,14 +146,30 @@ class InProcessRostrixRuntime implements RostrixRuntime {
     await this._activator.activate(resolved);
   }
 
+  deactivateProfile(): void {
+    this._activator.deactivate();
+  }
+
   getActiveProfile(): ResolvedProfile | undefined {
     return this._activator.activeProfile;
+  }
+
+  async loadDiscoveredProfiles(options?: DiscoverProfilesOptions): Promise<DiscoveryResult> {
+    const result = await discoverAllProfiles(options);
+    this._discoveredProfiles = [...result.profiles];
+
+    for (const item of result.profiles) {
+      this._profiles.register(item.profile);
+    }
+
+    return result;
   }
 
   dispose(): void {
     this._supervisor.dispose();
     this._activator.dispose();
     this._profiles.clear();
+    this._discoveredProfiles = [];
     this._initialized = false;
     delete (globalThis as any)[ROSTRIX_RUNTIME_SYMBOL];
   }

@@ -20,7 +20,11 @@ export default async function gear(pi: ExtensionAPI): Promise<void> {
   const workspace = setupWorkspace(pi, execution.filesystem, lifecycle.fff);
 
   // Initialize Rostrix runtime and register gear profiles
-  const rostrix = initRostrix(pi, { autoRegisterTools: false });
+  const rostrix = initRostrix(pi, {
+    autoRegisterTools: false,
+    autoRegisterInteractive: !child,
+    autoLoadProfiles: !child,
+  });
   for (const profile of ALL_GEAR_PROFILES) {
     if (!rostrix.getProfile(profile.id)) {
       rostrix.registerProfile(profile);

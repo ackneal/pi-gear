@@ -33,6 +33,24 @@ export class ProfileActivator {
     return this._activeProfile;
   }
 
+  deactivate(): void {
+    if (!this._activeProfile) return;
+
+    const allTools = this._pi.getAllTools().map((t) => t.name);
+    this._pi.setActiveTools(allTools);
+
+    for (const current of this._registeredMcpServers) {
+      if (typeof (this._pi as any).unregisterMcpServer === "function") {
+        (this._pi as any).unregisterMcpServer(current);
+      }
+    }
+    this._registeredMcpServers.clear();
+
+    this._removeBeforeAgentStartHook?.();
+    this._removeBeforeAgentStartHook = undefined;
+    this._activeProfile = undefined;
+  }
+
   async activate(profile: ResolvedProfile): Promise<void> {
     const priorSnapshot = this._createSnapshot();
 
