@@ -20,6 +20,8 @@ export type SubagentUsage = {
 export interface SubagentSessionOptions {
   readonly profile: ResolvedProfile;
   readonly cwd?: string | undefined;
+  readonly model?: string | undefined;
+  readonly thinkingLevel?: import("../core/schema.ts").ThinkingLevel | undefined;
   readonly parentSession?: AgentSession | undefined;
   readonly modelRuntime?: ModelRuntime | undefined;
   readonly customTools?: ToolDefinition[] | undefined;
@@ -70,16 +72,40 @@ export class InProcessSubagentRunner {
 
     let sessionResult;
     try {
+      const thinkingLevel = this._options.thinkingLevel ?? this._profile.model?.thinkingLevel;
+      const modelStr = this._options.model ?? this._profile.model?.preferred;
+
+      let resolvedModelInstance: any = undefined;
+      if (modelStr && modelRuntime) {
+        const slashIdx = modelStr.indexOf("/");
+        if (slashIdx > 0) {
+          const providerId = modelStr.slice(0, slashIdx);
+          const modelId = modelStr.slice(slashIdx + 1);
+          resolvedModelInstance = modelRuntime.getModel(providerId, modelId) ?? modelRuntime.getPhysicalModel(providerId, modelId);
+        }
+      }
+
       sessionResult = await createAgentSession({
         cwd,
         sessionManager: inMemorySessionManager,
         ...(modelRuntime ? { modelRuntime } : {}),
+        ...(resolvedModelInstance ? { model: resolvedModelInstance } : {}),
         ...(toolsAllowlist ? { tools: toolsAllowlist } : {}),
         ...(this._profile.deniedTools.length > 0 ? { excludeTools: Array.from(this._profile.deniedTools) } : {}),
         ...(this._options.customTools ? { customTools: this._options.customTools } : {}),
-        ...(this._profile.model?.thinkingLevel ? { thinkingLevel: this._profile.model.thinkingLevel } : {}),
+        ...(thinkingLevel ? { thinkingLevel } : {}),
       });
     } catch (createErr) {
+      if (this._options.signal?.aborted) {
+        return {
+          status: "aborted",
+          error: this._options.signal.reason instanceof Error ? this._options.signal.reason.message : String(this._options.signal.reason ?? "Aborted"),
+          usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0 },
+          turns: 0,
+          durationMs: Date.now() - startedAt,
+        };
+      }
+
       return {
         status: "failed",
         error: `Failed to create subagent session: ${createErr instanceof Error ? createErr.message : String(createErr)}`,
@@ -202,6 +228,7 @@ export class InProcessSubagentRunner {
       if (this._options.signal?.aborted) {
         return {
           status: "aborted",
+          error: this._options.signal.reason instanceof Error ? this._options.signal.reason.message : String(this._options.signal.reason ?? "Aborted"),
           result: latestAssistantText || undefined,
           usage,
           turns,

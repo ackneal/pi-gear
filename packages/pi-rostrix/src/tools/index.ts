@@ -173,7 +173,7 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
       reason: Type.Optional(Type.String({ description: "Reason for cancellation" })),
     }),
     execute: async (_toolCallId, params) => {
-      const ok = taskRegistry.cancel(params.taskId, params.reason);
+      const ok = await taskRegistry.cancel(params.taskId, params.reason);
       return {
         content: [
           {

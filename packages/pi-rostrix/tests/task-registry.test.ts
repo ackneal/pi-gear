@@ -51,19 +51,59 @@ test("TaskRegistry enforces maxConcurrent limit per profile", () => {
   );
 });
 
-test("TaskRegistry cancels active task", () => {
+test("TaskRegistry cancels active task", async () => {
   const registry = new TaskRegistry();
   const profile = createMockProfile();
 
   const task = registry.spawn({ profile, task: "To be cancelled" });
   assert.equal(task.status, "running");
 
-  const cancelled = registry.cancel(task.id, "Stop now");
+  const cancelled = await registry.cancel(task.id, "Stop now");
   assert.equal(cancelled, true);
 
   const updated = registry.getTask(task.id);
   assert.equal(updated?.status, "aborted");
   assert.equal(updated?.error, "Stop now");
+});
+
+test("TaskRegistry prevents overlapping targetFiles write scopes across running tasks", () => {
+  const registry = new TaskRegistry();
+  const profile = createMockProfile();
+
+  registry.spawn({
+    profile,
+    task: "Modify src/index.ts",
+    targetFiles: ["/repo/src/index.ts"],
+  });
+
+  assert.throws(
+    () => {
+      registry.spawn({
+        profile,
+        task: "Also modify src/index.ts",
+        targetFiles: ["/repo/src/index.ts"],
+      });
+    },
+    /Target files overlap with running task/,
+  );
+});
+
+test("TaskRegistry aborts task when caller signal fires", async () => {
+  const registry = new TaskRegistry();
+  const profile = createMockProfile();
+  const callerController = new AbortController();
+
+  const task = registry.spawn({
+    profile,
+    task: "Signal abort test",
+    signal: callerController.signal,
+  });
+
+  assert.equal(task.status, "running");
+  callerController.abort();
+
+  const awaited = await registry.wait(task.id, { timeoutSeconds: 2 });
+  assert.equal(awaited.status, "aborted");
 });
 
 test("TaskRegistry wait resolves on revision update or settle", async () => {
@@ -72,10 +112,8 @@ test("TaskRegistry wait resolves on revision update or settle", async () => {
 
   const task = registry.spawn({ profile, task: "Wait test" });
 
-  // Cancel in next tick to trigger revision bump and completion
-  setTimeout(() => {
-    registry.cancel(task.id, "Completed via cancel");
-  }, 20);
+  // Cancel to trigger revision bump and completion
+  await registry.cancel(task.id, "Completed via cancel");
 
   const waited = await registry.wait(task.id, { afterRevision: 1, timeoutSeconds: 2 });
   assert.equal(waited.status, "aborted");

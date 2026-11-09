@@ -14,13 +14,21 @@ export interface SpawnTaskOptions {
   readonly depth?: number | undefined;
   readonly timeoutSeconds?: number | undefined;
   readonly cwd?: string | undefined;
+  readonly model?: string | undefined;
+  readonly thinkingLevel?: import("../core/schema.ts").ThinkingLevel | undefined;
+  readonly signal?: AbortSignal | undefined;
 }
 
 type TaskListener = (task: TaskRecord) => void;
 
+export function scopesOverlap(left: readonly string[], right: readonly string[]): boolean {
+  return left.some((a) => right.some((b) => a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)));
+}
+
 export class TaskRegistry {
   private readonly _tasks: Map<string, TaskRecord> = new Map();
   private readonly _runners: Map<string, InProcessSubagentRunner> = new Map();
+  private readonly _runnerPromises: Map<string, Promise<void>> = new Map();
   private readonly _abortControllers: Map<string, AbortController> = new Map();
   private readonly _listeners: Map<string, Set<TaskListener>> = new Map();
   private readonly _maxGlobalConcurrent: number;
@@ -86,6 +94,20 @@ export class TaskRegistry {
       throw new Error(`Profile ${profile.id} concurrent limit of ${maxConcurrentForProfile} reached`);
     }
 
+    // Check targetFiles write scope collision with running tasks
+    if (options.targetFiles && options.targetFiles.length > 0) {
+      const activeTasksWithScopes = this.listTasks({ status: "running" }).filter(
+        (t) => t.targetFiles && t.targetFiles.length > 0,
+      );
+      for (const runningTask of activeTasksWithScopes) {
+        if (scopesOverlap(options.targetFiles, runningTask.targetFiles)) {
+          throw new Error(
+            `Target files overlap with running task ${runningTask.id}: ${runningTask.targetFiles.join(", ")}`,
+          );
+        }
+      }
+    }
+
     const taskId = `task-${this._nextId++}-${Date.now().toString(36)}`;
     const now = Date.now();
 
@@ -110,6 +132,16 @@ export class TaskRegistry {
     const controller = new AbortController();
     this._abortControllers.set(taskId, controller);
 
+    if (options.signal) {
+      if (options.signal.aborted) {
+        controller.abort(options.signal.reason);
+      } else {
+        options.signal.addEventListener("abort", () => {
+          this.cancel(taskId, "Cancelled by caller signal");
+        }, { once: true });
+      }
+    }
+
     let timeoutTimer: NodeJS.Timeout | undefined;
     if (options.timeoutSeconds && options.timeoutSeconds > 0) {
       timeoutTimer = setTimeout(() => {
@@ -120,12 +152,20 @@ export class TaskRegistry {
     const runner = new InProcessSubagentRunner({
       profile,
       cwd: options.cwd,
+      model: options.model,
+      thinkingLevel: options.thinkingLevel,
       signal: controller.signal,
+      onEvent: () => {
+        this._updateTask(taskId, {});
+      },
+      onTextDelta: () => {
+        this._updateTask(taskId, {});
+      },
     });
     this._runners.set(taskId, runner);
 
     // Kick off execution asynchronously
-    void (async () => {
+    const runPromise = (async () => {
       try {
         const result = await runner.run(options.task);
         if (timeoutTimer) clearTimeout(timeoutTimer);
@@ -152,21 +192,24 @@ export class TaskRegistry {
         });
       } catch (err) {
         if (timeoutTimer) clearTimeout(timeoutTimer);
+        const isAborted = controller.signal.aborted;
         this._updateTask(taskId, {
-          status: "failed",
+          status: isAborted ? "aborted" : "failed",
           finishedAt: Date.now(),
-          error: err instanceof Error ? err.message : String(err),
+          error: isAborted ? (controller.signal.reason instanceof Error ? controller.signal.reason.message : String(controller.signal.reason ?? "Aborted")) : (err instanceof Error ? err.message : String(err)),
         });
       } finally {
         this._runners.delete(taskId);
         this._abortControllers.delete(taskId);
+        this._runnerPromises.delete(taskId);
       }
     })();
+    this._runnerPromises.set(taskId, runPromise);
 
     return taskRecord;
   }
 
-  public cancel(taskId: string, reason = "Cancelled by user or supervisor"): boolean {
+  public async cancel(taskId: string, reason = "Cancelled by user or supervisor"): Promise<boolean> {
     const task = this._tasks.get(taskId);
     if (!task) return false;
     if (task.status === "completed" || task.status === "failed" || task.status === "aborted") {
@@ -178,11 +221,23 @@ export class TaskRegistry {
       controller.abort(new Error(reason));
     }
 
-    this._updateTask(taskId, {
-      status: "aborted",
-      finishedAt: Date.now(),
-      error: reason,
-    });
+    const runnerPromise = this._runnerPromises.get(taskId);
+    if (runnerPromise) {
+      await runnerPromise;
+    }
+
+    // Ensure status is aborted and error is recorded if not already set
+    if (task.status !== "aborted") {
+      this._updateTask(taskId, {
+        status: "aborted",
+        finishedAt: task.finishedAt ?? Date.now(),
+        error: task.error ?? reason,
+      });
+    } else if (!task.error) {
+      this._updateTask(taskId, {
+        error: reason,
+      });
+    }
 
     return true;
   }

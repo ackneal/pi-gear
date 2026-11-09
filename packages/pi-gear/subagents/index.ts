@@ -77,7 +77,7 @@ export function setupSubagents(
     description: "Start focused read-only research. Pass the research question as question (optional scope). The researcher inspects the workspace and can search the web (Exa) and GitHub code for external evidence. Returns immediately with a runId; use subagent_observe for progress or completion.",
     parameters: researcherParameters,
     executionMode: "parallel",
-    async execute(toolCallId, { question, scope }, _signal, _onUpdate, ctx) {
+    async execute(toolCallId, { question, scope }, signal, _onUpdate, ctx) {
       const task = formatResearcherInput({ question, scope });
       const dispatch = settings.resolve("researcher", ctx);
       if (toolCallId) recordSubagentLiveStart(toolCallId, task);
@@ -87,6 +87,9 @@ export function setupSubagents(
         profile: resolved,
         task,
         cwd: ctx.cwd,
+        model: dispatch.model,
+        thinkingLevel: dispatch.thinkingLevel,
+        signal,
       });
 
       runtime.tasks.subscribe(record.id, (updated) => {
@@ -119,7 +122,7 @@ export function setupSubagents(
     description: "Start one bounded task. Pass the work as task, with optional targetFiles, findings, and verification. Returns immediately with a runId; use subagent_observe for progress or completion. Set targetFiles when files may be modified so active scope conflicts can be rejected.",
     parameters: workerParameters,
     executionMode: "parallel",
-    async execute(toolCallId, { task: requestedTask, targetFiles, findings, verification }, _signal, _onUpdate, ctx) {
+    async execute(toolCallId, { task: requestedTask, targetFiles, findings, verification }, signal, _onUpdate, ctx) {
       const task = formatWorkerInput({ task: requestedTask, targetFiles, findings, verification });
       const dispatch = settings.resolve("worker", ctx);
       if (toolCallId) recordSubagentLiveStart(toolCallId, task);
@@ -130,6 +133,9 @@ export function setupSubagents(
         task,
         targetFiles: targetFiles?.map((f) => resolve(ctx.cwd, f)),
         cwd: ctx.cwd,
+        model: dispatch.model,
+        thinkingLevel: dispatch.thinkingLevel,
+        signal,
       });
 
       runtime.tasks.subscribe(record.id, (updated) => {
@@ -162,7 +168,7 @@ export function setupSubagents(
     description: "Start focused read-only code review. Pass the changes or focus area as scope, with optional context and skills. Returns immediately with a runId; use subagent_observe for progress or completion.",
     parameters: reviewerParameters,
     executionMode: "parallel",
-    async execute(toolCallId, { scope, context, skills }, _signal, _onUpdate, ctx) {
+    async execute(toolCallId, { scope, context, skills }, signal, _onUpdate, ctx) {
       const task = formatReviewerInput({ scope, context, skills });
       const dispatch = settings.resolve("reviewer", ctx);
       if (toolCallId) recordSubagentLiveStart(toolCallId, task);
@@ -172,6 +178,9 @@ export function setupSubagents(
         profile: resolved,
         task,
         cwd: ctx.cwd,
+        model: dispatch.model,
+        thinkingLevel: dispatch.thinkingLevel,
+        signal,
       });
 
       runtime.tasks.subscribe(record.id, (updated) => {
@@ -256,7 +265,7 @@ export function setupSubagents(
     description: "Cancel one subagent and wait for its process to terminate. Other runs and the main agent continue; repeated cancellation returns the same terminal state.",
     parameters: Type.Object({ runId: Type.String({ description: "Run identifier returned by researcher, worker, or reviewer." }) }),
     async execute(_toolCallId, { runId }): Promise<any> {
-      runtime.tasks.cancel(runId);
+      await runtime.tasks.cancel(runId);
       const task = runtime.tasks.getTask(runId);
       const status = task ? mapStatus(task.status) : "aborted";
       return {

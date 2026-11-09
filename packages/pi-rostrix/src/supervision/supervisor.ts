@@ -73,7 +73,7 @@ export class TaskSupervisor {
       // Check stall timeout
       const inactiveDuration = now - task.lastActivityAt;
       if (inactiveDuration > this._defaultStallTimeoutMs) {
-        this._taskRegistry.cancel(task.id, `Task stalled: no activity for ${Math.round(inactiveDuration / 1000)}s`);
+        void this._taskRegistry.cancel(task.id, `Task stalled: no activity for ${Math.round(inactiveDuration / 1000)}s`);
         this.notifyTaskSettled(task);
       }
     }
