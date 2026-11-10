@@ -5,6 +5,8 @@ export interface SetupInteractiveOptions {
   readonly pi: ExtensionAPI;
   readonly runtime: RostrixRuntime;
   readonly shortcut?: string | undefined;
+  readonly commandName?: string | false | undefined;
+  readonly statusKey?: string | undefined;
 }
 
 function getAgentDef(item: any) {
@@ -13,6 +15,8 @@ function getAgentDef(item: any) {
 
 export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
   const { pi, runtime } = options;
+  const commandName = options.commandName !== undefined ? options.commandName : "rostrix:agents";
+  const statusKey = options.statusKey ?? "rostrix:agent";
 
   async function cycleAgent(ctx: any): Promise<void> {
     const available = runtime.discoveredAgents;
@@ -32,7 +36,7 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
     if (nextId === undefined) {
       runtime.deactivateAgent();
       if (ctx?.ui?.setStatus) {
-        ctx.ui.setStatus("rostrix:agent", "");
+        ctx.ui.setStatus(statusKey, "");
       }
       if (ctx?.ui?.notify) {
         ctx.ui.notify("Agent: default (unrestricted)");
@@ -48,7 +52,7 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
       await runtime.activateAgent(nextId);
       const label = def?.label || def?.id || nextId;
       if (ctx?.ui?.setStatus) {
-        ctx.ui.setStatus("rostrix:agent", `👤 ${label}`);
+        ctx.ui.setStatus(statusKey, `👤 ${label}`);
       }
       if (ctx?.ui?.notify) {
         ctx.ui.notify(`Agent: ${label}`);
@@ -86,7 +90,7 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
       if (trimmed === "default" || trimmed === "off") {
         runtime.deactivateAgent();
         if (ctx?.ui?.setStatus) {
-          ctx.ui.setStatus("rostrix:agent", "");
+          ctx.ui.setStatus(statusKey, "");
         }
         if (ctx?.ui?.notify) {
           ctx.ui.notify("Agent: default (unrestricted)");
@@ -111,7 +115,7 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
           await runtime.activateAgent(def.id);
           const label = def.label || def.id;
           if (ctx?.ui?.setStatus) {
-            ctx.ui.setStatus("rostrix:agent", `👤 ${label}`);
+            ctx.ui.setStatus(statusKey, `👤 ${label}`);
           }
           if (ctx?.ui?.notify) {
             ctx.ui.notify(`Agent: ${label}`);
@@ -141,7 +145,7 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
         if (selected.startsWith("default")) {
           runtime.deactivateAgent();
           if (ctx?.ui?.setStatus) {
-            ctx.ui.setStatus("rostrix:agent", "");
+            ctx.ui.setStatus(statusKey, "");
           }
           if (ctx?.ui?.notify) {
             ctx.ui.notify("Agent: default (unrestricted)");
@@ -154,7 +158,7 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
             await runtime.activateAgent(def.id);
             const label = def.label || def.id;
             if (ctx?.ui?.setStatus) {
-              ctx.ui.setStatus("rostrix:agent", `👤 ${label}`);
+              ctx.ui.setStatus(statusKey, `👤 ${label}`);
             }
             if (ctx?.ui?.notify) {
               ctx.ui.notify(`Agent: ${label}`);
@@ -164,15 +168,12 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
       }
     };
 
-    (pi as any).registerCommand("agent", {
-      description: "Select or switch active agent",
-      handler: handleAgentCommand,
-    });
-
-    (pi as any).registerCommand("profile", {
-      description: "Select or switch active agent (alias for /agent)",
-      handler: handleAgentCommand,
-    });
+    if (commandName && typeof (pi as any).registerCommand === "function") {
+      (pi as any).registerCommand(commandName, {
+        description: "Select or switch active agent",
+        handler: handleAgentCommand,
+      });
+    }
   }
 }
 

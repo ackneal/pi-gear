@@ -1,4 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { RostrixRuntime } from "pi-rostrix";
+import { setupInteractiveAgents } from "pi-rostrix";
 import type { ExecutionServices } from "../execution/index.ts";
 import type { LspServices } from "../lsp/index.ts";
 import type { SubagentServices } from "../subagents/index.ts";
@@ -8,6 +10,7 @@ import type { WorkspaceServices } from "../workspace/setup.ts";
 export const GEAR_COMMANDS = {
   doctor: "gear:doctor",
   subagentModel: "gear:subagent-model",
+  agents: "gear:agents",
 } as const;
 
 export interface GearCommandServices {
@@ -15,6 +18,7 @@ export interface GearCommandServices {
   subagents: SubagentServices;
   lsp: LspServices;
   workspace?: WorkspaceServices;
+  rostrix?: RostrixRuntime;
 }
 
 export function setupCommands(pi: ExtensionAPI, services: GearCommandServices): void {
@@ -39,4 +43,19 @@ export function setupCommands(pi: ExtensionAPI, services: GearCommandServices): 
       pi.sendMessage({ customType: GEAR_COMMANDS.doctor, content: output, display: true });
     },
   });
+
+  if (services.rostrix) {
+    setupInteractiveAgents({
+      pi,
+      runtime: services.rostrix,
+      commandName: GEAR_COMMANDS.agents,
+    });
+  } else {
+    pi.registerCommand(GEAR_COMMANDS.agents, {
+      description: "Select or switch active agent",
+      handler: async (_args, ctx) => {
+        ctx?.ui?.notify?.("Agent runtime is not available", "warning");
+      },
+    });
+  }
 }

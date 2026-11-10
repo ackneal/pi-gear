@@ -22,7 +22,7 @@ export default async function gear(pi: ExtensionAPI): Promise<void> {
   // Initialize Rostrix runtime and register gear profiles
   const rostrix = initRostrix(pi, {
     autoRegisterTools: false,
-    autoRegisterInteractive: !child,
+    autoRegisterInteractive: false,
     autoLoadProfiles: !child,
   });
   for (const profile of ALL_GEAR_PROFILES) {
@@ -41,5 +41,5 @@ export default async function gear(pi: ExtensionAPI): Promise<void> {
   if (child) return;
 
   const subagents = setupSubagents(pi, workspace, rostrix);
-  setupCommands(pi, { execution, subagents, lsp, workspace });
+  setupCommands(pi, { execution, subagents, lsp, workspace, rostrix });
 }

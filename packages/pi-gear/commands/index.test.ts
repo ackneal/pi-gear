@@ -126,7 +126,43 @@ test("gear commands are centrally registered and delegate to their services", as
 
   assert.deepEqual([...commands.keys()].sort(), Object.values(GEAR_COMMANDS).sort());
   assert.equal(commands.has("gear:subagent-inspect"), false);
+  assert.equal(commands.has(GEAR_COMMANDS.agents), true);
   await commands.get(GEAR_COMMANDS.subagentModel)?.handler("worker", ctx);
   await commands.get(GEAR_COMMANDS.doctor)?.handler("", ctx);
   assert.deepEqual(calls, ["model:worker", "lsp:/workspace", "doctor:Sandbox: enabled"]);
+});
+
+test("gear:agents command delegates to rostrix when services.rostrix is provided", async () => {
+  const commands = new Map<string, { handler: (args: string, ctx: any) => Promise<void> }>();
+  const pi = {
+    registerCommand: (name: string, definition: { handler: (args: string, ctx: any) => Promise<void> }) => {
+      commands.set(name, definition);
+    },
+  } as unknown as ExtensionAPI;
+
+  let deactivated = false;
+  const mockRostrix = {
+    discoveredAgents: [
+      { agent: { id: "test-agent", label: "Test Agent" } },
+    ],
+    getActiveAgent: () => undefined,
+    activateAgent: async () => {},
+    deactivateAgent: () => { deactivated = true; },
+  };
+
+  const services = {
+    execution: { sandbox: { status: () => sandboxStatus } },
+    lsp: { statuses: async () => [] },
+    subagents: { settings: { configure: async () => {}, resolve: () => ({}), summaries: () => [], runtimeError: () => undefined } },
+    rostrix: mockRostrix,
+  } as unknown as GearCommandServices;
+
+  setupCommands(pi, services);
+
+  assert.equal(commands.has(GEAR_COMMANDS.agents), true);
+  const cmd = commands.get(GEAR_COMMANDS.agents);
+  assert.ok(cmd);
+
+  await cmd.handler("default", { ui: { notify: () => {}, setStatus: () => {} } });
+  assert.equal(deactivated, true);
 });

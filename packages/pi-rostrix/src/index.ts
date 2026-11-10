@@ -35,7 +35,9 @@ export interface RostrixOptions {
   autoLoadAgents?: boolean;
   autoLoadProfiles?: boolean; // alias
   autoRegisterInteractive?: boolean;
+  commandName?: string | false;
   shortcut?: string;
+  statusKey?: string;
 }
 
 export interface RostrixRuntime {
@@ -101,8 +103,14 @@ class InProcessRostrixRuntime implements RostrixRuntime {
       });
     }
 
-    if (options.autoRegisterInteractive !== false) {
-      setupInteractiveAgents({ pi, runtime: this, shortcut: options.shortcut });
+    if (options.autoRegisterInteractive !== false && options.commandName !== false) {
+      setupInteractiveAgents({
+        pi,
+        runtime: this,
+        shortcut: options.shortcut,
+        commandName: options.commandName ?? "rostrix:agents",
+        statusKey: options.statusKey,
+      });
     }
 
     const shouldAutoLoad = (options.autoLoadAgents !== false) && (options.autoLoadProfiles !== false);

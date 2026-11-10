@@ -77,7 +77,7 @@ function createMockExtensionApi() {
 }
 
 describe("Interactive Profile Cycling & Commands", () => {
-  test("registers /agent and /profile command, and registers shortcut only when configured", () => {
+  test("registers rostrix:agents command by default, supports custom commandName, and registers shortcut only when configured", () => {
     const { pi, registeredShortcuts, registeredCommands } = createMockExtensionApi();
     const runtime = initRostrix(pi, {
       autoRegisterTools: false,
@@ -88,8 +88,18 @@ describe("Interactive Profile Cycling & Commands", () => {
     setupInteractiveProfiles({ pi, runtime });
 
     assert.equal(registeredShortcuts.size, 0, "No shortcuts registered by default");
-    assert.ok(registeredCommands.has("profile"), "/profile command must be registered");
-    assert.ok(registeredCommands.has("agent"), "/agent alias command must be registered");
+    assert.ok(registeredCommands.has("rostrix:agents"), "rostrix:agents command must be registered by default");
+    assert.equal(registeredCommands.has("agent"), false, "legacy /agent command must not be registered");
+    assert.equal(registeredCommands.has("profile"), false, "legacy /profile command must not be registered");
+
+    // When custom commandName is provided (e.g. gear:agents)
+    setupInteractiveProfiles({ pi, runtime, commandName: "gear:agents" });
+    assert.ok(registeredCommands.has("gear:agents"), "Custom commandName must be registered");
+
+    // When commandName is explicitly false
+    const mock2 = createMockExtensionApi();
+    setupInteractiveProfiles({ pi: mock2.pi, runtime, commandName: false });
+    assert.equal(mock2.registeredCommands.size, 0, "No commands registered when commandName is false");
 
     // When shortcut is explicitly passed
     setupInteractiveProfiles({ pi, runtime, shortcut: "alt+a" });
@@ -98,7 +108,7 @@ describe("Interactive Profile Cycling & Commands", () => {
     runtime.dispose();
   });
 
-  test("/agent command with no arguments opens interactive picker and updates rostrix:agent status", async () => {
+  test("rostrix:agents command with no arguments opens interactive picker and updates rostrix:agent status", async () => {
     const { pi, mockCtx, registeredCommands, statuses, notifications, setSelectChoice } = createMockExtensionApi();
     const runtime = initRostrix(pi, {
       autoRegisterTools: false,
@@ -146,7 +156,7 @@ describe("Interactive Profile Cycling & Commands", () => {
     runtime.registerAgent(reviewerAgent);
     runtime.registerAgent(analystAgent);
 
-    const cmd = registeredCommands.get("agent");
+    const cmd = registeredCommands.get("rostrix:agents");
     assert.ok(cmd);
 
     // Initial state: default (activeAgent undefined)
@@ -178,7 +188,7 @@ describe("Interactive Profile Cycling & Commands", () => {
     runtime.dispose();
   });
 
-  test("/agent notifies when no directory agents are found", async () => {
+  test("rostrix:agents notifies when no directory agents are found", async () => {
     const { pi, mockCtx, registeredCommands, notifications } = createMockExtensionApi();
     const runtime = initRostrix(pi, {
       autoRegisterTools: false,
@@ -188,7 +198,7 @@ describe("Interactive Profile Cycling & Commands", () => {
 
     setupInteractiveProfiles({ pi, runtime });
 
-    const cmd = registeredCommands.get("agent");
+    const cmd = registeredCommands.get("rostrix:agents");
     assert.ok(cmd);
     await cmd.handler("", mockCtx);
 
@@ -198,7 +208,7 @@ describe("Interactive Profile Cycling & Commands", () => {
     runtime.dispose();
   });
 
-  test("/profile command allows direct switching by ID and resetting via default", async () => {
+  test("rostrix:agents command allows direct switching by ID and resetting via default", async () => {
     const { pi, mockCtx, registeredCommands, statuses } = createMockExtensionApi();
     const runtime = initRostrix(pi, {
       autoRegisterTools: false,
@@ -219,7 +229,7 @@ describe("Interactive Profile Cycling & Commands", () => {
     ];
     runtime.registerProfile(profileDef);
 
-    const cmd = registeredCommands.get("profile");
+    const cmd = registeredCommands.get("rostrix:agents");
     assert.ok(cmd);
 
     // Switch to doc-writer directly by ID
@@ -227,7 +237,7 @@ describe("Interactive Profile Cycling & Commands", () => {
     assert.equal(runtime.getActiveProfile()?.id, "doc-writer");
     assert.equal(statuses.get("rostrix:agent"), "👤 Doc Writer");
 
-    // Switch to default via /profile default
+    // Switch to default via /rostrix:agents default
     await cmd.handler("default", mockCtx);
     assert.equal(runtime.getActiveProfile(), undefined);
     assert.equal(statuses.get("rostrix:agent"), "");
