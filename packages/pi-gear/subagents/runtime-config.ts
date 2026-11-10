@@ -50,12 +50,17 @@ export function parseRuntimeConfig(value: unknown): RuntimeConfig {
 
 export class RuntimeConfigStore {
   public readonly path: string;
+  private readonly legacyPath?: string;
   private config: RuntimeConfig = { version: 1 };
   private loaded = false;
   private loadError: string | undefined;
 
-  constructor(path = join(getAgentDir(), "pi-gear", "runtime.json")) {
+  constructor(
+    path = join(getAgentDir(), "gear", "runtime.json"),
+    legacyPath = join(getAgentDir(), "pi-gear", "runtime.json"),
+  ) {
     this.path = path;
+    this.legacyPath = legacyPath;
   }
 
   async load(): Promise<void> {
@@ -64,8 +69,19 @@ export class RuntimeConfigStore {
     try {
       this.config = parseRuntimeConfig(JSON.parse(await readFile(this.path, "utf8")) as unknown);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-      this.loadError = error instanceof Error ? error.message : String(error);
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        this.loadError = error instanceof Error ? error.message : String(error);
+        return;
+      }
+      if (this.legacyPath) {
+        try {
+          this.config = parseRuntimeConfig(JSON.parse(await readFile(this.legacyPath, "utf8")) as unknown);
+          return;
+        } catch (legacyError) {
+          if ((legacyError as NodeJS.ErrnoException).code === "ENOENT") return;
+          this.loadError = legacyError instanceof Error ? legacyError.message : String(legacyError);
+        }
+      }
     }
   }
 

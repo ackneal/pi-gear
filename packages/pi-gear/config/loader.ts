@@ -25,14 +25,20 @@ const withRuntimeDefaults = (config: ExtensionConfig): ExtensionConfig => {
 };
 
 const bundledConfigUrl = new URL("../config.json", import.meta.url);
-const getGlobalConfigPath = (): string => join(getAgentDir(), "pi-gear", "config.json");
+const getGlobalConfigPath = (): string => join(getAgentDir(), "gear", "config.json");
+const getLegacyGlobalConfigPath = (): string => join(getAgentDir(), "pi-gear", "config.json");
 
 const readConfig = async (): Promise<string> => {
   try {
     return await readFile(getGlobalConfigPath(), "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    return readFile(bundledConfigUrl, "utf8");
+    try {
+      return await readFile(getLegacyGlobalConfigPath(), "utf8");
+    } catch (legacyError) {
+      if ((legacyError as NodeJS.ErrnoException).code !== "ENOENT") throw legacyError;
+      return readFile(bundledConfigUrl, "utf8");
+    }
   }
 };
 

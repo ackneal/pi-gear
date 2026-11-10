@@ -38,9 +38,9 @@ test("runtime filesystem defaults include explicit temp roots and read-only Pi s
   }
 });
 
-test("global config takes priority over the bundled default", async () => {
+test("global config in ~/.pi/agent/gear takes priority over the bundled default, with legacy fallback", async () => {
   const agentDir = await mkdtemp(join(tmpdir(), "pi-gear-agent-dir-"));
-  const configDir = join(agentDir, "pi-gear");
+  const configDir = join(agentDir, "gear");
   const globalConfig = {
     version: 1,
     filesystem: { rules: [] },
@@ -48,13 +48,26 @@ test("global config takes priority over the bundled default", async () => {
   };
 
   try {
-    await mkdir(configDir);
+    await mkdir(configDir, { recursive: true });
     await writeFile(join(configDir, "config.json"), JSON.stringify(globalConfig));
     const loaded = await loadFrom(agentDir);
 
     assert.deepEqual(loaded.sandbox.network.rules, globalConfig.sandbox.network.rules);
   } finally {
     await rm(agentDir, { recursive: true, force: true });
+  }
+
+  // Verify legacy ~/.pi/agent/pi-gear fallback
+  const legacyAgentDir = await mkdtemp(join(tmpdir(), "pi-gear-legacy-dir-"));
+  const legacyConfigDir = join(legacyAgentDir, "pi-gear");
+  try {
+    await mkdir(legacyConfigDir, { recursive: true });
+    await writeFile(join(legacyConfigDir, "config.json"), JSON.stringify(globalConfig));
+    const loadedLegacy = await loadFrom(legacyAgentDir);
+
+    assert.deepEqual(loadedLegacy.sandbox.network.rules, globalConfig.sandbox.network.rules);
+  } finally {
+    await rm(legacyAgentDir, { recursive: true, force: true });
   }
 });
 
@@ -121,7 +134,7 @@ test("appendAllowedFilesystemRule rejects invalid rule without modifying file on
   const agentDir = await mkdtemp(join(tmpdir(), "pi-gear-agent-dir-"));
 
   try {
-    const configPath = join(agentDir, "pi-gear", "config.json");
+    const configPath = join(agentDir, "gear", "config.json");
     await mkdir(dirname(configPath), { recursive: true });
     await writeFile(configPath, JSON.stringify({ version: 1, filesystem: { rules: [] } }), "utf8");
 
