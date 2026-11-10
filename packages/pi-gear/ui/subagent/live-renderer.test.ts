@@ -223,3 +223,63 @@ test("cleared running history renders interrupted without recreating a live subs
   assert.match(rendered(component), /Read · interrupted/);
   assert.deepEqual(result, original);
 });
+
+test("renderSubagentResult queries TaskRegistry directly from runtime when available", (t) => {
+  clearSubagentRegistry();
+  t.after(clearSubagentRegistry);
+
+  const mockRuntime = {
+    tasks: {
+      getTask: (id: string) => {
+        if (id === "task-runtime-1") {
+          return {
+            taskId: "task-runtime-1",
+            status: "completed" as const,
+            createdAt: 1000,
+            startedAt: 1000,
+            finishedAt: 2000,
+            lastActivityAt: 2000,
+            result: "Authoritative result from runtime TaskRegistry",
+          };
+        }
+        return undefined;
+      },
+    },
+  } as never;
+
+  const result = {
+    content: [{ type: "text", text: "started" }],
+    details: { status: "running", startedAt: 1000, items: [], runId: "task-runtime-1" },
+  } as AgentToolResult<SubagentRun>;
+
+  const component = renderSubagentResult(
+    researcherProfile,
+    result,
+    { isPartial: false, expanded: true } as never,
+    theme,
+    { args: { question: "Inspect architecture" }, invalidate: () => {} },
+    mockRuntime,
+  );
+  t.after(() => (component as SubagentResultComponent).dispose());
+
+  const output = rendered(component);
+  assert.match(output, /● Agent\(researcher\)/);
+  assert.match(output, /Authoritative result from runtime TaskRegistry/);
+  assert.doesNotMatch(output, /aborted/i);
+
+  // Test collapsed mode
+  const collapsedComponent = renderSubagentResult(
+    researcherProfile,
+    result,
+    { isPartial: false, expanded: false } as never,
+    theme,
+    { args: { question: "Inspect architecture" }, invalidate: () => {} },
+    mockRuntime,
+  );
+  t.after(() => (collapsedComponent as SubagentResultComponent).dispose());
+  const collapsedOutput = rendered(collapsedComponent);
+  assert.match(collapsedOutput, /Research complete/);
+  assert.match(collapsedOutput, /● Agent\(researcher/);
+
+});
+

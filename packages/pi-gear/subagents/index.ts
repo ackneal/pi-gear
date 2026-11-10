@@ -124,7 +124,7 @@ export function setupSubagents(
     },
     renderCall: renderSubagentCall,
     renderResult: (toolResult, options, theme, context) =>
-      renderSubagentResult(researcherProfile, toolResult as any, options, theme, context as any),
+      renderSubagentResult(researcherProfile, toolResult as any, options, theme, context as any, runtime),
     renderShell: "self",
   });
 
@@ -171,7 +171,7 @@ export function setupSubagents(
     },
     renderCall: renderSubagentCall,
     renderResult: (toolResult, options, theme, context) =>
-      renderSubagentResult(workerProfile, toolResult as any, options, theme, context as any),
+      renderSubagentResult(workerProfile, toolResult as any, options, theme, context as any, runtime),
     renderShell: "self",
   });
 
@@ -217,7 +217,7 @@ export function setupSubagents(
     },
     renderCall: renderSubagentCall,
     renderResult: (toolResult, options, theme, context) =>
-      renderSubagentResult(reviewerProfile, toolResult as any, options, theme, context as any),
+      renderSubagentResult(reviewerProfile, toolResult as any, options, theme, context as any, runtime),
     renderShell: "self",
   });
 

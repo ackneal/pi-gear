@@ -2,6 +2,7 @@ import { expandedActivity } from "./activity.ts";
 import { padOutput } from "../tools/padding.ts";
 import type { AgentToolResult, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import type { RostrixRuntime, TaskStatus, TaskUsage } from "pi-rostrix";
 import type { SubagentRun } from "../../subagents/runtime/types.ts";
 import { SubagentResultComponent } from "./component.ts";
 import { getSubagentEntry, subscribeSubagent } from "./registry.ts";
@@ -23,18 +24,70 @@ export function renderSubagentCall(_args: Record<string, unknown>, _theme: Theme
   };
 }
 
+function toSubagentUsage(usage: TaskUsage | undefined): SubagentRun["usage"] {
+  if (!usage) return undefined;
+  return {
+    input: usage.input,
+    output: usage.output,
+    ...(usage.cacheRead !== undefined ? { cacheRead: usage.cacheRead } : {}),
+    ...(usage.cacheWrite !== undefined ? { cacheWrite: usage.cacheWrite } : {}),
+    ...(usage.cacheWrite1h !== undefined ? { cacheWrite1h: usage.cacheWrite1h } : {}),
+    ...(usage.reasoning !== undefined ? { reasoning: usage.reasoning } : {}),
+    ...(usage.totalTokens !== undefined ? { totalTokens: usage.totalTokens } : {}),
+    ...(usage.cost
+      ? {
+          cost: {
+            ...(usage.cost.input !== undefined ? { input: usage.cost.input } : {}),
+            ...(usage.cost.output !== undefined ? { output: usage.cost.output } : {}),
+            ...(usage.cost.cacheRead !== undefined ? { cacheRead: usage.cost.cacheRead } : {}),
+            ...(usage.cost.cacheWrite !== undefined ? { cacheWrite: usage.cost.cacheWrite } : {}),
+            ...(usage.cost.total !== undefined ? { total: usage.cost.total } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+function mapStatus(status: TaskStatus): SubagentRun["status"] {
+  switch (status) {
+    case "completed":
+      return "success";
+    case "failed":
+      return "error";
+    case "aborted":
+      return "aborted";
+    default:
+      return "running";
+  }
+}
+
 export function renderSubagentResult(
   profile: SubagentRendererProfile,
   result: AgentToolResult<SubagentRun>,
   options: ToolRenderResultOptions,
   theme: Theme,
   context: ToolRenderContext,
+  runtime?: RostrixRuntime,
 ): Text {
   const details = result.details && !Array.isArray(result.details.items)
     ? { ...result.details, items: [] }
     : result.details;
 
   const runId = (details as SubagentRun & { runId?: string } | undefined)?.runId;
+  const taskRecord = runId && runtime ? runtime.tasks.getTask(runId) : undefined;
+  const usage = toSubagentUsage(taskRecord?.usage);
+  const taskRun: SubagentRun | undefined = taskRecord
+    ? {
+        status: mapStatus(taskRecord.status),
+        startedAt: taskRecord.startedAt ?? taskRecord.createdAt,
+        lastActivityAt: taskRecord.lastActivityAt,
+        items: [],
+        ...(taskRecord.finishedAt !== undefined ? { finishedAt: taskRecord.finishedAt } : {}),
+        ...(taskRecord.result !== undefined ? { result: taskRecord.result } : {}),
+        ...(taskRecord.error !== undefined ? { error: taskRecord.error } : {}),
+        ...(usage ? { usage } : {}),
+      }
+    : undefined;
   const primary = context.args?.question ?? context.args?.task ?? context.args?.scope;
   const task = typeof primary === "string"
     ? primary
@@ -55,7 +108,7 @@ export function renderSubagentResult(
       : (context.toolCallId ?? runId);
   const liveEntry = liveKey ? getSubagentEntry(liveKey) : undefined;
   const liveToolCallId = liveKey;
-  const run = liveEntry?.run ?? (
+  const run = taskRun ?? liveEntry?.run ?? (
     !options.isPartial && runId && details?.status === "running"
       ? { ...details, status: "aborted" as const }
       : details
