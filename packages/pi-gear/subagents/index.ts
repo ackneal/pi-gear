@@ -49,9 +49,19 @@ function mapStatus(status: TaskStatus): SubagentRun["status"] {
   }
 }
 
-function recordUpdate(toolCallId: string | undefined, task: TaskRecord, dispatch?: any): void {
-  if (!toolCallId) return;
-  recordSubagentLiveUpdate(toolCallId, {
+function recordStart(toolCallId: string | undefined, runId: string, task: string, dispatch?: any): void {
+  const initialRun: SubagentRun = {
+    status: "running",
+    startedAt: Date.now(),
+    items: [],
+    ...(dispatch ? { dispatch } : {}),
+  };
+  if (toolCallId) recordSubagentLiveStart(toolCallId, task, initialRun);
+  recordSubagentLiveStart(runId, task, initialRun);
+}
+
+function recordProgress(toolCallId: string | undefined, runId: string, task: TaskRecord, dispatch?: any): void {
+  const run: SubagentRun = {
     status: mapStatus(task.status),
     startedAt: task.startedAt ?? task.createdAt,
     lastActivityAt: task.lastActivityAt,
@@ -59,7 +69,9 @@ function recordUpdate(toolCallId: string | undefined, task: TaskRecord, dispatch
     ...(task.result !== undefined ? { result: task.result } : {}),
     ...(task.error !== undefined ? { error: task.error } : {}),
     ...(dispatch ? { dispatch } : {}),
-  });
+  };
+  if (toolCallId) recordSubagentLiveUpdate(toolCallId, run);
+  recordSubagentLiveUpdate(runId, run);
 }
 
 export function setupSubagents(
@@ -80,7 +92,6 @@ export function setupSubagents(
     async execute(toolCallId, { question, scope }, signal, _onUpdate, ctx) {
       const task = formatResearcherInput({ question, scope });
       const dispatch = settings.resolve("researcher", ctx);
-      if (toolCallId) recordSubagentLiveStart(toolCallId, task);
 
       const resolved = runtime.resolveProfile("gear:researcher");
       const record = runtime.tasks.spawn({
@@ -92,8 +103,10 @@ export function setupSubagents(
         signal,
       });
 
+      recordStart(toolCallId, record.id, task, dispatch);
+
       runtime.tasks.subscribe(record.id, (updated) => {
-        recordUpdate(toolCallId, updated, dispatch);
+        recordProgress(toolCallId, record.id, updated, dispatch);
       });
 
       return {
@@ -125,7 +138,6 @@ export function setupSubagents(
     async execute(toolCallId, { task: requestedTask, targetFiles, findings, verification }, signal, _onUpdate, ctx) {
       const task = formatWorkerInput({ task: requestedTask, targetFiles, findings, verification });
       const dispatch = settings.resolve("worker", ctx);
-      if (toolCallId) recordSubagentLiveStart(toolCallId, task);
 
       const resolved = runtime.resolveProfile("gear:worker");
       const record = runtime.tasks.spawn({
@@ -138,8 +150,10 @@ export function setupSubagents(
         signal,
       });
 
+      recordStart(toolCallId, record.id, task, dispatch);
+
       runtime.tasks.subscribe(record.id, (updated) => {
-        recordUpdate(toolCallId, updated, dispatch);
+        recordProgress(toolCallId, record.id, updated, dispatch);
       });
 
       return {
@@ -171,7 +185,6 @@ export function setupSubagents(
     async execute(toolCallId, { scope, context, skills }, signal, _onUpdate, ctx) {
       const task = formatReviewerInput({ scope, context, skills });
       const dispatch = settings.resolve("reviewer", ctx);
-      if (toolCallId) recordSubagentLiveStart(toolCallId, task);
 
       const resolved = runtime.resolveProfile("gear:reviewer");
       const record = runtime.tasks.spawn({
@@ -183,8 +196,10 @@ export function setupSubagents(
         signal,
       });
 
+      recordStart(toolCallId, record.id, task, dispatch);
+
       runtime.tasks.subscribe(record.id, (updated) => {
-        recordUpdate(toolCallId, updated, dispatch);
+        recordProgress(toolCallId, record.id, updated, dispatch);
       });
 
       return {
@@ -224,6 +239,7 @@ export function setupSubagents(
         });
 
         const status = mapStatus(task.status);
+        recordProgress(undefined, task.id, task);
 
         return {
           content: [
@@ -268,6 +284,11 @@ export function setupSubagents(
       await runtime.tasks.cancel(runId);
       const task = runtime.tasks.getTask(runId);
       const status = task ? mapStatus(task.status) : "aborted";
+      if (task) {
+        recordProgress(undefined, runId, task);
+      } else {
+        recordSubagentLiveUpdate(runId, { status: "aborted", startedAt: Date.now(), items: [] });
+      }
       return {
         content: [
           {

@@ -34,8 +34,11 @@ export function renderSubagentResult(
     ? { ...result.details, items: [] }
     : result.details;
 
+  const runId = (details as SubagentRun & { runId?: string } | undefined)?.runId;
   const primary = context.args?.question ?? context.args?.task ?? context.args?.scope;
-  const task = typeof primary === "string" ? primary : context.toolCallId ? getSubagentEntry(context.toolCallId)?.task : undefined;
+  const task = typeof primary === "string"
+    ? primary
+    : (context.toolCallId ? getSubagentEntry(context.toolCallId)?.task : undefined) ?? (runId ? getSubagentEntry(runId)?.task : undefined);
   const format = (run: SubagentRun | undefined, currentOptions: ToolRenderResultOptions, icon?: string, width = 10000) =>
     currentOptions.expanded
       ? collapsed(run, profile, theme, icon, Date.now(), undefined, false).split("\n")[0] +
@@ -45,9 +48,13 @@ export function renderSubagentResult(
     context.lastComponent instanceof SubagentResultComponent
       ? context.lastComponent
       : new SubagentResultComponent(context.invalidate, format);
-  const runId = (details as SubagentRun & { runId?: string } | undefined)?.runId;
-  const liveEntry = runId && context.toolCallId ? getSubagentEntry(context.toolCallId) : undefined;
-  const liveToolCallId = liveEntry ? context.toolCallId : undefined;
+  const liveKey = (context.toolCallId && getSubagentEntry(context.toolCallId))
+    ? context.toolCallId
+    : (runId && getSubagentEntry(runId))
+      ? runId
+      : (context.toolCallId ?? runId);
+  const liveEntry = liveKey ? getSubagentEntry(liveKey) : undefined;
+  const liveToolCallId = liveKey;
   const run = liveEntry?.run ?? (
     !options.isPartial && runId && details?.status === "running"
       ? { ...details, status: "aborted" as const }

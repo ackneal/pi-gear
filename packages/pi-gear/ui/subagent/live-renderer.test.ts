@@ -49,6 +49,36 @@ test("asynchronous transcript component follows live registry updates through co
   component.dispose();
 });
 
+test("asynchronous transcript component tracks live run by runId even when toolCallId is absent in context", () => {
+  clearSubagentRegistry();
+  const initial: SubagentRun = { status: "running", startedAt: Date.now(), items: [] };
+  const runId = "task-uuid-12345";
+  recordSubagentLiveStart(runId, "Perform audit", initial);
+  let invalidations = 0;
+
+  const component = renderSubagentResult(
+    researcherProfile,
+    { content: [{ type: "text", text: "started" }], details: { ...initial, runId } } as AgentToolResult<SubagentRun>,
+    { isPartial: false, expanded: false } as never,
+    theme,
+    { invalidate: () => { invalidations++; } },
+  );
+  // Must render running state rather than being prematurely aborted
+  assert.match(rendered(component), /Researching/);
+  assert.doesNotMatch(rendered(component), /aborted/i);
+
+  recordSubagentLiveUpdate(runId, {
+    ...initial,
+    status: "success",
+    finishedAt: Date.now(),
+    result: "Audit complete",
+  });
+  assert.match(rendered(component), /Research complete/);
+  assert.equal(invalidations, 1);
+  assert.ok(component instanceof SubagentResultComponent);
+  component.dispose();
+});
+
 const historyCases = [
   { name: "missing items", fields: {}, expectedItems: [] },
   { name: "undefined items", fields: { items: undefined }, expectedItems: [] },
