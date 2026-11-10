@@ -1,12 +1,16 @@
 import {
   createAgentSession,
+  createMcpExtension,
+  DefaultResourceLoader,
+  getAgentDir,
   SessionManager,
   type AgentSession,
   type AgentSessionEvent,
+  type ExtensionAPI,
   type ModelRuntime,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { ResolvedAgent } from "../core/resolver.ts";
+import { isToolAllowed, type ResolvedAgent } from "../core/resolver.ts";
 
 export type SubagentUsage = {
   readonly inputTokens: number;
@@ -64,11 +68,7 @@ export class InProcessSubagentRunner {
     let latestAssistantText = "";
 
     const cwd = this._options.cwd ?? (this._options.parentSession ? (this._options.parentSession as any)._cwd : process.cwd());
-
-    // Resolve tools allowlist
-    const toolsAllowlist = this._agent.allowedTools
-      ? Array.from(this._agent.allowedTools)
-      : undefined;
+    const agentDir = (this._options.parentSession as any)?._agentDir ?? getAgentDir();
 
     // Use in-memory session manager so no session JSONL files pollute the disk
     const inMemorySessionManager = SessionManager.inMemory();
@@ -90,16 +90,48 @@ export class InProcessSubagentRunner {
         }
       }
 
+      const mcpServerEntries = Object.entries(this._agent.mcpServers);
+      const hasMcpServers = mcpServerEntries.length > 0;
+
+      const extensionFactories: any[] = [];
+      if (hasMcpServers) {
+        extensionFactories.push(createMcpExtension());
+      }
+
+      extensionFactories.push((childPi: ExtensionAPI) => {
+        if (hasMcpServers) {
+          for (const [name, config] of mcpServerEntries) {
+            childPi.registerMcpServer(name, config as any);
+          }
+        }
+
+        childPi.on("before_agent_start", async () => {
+          const allTools = childPi.getAllTools().map((t) => t.name);
+          const targetTools = allTools.filter((toolName) =>
+            isToolAllowed(toolName, this._agent.allowedTools, this._agent.deniedTools),
+          );
+          childPi.setActiveTools(targetTools);
+        });
+      });
+
+      const resourceLoader = new DefaultResourceLoader({
+        cwd,
+        agentDir,
+        extensionFactories,
+      });
+      await resourceLoader.reload();
+
       sessionResult = await createAgentSession({
         cwd,
         sessionManager: inMemorySessionManager,
+        resourceLoader,
         ...(modelRuntime ? { modelRuntime } : {}),
         ...(resolvedModelInstance ? { model: resolvedModelInstance } : {}),
-        ...(toolsAllowlist ? { tools: toolsAllowlist } : {}),
-        ...(this._agent.deniedTools.length > 0 ? { excludeTools: Array.from(this._agent.deniedTools) } : {}),
         ...(this._options.customTools ? { customTools: this._options.customTools } : {}),
         ...(thinkingLevel ? { thinkingLevel } : {}),
       });
+
+      await sessionResult.session.bindExtensions({ mode: "json" });
     } catch (createErr) {
       if (this._options.signal?.aborted) {
         return {

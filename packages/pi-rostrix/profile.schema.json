@@ -108,6 +108,34 @@
             "timeout": {
               "type": "number",
               "minimum": 0
+            },
+            "exposure": {
+              "type": "string",
+              "enum": [
+                "direct",
+                "model-only",
+                "codemode",
+                "deferred",
+                "hidden"
+              ]
+            },
+            "toolExposure": {
+              "type": "object",
+              "patternProperties": {
+                "^.*$": {
+                  "type": "string",
+                  "enum": [
+                    "direct",
+                    "model-only",
+                    "codemode",
+                    "deferred",
+                    "hidden"
+                  ]
+                }
+              }
+            },
+            "enabled": {
+              "type": "boolean"
             }
           }
         }

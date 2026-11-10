@@ -32,6 +32,21 @@ export const AgentMcpServerSchema = Type.Object({
   url: Type.Optional(Type.String()),
   headers: Type.Optional(Type.Record(Type.String(), Type.String())),
   timeout: Type.Optional(Type.Number({ minimum: 0 })),
+  exposure: Type.Optional(Type.Union([
+    Type.Literal("direct"),
+    Type.Literal("model-only"),
+    Type.Literal("codemode"),
+    Type.Literal("deferred"),
+    Type.Literal("hidden"),
+  ])),
+  toolExposure: Type.Optional(Type.Record(Type.String(), Type.Union([
+    Type.Literal("direct"),
+    Type.Literal("model-only"),
+    Type.Literal("codemode"),
+    Type.Literal("deferred"),
+    Type.Literal("hidden"),
+  ]))),
+  enabled: Type.Optional(Type.Boolean()),
 });
 export type AgentMcpServer = Static<typeof AgentMcpServerSchema>;
 

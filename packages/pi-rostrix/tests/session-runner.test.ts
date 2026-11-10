@@ -46,3 +46,29 @@ test("InProcessSubagentRunner reports error if session creation throws", async (
   const result = await runner.run("Fail immediately");
   assert.equal(result.status === "failed" || result.status === "completed", true);
 });
+
+test("InProcessSubagentRunner handles profile with mcpServers configuration", async () => {
+  const profile = createMockProfile({
+    id: "gear:researcher",
+    allowedTools: Object.freeze(["read", "find", "grep", "mcp__exa__*"]),
+    mcpServers: Object.freeze({
+      exa: {
+        url: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa",
+        exposure: "hidden" as const,
+        toolExposure: {
+          web_search_exa: "direct" as const,
+        },
+      },
+    }),
+  });
+  const controller = new AbortController();
+  controller.abort();
+
+  const runner = new InProcessSubagentRunner({
+    profile,
+    signal: controller.signal,
+  });
+
+  const result = await runner.run("Research question");
+  assert.equal(result.status, "aborted");
+});

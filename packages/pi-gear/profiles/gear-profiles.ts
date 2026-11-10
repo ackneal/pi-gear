@@ -30,7 +30,24 @@ export const GEAR_RESEARCHER_PROFILE: ProfileDefinition = {
     systemPrompt: RESEARCHER_SYSTEM_PROMPT,
   },
   tools: {
-    allow: ["read", "find", "grep", "fff_*", "github_*", "exa_*"],
+    allow: ["read", "find", "grep", "fff_*", "github_*", "exa_*", "mcp__exa__*", "mcp__gh_grep__*"],
+  },
+  mcpServers: {
+    exa: {
+      url: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa",
+      exposure: "hidden",
+      toolExposure: {
+        web_search_exa: "direct",
+        web_fetch_exa: "direct",
+      },
+    },
+    gh_grep: {
+      url: "https://mcp.grep.app",
+      exposure: "hidden",
+      toolExposure: {
+        searchGitHub: "direct",
+      },
+    },
   },
   subagents: {
     maxDepth: 1,
