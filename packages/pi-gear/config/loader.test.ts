@@ -38,7 +38,7 @@ test("runtime filesystem defaults include explicit temp roots and read-only Pi s
   }
 });
 
-test("global config in ~/.pi/agent/gear takes priority over the bundled default, with legacy fallback", async () => {
+test("global config in ~/.pi/agent/gear takes priority over the bundled default", async () => {
   const agentDir = await mkdtemp(join(tmpdir(), "pi-gear-agent-dir-"));
   const configDir = join(agentDir, "gear");
   const globalConfig = {
@@ -55,19 +55,6 @@ test("global config in ~/.pi/agent/gear takes priority over the bundled default,
     assert.deepEqual(loaded.sandbox.network.rules, globalConfig.sandbox.network.rules);
   } finally {
     await rm(agentDir, { recursive: true, force: true });
-  }
-
-  // Verify legacy ~/.pi/agent/pi-gear fallback
-  const legacyAgentDir = await mkdtemp(join(tmpdir(), "pi-gear-legacy-dir-"));
-  const legacyConfigDir = join(legacyAgentDir, "pi-gear");
-  try {
-    await mkdir(legacyConfigDir, { recursive: true });
-    await writeFile(join(legacyConfigDir, "config.json"), JSON.stringify(globalConfig));
-    const loadedLegacy = await loadFrom(legacyAgentDir);
-
-    assert.deepEqual(loadedLegacy.sandbox.network.rules, globalConfig.sandbox.network.rules);
-  } finally {
-    await rm(legacyAgentDir, { recursive: true, force: true });
   }
 });
 

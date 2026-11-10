@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parseRuntimeConfig, RuntimeConfigStore } from "../runtime-config.ts";
 
@@ -39,15 +39,6 @@ test("runtime config store persists updates and preserves invalid files", async 
       version: 1,
       subagents: { worker: valid.subagents.worker },
     });
-
-    // Test legacy fallback from pi-gear/runtime.json
-    const legacyPath = join(root, "pi-gear", "runtime.json");
-    const newPath = join(root, "non-existent-gear", "runtime.json");
-    await mkdir(dirname(legacyPath), { recursive: true });
-    await writeFile(legacyPath, JSON.stringify({ version: 1, subagents: { researcher: valid.subagents.researcher } }), "utf8");
-    const legacyStore = new RuntimeConfigStore(newPath, legacyPath);
-    await legacyStore.load();
-    assert.deepEqual(legacyStore.get("researcher"), valid.subagents.researcher);
 
     const invalidPath = join(root, "invalid.json");
     await writeFile(invalidPath, "not json");
