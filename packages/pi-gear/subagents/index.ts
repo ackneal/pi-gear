@@ -228,13 +228,13 @@ export function setupSubagents(
     description: "Wait until the run finishes, goes quiet for a few seconds, or the timeout elapses (default 30s). A timeout ends only this observation; the subagent keeps running. Prefer one long wait over repeated polling; omit afterRevision unless resuming from a known revision.",
     parameters: Type.Object({
       runId: Type.String({ description: "Run identifier returned by researcher, worker, or reviewer." }),
-      afterRevision: Type.Integer({ minimum: 0, description: "Last observed revision. Returns when a newer revision is available." }),
+      afterRevision: Type.Optional(Type.Integer({ minimum: 0, description: "Last observed revision. Returns when a newer revision is available." })),
       timeoutSeconds: Type.Optional(Type.Number({ minimum: 0, description: "Maximum seconds to wait. Defaults to 30; values above 60 are clamped." })),
     }),
     async execute(_toolCallId, { runId, afterRevision, timeoutSeconds }): Promise<any> {
       try {
         const task = await runtime.tasks.wait(runId, {
-          afterRevision,
+          ...(afterRevision !== undefined ? { afterRevision } : {}),
           timeoutSeconds: timeoutSeconds ? Math.min(timeoutSeconds, 60) : 30,
         });
 

@@ -280,6 +280,65 @@ test("renderSubagentResult queries TaskRegistry directly from runtime when avail
   const collapsedOutput = rendered(collapsedComponent);
   assert.match(collapsedOutput, /Research complete/);
   assert.match(collapsedOutput, /● Agent\(researcher/);
+});
 
+test("renderSubagentResult updates live from TaskRegistry even when UI registry was cleared", (t) => {
+  clearSubagentRegistry();
+  t.after(clearSubagentRegistry);
+
+  let taskListener: ((task: any) => void) | undefined;
+  const mockTask = {
+    taskId: "task-live-cleared",
+    status: "running" as const,
+    createdAt: 1000,
+    startedAt: 1000,
+    lastActivityAt: 1000,
+  };
+
+  const mockRuntime = {
+    tasks: {
+      getTask: (id: string) => (id === "task-live-cleared" ? mockTask : undefined),
+      subscribe: (id: string, listener: (task: any) => void) => {
+        if (id === "task-live-cleared") {
+          taskListener = listener;
+          return () => { taskListener = undefined; };
+        }
+        return () => {};
+      },
+    },
+  } as never;
+
+  let invalidations = 0;
+  const result = {
+    content: [{ type: "text", text: "started" }],
+    details: { status: "running", startedAt: 1000, items: [], runId: "task-live-cleared" },
+  } as AgentToolResult<SubagentRun>;
+
+  const component = renderSubagentResult(
+    researcherProfile,
+    result,
+    { isPartial: false, expanded: true } as never,
+    theme,
+    { toolCallId: "call-1", args: { question: "Audit live updates" }, invalidate: () => { invalidations++; } },
+    mockRuntime,
+  );
+  t.after(() => (component as SubagentResultComponent).dispose());
+
+  // UI registry has no entry for call-1, but component is bound to runtime.tasks
+  assert.equal(getSubagentEntry("call-1"), undefined);
+  assert.ok(taskListener, "taskListener must be registered");
+
+  // When task completes in runtime
+  taskListener({
+    ...mockTask,
+    status: "completed",
+    finishedAt: 2500,
+    result: "Live update successfully received despite empty UI registry",
+  });
+
+  assert.equal(invalidations, 1);
+  const updatedOutput = rendered(component);
+  assert.match(updatedOutput, /Live update successfully received despite empty UI registry/);
+  assert.match(updatedOutput, /● Agent\(researcher\)/);
 });
 

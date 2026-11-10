@@ -115,7 +115,29 @@ export function renderSubagentResult(
   );
   component.update(run, options, format);
   if (liveToolCallId && run?.status === "running") {
-    component.bindLive(liveToolCallId, (listener) => subscribeSubagent(liveToolCallId, listener));
+    component.bindLive(liveToolCallId, (listener) => {
+      const unsubSubagent = subscribeSubagent(liveToolCallId, listener);
+      if (runtime && runId) {
+        const unsubTask = runtime.tasks.subscribe(runId, (record) => {
+          const u = toSubagentUsage(record.usage);
+          listener({
+            status: mapStatus(record.status),
+            startedAt: record.startedAt ?? record.createdAt,
+            lastActivityAt: record.lastActivityAt,
+            items: [],
+            ...(record.finishedAt !== undefined ? { finishedAt: record.finishedAt } : {}),
+            ...(record.result !== undefined ? { result: record.result } : {}),
+            ...(record.error !== undefined ? { error: record.error } : {}),
+            ...(u ? { usage: u } : {}),
+          });
+        });
+        return () => {
+          unsubSubagent();
+          unsubTask();
+        };
+      }
+      return unsubSubagent;
+    });
   }
   return padOutput(component);
 }

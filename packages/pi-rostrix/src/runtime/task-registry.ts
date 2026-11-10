@@ -253,39 +253,61 @@ export class TaskRegistry {
 
   public async wait(
     taskId: string,
-    options?: { afterRevision?: number; timeoutSeconds?: number },
+    options?: { afterRevision?: number; timeoutSeconds?: number; settleMs?: number },
   ): Promise<TaskRecord> {
     const task = this._tasks.get(taskId);
     if (!task) {
       throw new Error(`Task ${taskId} not found`);
     }
 
-    const targetRev = options?.afterRevision ?? task.revision;
-    const isDone = task.status === "completed" || task.status === "failed" || task.status === "aborted";
+    const isDone = (t: TaskRecord): boolean =>
+      t.status === "completed" || t.status === "failed" || t.status === "aborted";
 
-    // If already modified past target revision or already settled
-    if (task.revision > targetRev || isDone) {
+    if (isDone(task)) {
       return task;
     }
 
+    const targetRev = options?.afterRevision ?? 0;
     const timeoutMs = (options?.timeoutSeconds ?? 30) * 1000;
+    const settleMs = options?.settleMs ?? 1500;
+
+    const now = Date.now();
+    const lastActivity = task.lastActivityAt ?? task.startedAt ?? task.createdAt;
+    if (task.revision > targetRev && now - lastActivity >= settleMs) {
+      return task;
+    }
 
     return new Promise<TaskRecord>((resolve) => {
-      let timer: NodeJS.Timeout | undefined;
-
-      const listener: TaskListener = (updated) => {
-        if (updated.revision > targetRev || updated.status === "completed" || updated.status === "failed" || updated.status === "aborted") {
-          cleanup();
-          resolve(updated);
-        }
-      };
+      let timeoutTimer: NodeJS.Timeout | undefined;
+      let settleTimer: NodeJS.Timeout | undefined;
 
       const cleanup = () => {
-        if (timer) clearTimeout(timer);
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        if (settleTimer) clearTimeout(settleTimer);
         const set = this._listeners.get(taskId);
         if (set) {
           set.delete(listener);
           if (set.size === 0) this._listeners.delete(taskId);
+        }
+      };
+
+      const finish = (record: TaskRecord) => {
+        cleanup();
+        resolve(record);
+      };
+
+      const listener: TaskListener = (updated) => {
+        if (isDone(updated)) {
+          finish(updated);
+          return;
+        }
+
+        if (updated.revision > targetRev) {
+          if (settleTimer) clearTimeout(settleTimer);
+          settleTimer = setTimeout(() => {
+            finish(this._tasks.get(taskId) ?? updated);
+          }, settleMs);
+          settleTimer.unref();
         }
       };
 
@@ -294,12 +316,19 @@ export class TaskRegistry {
       }
       this._listeners.get(taskId)!.add(listener);
 
+      if (task.revision > targetRev) {
+        const remainingSettle = Math.max(0, settleMs - (now - lastActivity));
+        settleTimer = setTimeout(() => {
+          finish(this._tasks.get(taskId) ?? task);
+        }, remainingSettle);
+        settleTimer.unref();
+      }
+
       if (timeoutMs > 0) {
-        timer = setTimeout(() => {
-          cleanup();
-          resolve(this._tasks.get(taskId)!);
+        timeoutTimer = setTimeout(() => {
+          finish(this._tasks.get(taskId) ?? task);
         }, timeoutMs);
-        timer.unref();
+        timeoutTimer.unref();
       }
     });
   }
