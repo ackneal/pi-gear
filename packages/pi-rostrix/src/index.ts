@@ -112,6 +112,7 @@ class InProcessRostrixRuntime implements RostrixRuntime {
         taskRegistry: this._tasks,
         agentRegistry: this._agents,
         agentResolver: this._resolver,
+        taskSupervisor: this._supervisor,
         getParentContext: () => ({ agent: this._activator.activeAgent }),
       });
     }

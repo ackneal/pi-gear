@@ -10,7 +10,7 @@ export interface InboxNotification {
   readonly timestamp: number;
 }
 
-export type InboxDeliveryHandler = (message: string, notifications: InboxNotification[]) => Promise<void> | void;
+export type InboxDeliveryHandler = (notifications: readonly InboxNotification[]) => boolean;
 
 export interface ParentInboxOptions {
   readonly debounceMs?: number | undefined;
@@ -29,17 +29,16 @@ export class ParentInbox {
   }
 
   public enqueue(notification: InboxNotification): void {
-    // Keep most recent notification per taskId
     this._pendingNotifications.set(notification.taskId, notification);
+    if (this._timer) clearTimeout(this._timer);
 
-    if (this._timer) {
-      clearTimeout(this._timer);
-    }
-
-    this._timer = setTimeout(() => {
-      this.flush();
-    }, this._debounceMs);
+    this._timer = setTimeout(() => this.flush(), this._debounceMs);
     this._timer.unref();
+  }
+
+  public remove(taskId: string): void {
+    this._pendingNotifications.delete(taskId);
+    if (this._pendingNotifications.size === 0) this.clear();
   }
 
   public flush(): void {
@@ -47,35 +46,17 @@ export class ParentInbox {
       clearTimeout(this._timer);
       this._timer = undefined;
     }
-
     if (this._pendingNotifications.size === 0) return;
 
-    const list = Array.from(this._pendingNotifications.values());
-    this._pendingNotifications.clear();
+    const notifications = Array.from(this._pendingNotifications.values());
+    if (!this._onDeliver?.(notifications)) return;
 
-    const formatted = this.formatNotifications(list);
-    if (this._onDeliver) {
-      void this._onDeliver(formatted, list);
+    // Keep replacements enqueued by a reentrant delivery callback.
+    for (const notification of notifications) {
+      if (this._pendingNotifications.get(notification.taskId) === notification) {
+        this._pendingNotifications.delete(notification.taskId);
+      }
     }
-  }
-
-  public formatNotifications(notifications: InboxNotification[]): string {
-    const lines: string[] = ["<subagent_notifications>"];
-    for (const n of notifications) {
-      lines.push(`  <notification task_id="${n.taskId}" profile="${n.profileId}" status="${n.status}">`);
-      if (n.durationMs !== undefined) {
-        lines.push(`    <duration_ms>${n.durationMs}</duration_ms>`);
-      }
-      if (n.error) {
-        lines.push(`    <error>${escapeXml(n.error)}</error>`);
-      }
-      if (n.result) {
-        lines.push(`    <result>${escapeXml(n.result)}</result>`);
-      }
-      lines.push("  </notification>");
-    }
-    lines.push("</subagent_notifications>");
-    return lines.join("\n");
   }
 
   public clear(): void {
@@ -85,13 +66,4 @@ export class ParentInbox {
     }
     this._pendingNotifications.clear();
   }
-}
-
-function escapeXml(unsafe: string): string {
-  return unsafe
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
 }

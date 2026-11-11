@@ -36,7 +36,7 @@ test("Gear and Rostrix compose their own prompt contracts through Pi's extension
       assert.equal(rendered.match(/<rostrix_supervision>/g)?.length ?? 0, delegates ? 1 : 0);
       assert.equal(rendered.match(/<pi_gear_context>/g)?.length ?? 0, delegates ? 1 : 0);
       if (delegates) {
-        assert.match(rendered, /Only enabled events produce <subagent_notifications>/);
+        assert.match(rendered, /Only enabled, unconsumed events produce rostrix:subagent_notifications custom messages/);
         assert.match(rendered, /end the turn/);
         assert.doesNotMatch(rendered, /Observe healthy runs again as needed/);
       }

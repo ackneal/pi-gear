@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { TaskRegistry } from "../runtime/task-registry.ts";
+import type { TaskSupervisor } from "../supervision/supervisor.ts";
 import type { AgentRegistry } from "../core/registry.ts";
 import type { AgentResolver, ResolvedAgent } from "../core/resolver.ts";
 import type { TaskRecord } from "../runtime/task-types.ts";
@@ -9,6 +10,7 @@ import { resolve } from "node:path";
 export interface RegisterToolsOptions {
   readonly pi: ExtensionAPI;
   readonly taskRegistry: TaskRegistry;
+  readonly taskSupervisor?: Pick<TaskSupervisor, "acknowledgeTask">;
   readonly agentRegistry?: AgentRegistry | undefined;
   readonly agentResolver?: AgentResolver | undefined;
   // Aliases for compatibility
@@ -31,7 +33,7 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
   pi.registerTool({
     name: "delegate",
     label: "Delegate Subtask",
-    description: "Delegate a subtask to an agent asynchronously in the background. Returns a taskId and the task's wakeOn settings. Enabled events notify the parent via <subagent_notifications>; do not repeatedly wait or poll for independent work with the relevant notifications enabled.",
+    description: "Delegate a subtask to an agent asynchronously in the background. Returns a taskId and the task's wakeOn settings. Enabled events notify the parent via hidden rostrix:subagent_notifications custom messages containing JSON; do not repeatedly wait or poll for independent work with the relevant notifications enabled.",
     parameters: Type.Object({
       agent: Type.Optional(Type.String({ description: "ID of the agent to execute the task" })),
       profile: Type.Optional(Type.String({ description: "Alias for agent ID" })),
@@ -119,6 +121,9 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
             details: { notFound: true, taskId: params.taskId },
           };
         }
+        if (task.status === "completed" || task.status === "failed" || task.status === "aborted") {
+          options.taskSupervisor?.acknowledgeTask(task.id);
+        }
         return {
           content: [
             {
@@ -187,6 +192,10 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
               }
             : undefined,
         );
+
+        if (task.status === "completed" || task.status === "failed" || task.status === "aborted") {
+          options.taskSupervisor?.acknowledgeTask(task.id);
+        }
 
         return {
           content: [

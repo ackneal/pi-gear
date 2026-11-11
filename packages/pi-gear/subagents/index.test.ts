@@ -58,7 +58,12 @@ function harness(sessionManager?: SessionManager) {
     },
   };
   const delegationTools: string[] = [];
+  const acknowledgments: string[] = [];
+  const supervisor = {
+    acknowledgeTask: (taskId: string) => { acknowledgments.push(taskId); },
+  } satisfies Pick<RostrixRuntime["supervisor"], "acknowledgeTask">;
   const runtime = {
+    supervisor,
     tasks, resolveProfile: () => ({ id: "gear:worker" }),
     registerDelegationTools: (names: readonly string[]) => { delegationTools.push(...names); },
   } as unknown as RostrixRuntime;
@@ -77,7 +82,7 @@ function harness(sessionManager?: SessionManager) {
   setupSubagents(pi, undefined, runtime);
 
   return {
-    record, entries, listeners, tools, delegationTools,
+    record, entries, listeners, tools, delegationTools, acknowledgments,
     emit: async (event: string) => {
       for (const handler of handlers.get(event) ?? []) await handler({}, ctx);
     },
@@ -311,3 +316,35 @@ for (const scenario of ["bounded evidence", "changed session", "unknown run", "a
     }
   });
 }
+
+
+test("observe acknowledges only delivered live terminal results", async (t) => {
+  for (const status of ["completed", "failed", "aborted", "running", "pending", "blocked", "error", "persisted"] as const) {
+    await t.test(status, async (t) => {
+      clearSubagentRegistry();
+      t.after(clearSubagentRegistry);
+      const h = harness();
+      await h.execute("worker", { task: "Inspect" });
+      assert.deepEqual(h.acknowledgments, []);
+      if (status === "persisted") {
+        h.update({ status: "completed", result: "Saved answer", finishedAt: 50 });
+        h.forgetTask();
+      } else if (status === "error") {
+        h.forgetTask();
+      } else {
+        h.update({ status });
+      }
+
+      const result = await h.execute("subagent_observe", { runId: h.record.id, timeoutSeconds: 0 });
+
+      assert.equal(result.isError, status === "error" ? true : undefined);
+      const details = result.details as { status: string; result?: string };
+      const mapped = status === "completed" || status === "persisted" ? "success"
+        : status === "failed" || status === "error" ? "error" : status === "aborted" ? "aborted" : "running";
+      assert.equal(details.status, mapped);
+      if (status === "persisted") assert.equal(details.result, "Saved answer");
+      if (status === "error") assert.match((result.content[0] as { text: string }).text, /Unknown task/);
+      assert.deepEqual(h.acknowledgments, ["completed", "failed", "aborted"].includes(status) ? [h.record.id] : []);
+    });
+  }
+});

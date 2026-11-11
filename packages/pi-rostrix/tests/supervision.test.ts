@@ -4,17 +4,22 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { TaskSupervisor } from "../src/supervision/supervisor.ts";
 import { TaskRegistry } from "../src/runtime/task-registry.ts";
 import type { SubagentTaskResult } from "../src/runtime/session-runner.ts";
-import { ParentInbox } from "../src/supervision/inbox.ts";
+import { ParentInbox, type InboxNotification } from "../src/supervision/inbox.ts";
+import { agent } from "./runtime-fixtures.ts";
 import { WakeUpManager } from "../src/supervision/wake-up.ts";
 
-test("ParentInbox coalesces multiple notifications within debounce window", async () => {
-  const delivered: string[] = [];
+const { convertToLlm } = await import(new URL("./core/messages.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href);
+
+test("ParentInbox coalesces multiple notifications within debounce window", async (t) => {
+  const delivered: Array<readonly InboxNotification[]> = [];
   const inbox = new ParentInbox({
     debounceMs: 50,
     onDeliver: (msg) => {
       delivered.push(msg);
+      return true;
     },
   });
+  t.after(() => inbox.clear());
 
   inbox.enqueue({
     taskId: "task-1",
@@ -39,54 +44,175 @@ test("ParentInbox coalesces multiple notifications within debounce window", asyn
 
   assert.equal(delivered.length, 1);
   const first = delivered[0]!;
-  assert.ok(first.includes('task_id="task-1"'));
-  assert.ok(first.includes('task_id="task-2"'));
-  assert.ok(first.includes("Review passed"));
+  assert.deepEqual(first.map((notification) => notification.taskId), ["task-1", "task-2"]);
+  assert.equal(first[1]?.result, "Review passed");
 });
 
-function sdkFixture() {
+function sdkFixture(failures = 0) {
   const messages: string[] = [];
+  const sent: Array<{ message: Parameters<ExtensionAPI["sendMessage"]>[0]; options: Parameters<ExtensionAPI["sendMessage"]>[1] }> = [];
   const handlers = new Map<string, () => void>();
+  let attempts = 0;
   const api = {
     on: (event: string, handler: () => void) => {
       handlers.set(event, handler);
       return () => { handlers.delete(event); };
     },
-    sendUserMessage: (message: string) => { messages.push(message); },
+    sendMessage: (message: Parameters<ExtensionAPI["sendMessage"]>[0], options: Parameters<ExtensionAPI["sendMessage"]>[1]) => {
+      attempts++;
+      if (attempts <= failures) throw new Error("Delivery failed");
+      assert.equal(typeof message.content, "string");
+      messages.push(String(message.content));
+      sent.push({ message, options });
+    },
+    sendUserMessage: () => { assert.fail("Internal notifications must not be user messages"); },
   };
-  // Only the SDK surface used by supervision is supplied by this fixture.
-  return { messages, handlers, pi: api as unknown as ExtensionAPI };
+  return { messages, sent, handlers, attempts: () => attempts, pi: api as unknown as ExtensionAPI };
+}
+
+function notification(taskId: string): InboxNotification {
+  return { taskId, profileId: "worker", status: "completed", result: `<result>${taskId} & \"data\"</result>`, timestamp: 0 };
 }
 
 test("WakeUpManager uses SDK lifecycle hooks and removes them on disposal", async (t) => {
   for (const end of ["agent_settled", "dispose", "session_shutdown"] as const) {
     await t.test(end, async () => {
-      const { pi, messages, handlers } = sdkFixture();
-      const manager = new WakeUpManager(new ParentInbox(), pi);
+      const { pi, messages, sent, handlers } = sdkFixture();
+      const inbox = new ParentInbox({ onDeliver: (batch) => manager.deliver(batch) });
+      const manager = new WakeUpManager(inbox, pi);
       try {
         assert.deepEqual([...handlers.keys()], ["agent_start", "agent_settled", "session_shutdown"]);
-        await manager.deliverOrQueue("idle");
+        inbox.enqueue(notification("idle"));
+        inbox.flush();
         handlers.get("agent_start")!();
-        await manager.deliverOrQueue("queued one");
-        await manager.deliverOrQueue("queued two");
-        assert.deepEqual(messages, ["idle"]);
+        inbox.enqueue(notification("queued one"));
+        inbox.enqueue(notification("queued two"));
+        inbox.flush();
+        assert.deepEqual(JSON.parse(messages[0]!).notifications, [notification("idle")]);
+        assert.equal(messages.length, 1);
 
         if (end === "dispose") manager.dispose();
         else handlers.get(end)!();
 
         if (end === "agent_settled") {
-          assert.deepEqual(messages, ["idle", "queued one\n\nqueued two"]);
+          assert.equal(messages.length, 2);
+          assert.deepEqual(JSON.parse(messages[1]!).notifications, [notification("queued one"), notification("queued two")]);
         } else {
           manager.setParentIdle(true);
-          await manager.deliverOrQueue("after disposal");
-          assert.deepEqual(messages, ["idle"]);
+          assert.equal(manager.deliver([notification("after disposal")]), false);
+          assert.equal(messages.length, 1);
           assert.equal(handlers.size, 0);
+        }
+        for (const { message, options } of sent) {
+          assert.equal(message.customType, "rostrix:subagent_notifications");
+          assert.equal(message.display, false);
+          assert.deepEqual(message.details, JSON.parse(String(message.content)));
+          assert.equal(JSON.parse(String(message.content)).type, "subagent_notifications");
+          assert.deepEqual(options, { triggerTurn: true, deliverAs: "followUp" });
+          const [modelMessage] = convertToLlm([{ ...message, role: "custom", timestamp: 0 }]);
+          assert.deepEqual(modelMessage.content, [{ type: "text", text: message.content }]);
         }
       } finally {
         manager.dispose();
       }
       assert.equal(handlers.size, 0);
     });
+  }
+});
+
+test("acknowledged terminal results cannot produce a delayed duplicate wake-up", async (t) => {
+  for (const phase of ["debounce", "busy", "retry", "before-notify"] as const) {
+    await t.test(phase, async () => {
+      const registry = new TaskRegistry({ createRunner: () => ({ run: async () => ({
+        status: "completed", result: "Result stays available", turns: 1, durationMs: 1,
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0 },
+      }) }) });
+      const { pi, messages, attempts } = sdkFixture(phase === "retry" ? 1 : 0);
+      const supervisor = new TaskSupervisor(registry, pi, { debounceMs: 10_000 });
+      const unsubscribe = registry.subscribe("*", (task) => {
+        if (phase !== "before-notify") supervisor.notifyTaskSettled(task);
+      });
+      try {
+        if (phase !== "retry") supervisor.wakeUpManager.setParentIdle(false);
+        const task = registry.spawn({ task: "Work", agent: agent({ supervision: { wakeOn: new Set(["completed"]) } }) });
+        await registry.wait(task.id);
+        if (phase === "busy" || phase === "retry") supervisor.inbox.flush();
+        assert.deepEqual(messages, []);
+
+        supervisor.acknowledgeTask(task.id);
+        supervisor.notifyTaskSettled(task);
+        supervisor.wakeUpManager.setParentIdle(true);
+        supervisor.inbox.flush();
+
+        assert.deepEqual(messages, []);
+        assert.equal(attempts(), phase === "retry" ? 1 : 0);
+        assert.equal(registry.getTask(task.id)?.result, "Result stays available");
+      } finally {
+        unsubscribe();
+        supervisor.dispose();
+        await registry.shutdown();
+      }
+    });
+  }
+});
+
+test("consuming one result preserves other pending tasks and delivery retry", async () => {
+  const registry = new TaskRegistry({ createRunner: () => ({ run: async () => ({
+    status: "completed", result: "Done", turns: 1, durationMs: 1,
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0 },
+  }) }) });
+  const { pi, messages, attempts } = sdkFixture(1);
+  const supervisor = new TaskSupervisor(registry, pi, { debounceMs: 10_000 });
+  const unsubscribe = registry.subscribe("*", (task) => supervisor.notifyTaskSettled(task));
+  try {
+    supervisor.wakeUpManager.setParentIdle(false);
+    const tasks = ["First", "Second"].map((task) => registry.spawn({ task, agent: agent({ supervision: { wakeOn: new Set(["completed"]) } }) }));
+    await Promise.all(tasks.map((task) => registry.wait(task.id)));
+    supervisor.inbox.flush();
+    supervisor.acknowledgeTask(tasks[0]!.id);
+    supervisor.wakeUpManager.setParentIdle(true);
+    assert.equal(attempts(), 1);
+    assert.deepEqual(messages, []);
+    supervisor.inbox.flush();
+
+    assert.equal(messages.length, 1);
+    assert.deepEqual(JSON.parse(messages[0]!).notifications.map((item: InboxNotification) => item.taskId), [tasks[1]!.id]);
+    for (const task of tasks) supervisor.notifyTaskSettled(task);
+    supervisor.inbox.flush();
+    assert.equal(messages.length, 1);
+    assert.ok(tasks.every((task) => registry.getTask(task.id)?.result === "Done"));
+  } finally {
+    unsubscribe();
+    supervisor.dispose();
+    await registry.shutdown();
+  }
+});
+
+test("acknowledging progress does not consume a future terminal notification", async () => {
+  let finish!: () => void;
+  const registry = new TaskRegistry({ createRunner: () => ({ run: async () => new Promise<SubagentTaskResult>((resolve) => {
+    finish = () => resolve({ status: "completed", result: "Done", turns: 1, durationMs: 1,
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0 } });
+  }) }) });
+  const { pi, messages } = sdkFixture();
+  const supervisor = new TaskSupervisor(registry, pi, { debounceMs: 10_000 });
+  const unsubscribe = registry.subscribe("*", (task) => supervisor.notifyTaskSettled(task));
+  try {
+    const task = registry.spawn({ task: "Work", agent: agent({ supervision: { wakeOn: new Set(["completed"]) } }) });
+    assert.equal(task.status, "running");
+    supervisor.acknowledgeTask(task.id);
+    supervisor.acknowledgeTask("unknown");
+    finish();
+    await registry.wait(task.id);
+    supervisor.inbox.flush();
+
+    assert.equal(messages.length, 1);
+    assert.equal(JSON.parse(messages[0]!).notifications[0].taskId, task.id);
+  } finally {
+    finish();
+    unsubscribe();
+    supervisor.dispose();
+    await registry.shutdown();
   }
 });
 

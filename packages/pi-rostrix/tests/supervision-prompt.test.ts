@@ -25,7 +25,9 @@ test("supervision prompt preserves structured, custom, and forced prompts withou
 
     assert.equal(rendered.match(/<rostrix_supervision>/g)?.length, 1);
     assert.ok(rendered.includes(before));
-    assert.match(rendered, /Only enabled events produce <subagent_notifications>/);
+    assert.match(rendered, /Only enabled, unconsumed events produce rostrix:subagent_notifications custom messages/);
+    assert.match(rendered, /JSON content has type subagent_notifications and a notifications array/);
+    assert.match(rendered, /Do not produce another reply merely to acknowledge/);
     assert.match(rendered, /empty wakeOn requires explicit observation/);
     assert.match(rendered, /Ordinary cancellation does not wake the parent/);
     assert.match(rendered, /needs_input is not emitted/);

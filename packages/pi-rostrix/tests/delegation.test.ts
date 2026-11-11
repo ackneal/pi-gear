@@ -97,3 +97,67 @@ test("delegation preserves the parent authorization and execution context", asyn
     });
   }
 });
+
+test("task_status acknowledges individual terminal results but not listings", async (t) => {
+  for (const status of ["completed", "failed", "aborted", "running", "pending", "blocked", "missing", "listing"] as const) {
+    await t.test(status, async (t) => {
+      const tools = new Map<string, ToolDefinition>();
+      const pi = { registerTool: (tool: ToolDefinition) => { tools.set(tool.name, tool); } } as unknown as ExtensionAPI;
+      const tasks = new TaskRegistry();
+      t.after(() => tasks.shutdown());
+      tasks.getTask = () => status === "missing" ? undefined : {
+        id: "observed", agentId: "child", profileId: "child", task: "Work", depth: 0,
+        targetFiles: [], wakeOn: [], status: status === "listing" ? "completed" : status,
+        revision: 2, createdAt: 0, lastActivityAt: 0, items: [], result: "Available result",
+      };
+      const record = tasks.getTask("observed");
+      if (record) t.mock.method(tasks, "listTasks", () => [record]);
+      const acknowledgments: string[] = [];
+      registerRostrixTools({
+        pi, taskRegistry: tasks, agentResolver: new AgentResolver(new AgentRegistry()),
+        taskSupervisor: { acknowledgeTask: (id) => { acknowledgments.push(id); } },
+      });
+
+      const result = await tools.get("task_status")!.execute("call", status === "listing" ? {} : { taskId: "observed" }, undefined, undefined, {} as ExtensionToolContext);
+
+      assert.equal(result.isError, status === "missing" ? true : undefined);
+      const content = result.content[0];
+      assert.ok(content?.type === "text");
+      if (status === "listing") {
+        assert.equal(JSON.parse(content.text)[0].status, "completed");
+        assert.equal(JSON.parse(content.text)[0].result, undefined);
+      } else if (status !== "missing") assert.equal(JSON.parse(content.text).result, "Available result");
+      assert.deepEqual(acknowledgments, ["completed", "failed", "aborted"].includes(status) ? ["observed"] : []);
+    });
+  }
+});
+
+test("task_wait acknowledges only delivered terminal results", async (t) => {
+  for (const status of ["completed", "failed", "aborted", "running", "pending", "blocked", "error"] as const) {
+    await t.test(status, async (t) => {
+      const tools = new Map<string, ToolDefinition>();
+      const pi = { registerTool: (tool: ToolDefinition) => { tools.set(tool.name, tool); } } as unknown as ExtensionAPI;
+      const tasks = new TaskRegistry();
+      t.after(() => tasks.shutdown());
+      tasks.wait = async () => {
+        if (status === "error") throw new Error("Wait failed");
+        return {
+          id: "observed", agentId: "child", profileId: "child", task: "Work", depth: 0,
+          targetFiles: [], wakeOn: [], status, revision: 2, createdAt: 0, lastActivityAt: 0, items: [],
+        };
+      };
+      const acknowledgments: string[] = [];
+      const taskSupervisor = {
+        acknowledgeTask: (taskId: string) => { acknowledgments.push(taskId); },
+      } satisfies NonNullable<RegisterToolsOptions["taskSupervisor"]>;
+      registerRostrixTools({ pi, taskRegistry: tasks, taskSupervisor, agentResolver: new AgentResolver(new AgentRegistry()) });
+
+      const result = await tools.get("task_wait")!.execute("call", { taskId: "observed", timeoutSeconds: 0 }, undefined, undefined, {} as ExtensionToolContext);
+
+      assert.equal(result.isError, status === "error" ? true : undefined);
+      if (status !== "error") assert.equal((result.details as { status: string }).status, status);
+      else assert.match((result.content[0] as { text: string }).text, /Wait failed/);
+      assert.deepEqual(acknowledgments, ["completed", "failed", "aborted"].includes(status) ? ["observed"] : []);
+    });
+  }
+});

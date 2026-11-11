@@ -265,6 +265,10 @@ export function setupSubagents(
         const status = mapStatus(task.status);
         recordProgress(undefined, task.id, task);
 
+        if (task.status === "completed" || task.status === "failed" || task.status === "aborted") {
+          runtime.supervisor.acknowledgeTask(task.id);
+        }
+
         return observation({ ...taskRun(task), runId: task.id, status, revision: task.revision });
       } catch (err) {
         return {
