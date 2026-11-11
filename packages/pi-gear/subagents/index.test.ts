@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RostrixRuntime, TaskRecord, TaskStatus } from "pi-rostrix";
 import { setupSubagents } from "./index.ts";
+import { composePrompt } from "../context/prompt/index.ts";
 import { clearSubagentRegistry, getSubagentEntry } from "../ui/subagent/registry.ts";
 import { SubagentResultComponent } from "../ui/subagent/component.ts";
 
@@ -56,7 +57,11 @@ function harness(sessionManager?: SessionManager) {
       return record;
     },
   };
-  const runtime = { tasks, resolveProfile: () => ({ id: "gear:worker" }) } as unknown as RostrixRuntime;
+  const delegationTools: string[] = [];
+  const runtime = {
+    tasks, resolveProfile: () => ({ id: "gear:worker" }),
+    registerDelegationTools: (names: readonly string[]) => { delegationTools.push(...names); },
+  } as unknown as RostrixRuntime;
   const ctx = {
     cwd: "/tmp",
     get sessionManager() {
@@ -72,7 +77,7 @@ function harness(sessionManager?: SessionManager) {
   setupSubagents(pi, undefined, runtime);
 
   return {
-    record, entries, listeners, tools,
+    record, entries, listeners, tools, delegationTools,
     emit: async (event: string) => {
       for (const handler of handlers.get(event) ?? []) await handler({}, ctx);
     },
@@ -153,6 +158,56 @@ const agents = [
   { name: "worker", params: { task: "Inspect code" } },
   { name: "reviewer", params: { scope: "Inspect code" } },
 ];
+
+test("spawn receipts preserve actual task wakeOn for every agent", async (t) => {
+  const cases: { name: string; wakeOn: TaskRecord["wakeOn"] }[] = [
+    { name: "disabled", wakeOn: [] },
+    { name: "stalled only", wakeOn: ["stalled"] },
+    { name: "completed only", wakeOn: ["completed"] },
+    { name: "failed only", wakeOn: ["failed"] },
+    { name: "input only", wakeOn: ["needs_input"] },
+    { name: "all triggers", wakeOn: ["completed", "failed", "stalled", "needs_input"] },
+  ];
+  for (const agent of agents) {
+    for (const scenario of cases) {
+      await t.test(`${agent.name}: ${scenario.name}`, async (t) => {
+        clearSubagentRegistry();
+        t.after(clearSubagentRegistry);
+        const h = harness();
+        Object.assign(h.record, { wakeOn: scenario.wakeOn });
+
+        const result = await h.execute(agent.name, agent.params);
+
+        assert.deepEqual(JSON.parse((result.content[0] as { text: string }).text), {
+          runId: h.record.id, status: h.record.status, revision: h.record.revision, wakeOn: scenario.wakeOn,
+        });
+        const details = result.details as Record<string, unknown>;
+        assert.deepEqual(details.wakeOn, scenario.wakeOn);
+        assert.equal(details.runId, h.record.id);
+        assert.equal(details.revision, h.record.revision);
+        assert.deepEqual(details.items, h.record.items.filter((item) => item.kind !== "message"));
+      });
+    }
+  }
+});
+
+test("tool descriptions and prompt agree on conditional notification workflow", () => {
+  const h = harness();
+  assert.deepEqual(h.delegationTools, ["researcher", "worker", "reviewer"]);
+  const cases = [...agents.map(({ name }) => name), "subagent_observe"];
+  for (const name of cases) {
+    const description = h.tools.get(name)!.description;
+    const prompt = composePrompt("", [name === "subagent_observe" ? "worker" : name]);
+    for (const text of [description, prompt]) {
+      assert.match(text, /wakeOn/);
+      assert.match(text, /For independent work with completion notification enabled/);
+      assert.match(text, /continue other useful work or end the turn/);
+      assert.match(text, /only for a current-step dependency or diagnosing progress/);
+      assert.match(text, /bounded waits without polling/);
+      assert.doesNotMatch(text, /Observe healthy runs again|use subagent_observe for progress or completion/);
+    }
+  }
+});
 
 for (const agent of agents) {
   for (const terminal of [

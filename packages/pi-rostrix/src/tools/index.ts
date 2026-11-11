@@ -31,7 +31,7 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
   pi.registerTool({
     name: "delegate",
     label: "Delegate Subtask",
-    description: "Delegate a subtask to an agent.",
+    description: "Delegate a subtask to an agent asynchronously in the background. Returns a taskId and the task's wakeOn settings. Enabled events notify the parent via <subagent_notifications>; do not repeatedly wait or poll for independent work with the relevant notifications enabled.",
     parameters: Type.Object({
       agent: Type.Optional(Type.String({ description: "ID of the agent to execute the task" })),
       profile: Type.Optional(Type.String({ description: "Alias for agent ID" })),
@@ -90,10 +90,11 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
               agent: taskRecord.agentId,
               profile: taskRecord.profileId,
               targetFiles: taskRecord.targetFiles,
+              wakeOn: taskRecord.wakeOn,
             }, null, 2),
           },
         ],
-        details: { taskId: taskRecord.id },
+        details: { taskId: taskRecord.id, wakeOn: taskRecord.wakeOn },
       };
     },
   });
@@ -169,7 +170,7 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
   pi.registerTool({
     name: "task_wait",
     label: "Wait for Task",
-    description: "Wait for a task to update or finish (bounded wait).",
+    description: "Optional bounded wait for a task to update or finish. Use when the current step depends on its result, when diagnosing progress, or when the needed event is not enabled in wakeOn. For independent work with relevant notifications enabled, rely on notification instead of repeated waiting or polling.",
     parameters: Type.Object({
       taskId: Type.String({ description: "Task ID to wait for" }),
       afterRevision: Type.Optional(Type.Number({ description: "Only return when revision is greater than this" })),

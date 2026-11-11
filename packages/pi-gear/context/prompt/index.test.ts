@@ -97,7 +97,13 @@ test("delegation guidance preserves research terms and explains asynchronous sub
   assert.match(prompt, /Pass the change scope, requirements or intent in context, and applicable coding or review skill paths in skills/);
   assert.match(prompt, /Reviewer does not modify files; evaluate findings, fix confirmed issues, and re-verify in the main agent/);
   assert.match(prompt, /Subagents do not inherit the parent agent's skills; provide the absolute path of any skill needed for the delegated task/);
-  assert.match(prompt, /Do independent work before observing\. Use bounded subagent_observe calls and avoid repeated polling/);
+  for (const guidance of [
+    "Dispatch does not require observation.",
+    "Notifications depend on each task's returned wakeOn triggers.",
+    "For independent work with completion notification enabled, continue other useful work or end the turn.",
+    "only for a current-step dependency or diagnosing progress, using bounded waits without polling.",
+  ]) assert.ok(prompt.includes(guidance), guidance);
+  assert.doesNotMatch(prompt, /Observe healthy runs again as needed/);
   assert.doesNotMatch(prompt, /resolve background runs before|before completing/i);
   assert.match(prompt, /Cancel or redispatch narrower work when stalled, repeatedly failing, unnecessary, or over budget/);
   assert.match(prompt, /Do not edit an active worker's targetFiles/);

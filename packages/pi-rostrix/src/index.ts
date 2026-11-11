@@ -12,6 +12,7 @@ import {
 import { setupInteractiveAgents } from "./interactive/index.ts";
 import { TaskRegistry } from "./runtime/task-registry.ts";
 import { TaskSupervisor } from "./supervision/supervisor.ts";
+import { applySupervisionPrompt } from "./supervision/prompt.ts";
 import { registerRostrixTools } from "./tools/index.ts";
 
 export * from "./core/schema.ts";
@@ -49,6 +50,7 @@ export interface RostrixRuntime {
   readonly activator: AgentActivator;
   readonly tasks: TaskRegistry;
   readonly supervisor: TaskSupervisor;
+  registerDelegationTools(names: readonly string[]): void;
   readonly discoveredAgents: readonly DiscoveredAgent[];
   readonly discoveredProfiles: readonly DiscoveredAgent[]; // alias
   registerAgent(agent: AgentDefinition): void;
@@ -81,6 +83,8 @@ class InProcessRostrixRuntime implements RostrixRuntime {
   private readonly _supervisor: TaskSupervisor;
   private readonly _pi: ExtensionAPI;
   private readonly _unsubscribeTasks: () => void;
+  private readonly _removeSupervisionPrompt: () => void;
+  private readonly _delegationTools = new Set<string>();
   private _discoveredAgents: DiscoveredAgent[] = [];
 
   constructor(pi: ExtensionAPI, options: RostrixOptions = {}) {
@@ -96,7 +100,13 @@ class InProcessRostrixRuntime implements RostrixRuntime {
       }
     });
 
+    this._removeSupervisionPrompt = pi.on("before_agent_start", (event) => {
+      const canDelegate = event.systemPromptOptions.selectedTools.some((name) => this._delegationTools.has(name));
+      applySupervisionPrompt(event.systemPromptOptions, canDelegate || this._tasks.listTasks().length > 0);
+    });
+
     if (options.autoRegisterTools !== false) {
+      this.registerDelegationTools(["delegate"]);
       registerRostrixTools({
         pi,
         taskRegistry: this._tasks,
@@ -150,6 +160,10 @@ class InProcessRostrixRuntime implements RostrixRuntime {
 
   get supervisor(): TaskSupervisor {
     return this._supervisor;
+  }
+
+  registerDelegationTools(names: readonly string[]): void {
+    for (const name of names) this._delegationTools.add(name);
   }
 
   get discoveredAgents(): readonly DiscoveredAgent[] {
@@ -235,6 +249,8 @@ class InProcessRostrixRuntime implements RostrixRuntime {
   dispose(): Promise<void> {
     if (!this._disposePromise) {
       this._unsubscribeTasks();
+      this._removeSupervisionPrompt();
+      this._delegationTools.clear();
       this._supervisor.dispose();
       this._disposePromise = this._tasks.shutdown().finally(() => {
         this._activator.dispose();

@@ -27,7 +27,7 @@ import {
 } from "./agents/worker/index.ts";
 import type { SubagentDispatch, SubagentRun } from "./runtime/types.ts";
 import type { WorkspaceServices } from "../workspace/setup.ts";
-import { setupSubagentSettings, type SubagentSettings } from "./settings.ts";
+import { setupSubagentSettings, SUBAGENTS, type SubagentSettings } from "./settings.ts";
 import { taskRun } from "./task-run.ts";
 import { setupGear } from "../index.ts";
 
@@ -97,6 +97,7 @@ export function setupSubagents(
   rostrix?: RostrixRuntime,
 ): SubagentServices {
   const runtime = rostrix ?? initRostrix(pi, { autoRegisterTools: false });
+  runtime.registerDelegationTools(SUBAGENTS);
   const settings = setupSubagentSettings(pi);
   let sessionContext: ExtensionContext | undefined;
   pi.on("session_start", (_event, ctx) => { sessionContext = ctx; });
@@ -137,7 +138,7 @@ export function setupSubagents(
   pi.registerTool({
     name: RESEARCHER_TOOL_NAME,
     label: researcherProfile.label,
-    description: "Start focused read-only research. Pass the research question as question (optional scope). The researcher inspects the workspace and can search the web (Exa) and GitHub code for external evidence. Returns immediately with a runId; use subagent_observe for progress or completion.",
+    description: "Start focused read-only research. Pass the research question as question (optional scope). The researcher inspects the workspace and can search the web (Exa) and GitHub code for external evidence. Returns immediately with a runId and the task's actual wakeOn notification triggers. For independent work with completion notification enabled, continue other useful work or end the turn. Observe only for a current-step dependency or diagnosing progress, using bounded waits without polling.",
     parameters: researcherParameters,
     executionMode: "parallel",
     async execute(toolCallId, { question, scope }, signal, _onUpdate, ctx) {
@@ -158,8 +159,8 @@ export function setupSubagents(
       track(toolCallId, record, dispatch, ctx);
 
       return {
-        content: [{ type: "text", text: JSON.stringify({ runId: record.id, status: record.status, revision: record.revision }) }],
-        details: { ...taskRun(record, dispatch), runId: record.id, revision: record.revision },
+        content: [{ type: "text", text: JSON.stringify({ runId: record.id, status: record.status, revision: record.revision, wakeOn: record.wakeOn }) }],
+        details: { ...taskRun(record, dispatch), runId: record.id, revision: record.revision, wakeOn: record.wakeOn },
       };
     },
     renderCall: renderSubagentCall,
@@ -172,7 +173,7 @@ export function setupSubagents(
   pi.registerTool({
     name: WORKER_TOOL_NAME,
     label: workerProfile.label,
-    description: "Start one bounded task. Pass the work as task, with optional targetFiles, findings, and verification. Returns immediately with a runId; use subagent_observe for progress or completion. Set targetFiles when files may be modified so active scope conflicts can be rejected.",
+    description: "Start one bounded task. Pass the work as task, with optional targetFiles, findings, and verification. Returns immediately with a runId and the task's actual wakeOn notification triggers. For independent work with completion notification enabled, continue other useful work or end the turn. Observe only for a current-step dependency or diagnosing progress, using bounded waits without polling. Set targetFiles when files may be modified so active scope conflicts can be rejected.",
     parameters: workerParameters,
     executionMode: "parallel",
     async execute(toolCallId, { task: requestedTask, targetFiles, findings, verification }, signal, _onUpdate, ctx) {
@@ -194,8 +195,8 @@ export function setupSubagents(
       track(toolCallId, record, dispatch, ctx);
 
       return {
-        content: [{ type: "text", text: JSON.stringify({ runId: record.id, status: record.status, revision: record.revision }) }],
-        details: { ...taskRun(record, dispatch), runId: record.id, revision: record.revision },
+        content: [{ type: "text", text: JSON.stringify({ runId: record.id, status: record.status, revision: record.revision, wakeOn: record.wakeOn }) }],
+        details: { ...taskRun(record, dispatch), runId: record.id, revision: record.revision, wakeOn: record.wakeOn },
       };
     },
     renderCall: renderSubagentCall,
@@ -208,7 +209,7 @@ export function setupSubagents(
   pi.registerTool({
     name: REVIEWER_TOOL_NAME,
     label: reviewerProfile.label,
-    description: "Start focused read-only code review. Pass the changes or focus area as scope, with optional context and skills. Returns immediately with a runId; use subagent_observe for progress or completion.",
+    description: "Start focused read-only code review. Pass the changes or focus area as scope, with optional context and skills. Returns immediately with a runId and the task's actual wakeOn notification triggers. For independent work with completion notification enabled, continue other useful work or end the turn. Observe only for a current-step dependency or diagnosing progress, using bounded waits without polling.",
     parameters: reviewerParameters,
     executionMode: "parallel",
     async execute(toolCallId, { scope, context, skills }, signal, _onUpdate, ctx) {
@@ -229,8 +230,8 @@ export function setupSubagents(
       track(toolCallId, record, dispatch, ctx);
 
       return {
-        content: [{ type: "text", text: JSON.stringify({ runId: record.id, status: record.status, revision: record.revision }) }],
-        details: { ...taskRun(record, dispatch), runId: record.id, revision: record.revision },
+        content: [{ type: "text", text: JSON.stringify({ runId: record.id, status: record.status, revision: record.revision, wakeOn: record.wakeOn }) }],
+        details: { ...taskRun(record, dispatch), runId: record.id, revision: record.revision, wakeOn: record.wakeOn },
       };
     },
     renderCall: renderSubagentCall,
@@ -243,7 +244,7 @@ export function setupSubagents(
   pi.registerTool({
     name: "subagent_observe",
     label: "Observe subagent",
-    description: "Wait until the run finishes, goes quiet for a few seconds, or the timeout elapses (default 30s). A timeout ends only this observation; the subagent keeps running. Prefer one long wait over repeated polling; omit afterRevision unless resuming from a known revision.",
+    description: "Observe only for a current-step dependency or diagnosing progress, using bounded waits without polling. For independent work with completion notification enabled in the task's wakeOn, continue other useful work or end the turn. Wait until the run finishes, goes quiet for a few seconds, or the timeout elapses (default 30s). A timeout ends only this observation; the subagent keeps running. Prefer one long wait over repeated polling; omit afterRevision unless resuming from a known revision.",
     parameters: Type.Object({
       runId: Type.String({ description: "Run identifier returned by researcher, worker, or reviewer." }),
       afterRevision: Type.Optional(Type.Integer({ minimum: 0, description: "Last observed revision. Returns when a newer revision is available." })),
