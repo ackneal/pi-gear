@@ -18,7 +18,7 @@ function harness(sessionManager?: SessionManager) {
   let contextValid = true;
   const record: TaskRecord = {
     id: "test-run", agentId: "gear:worker", profileId: "gear:worker", task: "Inspect code",
-    depth: 0, targetFiles: [], status: "running", revision: 1, createdAt: 10,
+    depth: 0, targetFiles: [], wakeOn: ["completed", "failed"], status: "running", revision: 1, createdAt: 10,
     startedAt: 20, lastActivityAt: 30,
     items: [
       { kind: "thinking", text: "Inspect the implementation", contentIndex: 0, messageId: 1 },

@@ -236,6 +236,7 @@
       "type": "object",
       "properties": {
         "wakeOn": {
+          "description": "Events that wake the parent. Inherited triggers are combined; no resolved triggers disables automatic wake-ups. Results remain queryable. needs_input is reserved and is not emitted by the current runtime.",
           "type": "array",
           "items": {
             "anyOf": [

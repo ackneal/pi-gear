@@ -80,7 +80,9 @@ export const SupervisionWakeTriggerSchema = Type.Union([
 export type SupervisionWakeTrigger = Static<typeof SupervisionWakeTriggerSchema>;
 
 export const AgentSupervisionSchema = Type.Object({
-  wakeOn: Type.Optional(Type.Array(SupervisionWakeTriggerSchema)),
+  wakeOn: Type.Optional(Type.Array(SupervisionWakeTriggerSchema, {
+    description: "Events that wake the parent. Inherited triggers are combined; no resolved triggers disables automatic wake-ups. Results remain queryable. needs_input is reserved and is not emitted by the current runtime.",
+  })),
   reviewIntervalSeconds: Type.Optional(Type.Number({ minimum: 1 })),
   maxDurationSeconds: Type.Optional(Type.Number({ minimum: 1 })),
 });

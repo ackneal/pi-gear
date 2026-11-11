@@ -90,9 +90,91 @@ test("WakeUpManager uses SDK lifecycle hooks and removes them on disposal", asyn
   }
 });
 
+test("manual and caller cancellations never wake as failure or stall", async (t) => {
+  for (const mode of ["manual", "caller", "already-aborted"] as const) {
+    await t.test(mode, async () => {
+      const caller = new AbortController();
+      if (mode === "already-aborted") caller.abort();
+      const registry = new TaskRegistry({ createRunner: ({ signal }) => ({
+        run: async () => new Promise<SubagentTaskResult>((resolve) => {
+          const finish = () => resolve({ status: "failed", error: "Task stalled: deliberately misleading text",
+            turns: 0, durationMs: 0,
+            usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0 } });
+          if (signal!.aborted) finish();
+          else signal!.addEventListener("abort", finish, { once: true });
+        }),
+      }) });
+      const { pi, messages } = sdkFixture();
+      const supervisor = new TaskSupervisor(registry, pi, { debounceMs: 1 });
+      const unsubscribe = registry.subscribe("*", (task) => supervisor.notifyTaskSettled(task));
+      try {
+        const task = registry.spawn({ task: "Wait", signal: caller.signal, agent: {
+          id: "worker", label: "Worker", description: "Test worker", promptGuidelines: [], appendPrompt: "",
+          deniedTools: [], deniedSkills: [], mcpServers: {}, subagents: { maxDepth: 2, maxConcurrent: 2 },
+          supervision: { wakeOn: new Set(["completed", "failed", "stalled"]) },
+        } });
+        if (mode === "manual") await registry.cancel(task.id, "Task stalled: manual reason");
+        else caller.abort();
+        await registry.wait(task.id);
+        await new Promise((resolve) => setTimeout(resolve, 15));
+        assert.equal(task.status, "aborted");
+        assert.equal(task.cancellationCause, "abort");
+        assert.deepEqual(messages, []);
+      } finally {
+        unsubscribe();
+        supervisor.dispose();
+        await registry.shutdown();
+      }
+    });
+  }
+});
+
+test("terminal wake filtering preserves results and evidence", async (t) => {
+  for (const status of ["completed", "failed", "aborted"] as const) {
+    for (const enabled of [false, true]) {
+      await t.test(`${status}, opt-in: ${enabled}`, async () => {
+        const registry = new TaskRegistry({
+          createRunner: ({ onEvent }) => ({ run: async () => {
+            onEvent?.({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "read", args: { path: "evidence.txt" } });
+            return { status, result: "observable result", error: status === "completed" ? undefined : "Task stalled: not a structured cause",
+              turns: 1, durationMs: 1,
+              usage: { inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 3, cost: 0 } };
+          } }),
+        });
+        const { pi, messages } = sdkFixture();
+        const supervisor = new TaskSupervisor(registry, pi, { debounceMs: 1 });
+        const unsubscribe = registry.subscribe("*", (task) => supervisor.notifyTaskSettled(task));
+        try {
+          const task = registry.spawn({ task: "Work", agent: {
+            id: "worker", label: "Worker", description: "Test worker", promptGuidelines: [], appendPrompt: "",
+            deniedTools: [], deniedSkills: [], mcpServers: {}, subagents: { maxDepth: 2, maxConcurrent: 2 },
+            supervision: { wakeOn: new Set(enabled ? ["completed", "failed", "stalled", "needs_input"] : []) },
+          } });
+          await registry.wait(task.id);
+          await new Promise((resolve) => setTimeout(resolve, 15));
+          assert.equal(messages.length, enabled && status !== "aborted" ? 1 : 0);
+          assert.equal(registry.getTask(task.id), task);
+          assert.equal(task.status, status);
+          assert.equal(task.result, "observable result");
+          assert.equal(task.usage?.totalTokens, 3);
+          assert.deepEqual(task.items, [{ kind: "tool", id: "tool-1", name: "read", status: "running", args: { path: "evidence.txt" } }]);
+        } finally {
+          unsubscribe();
+          supervisor.dispose();
+          await registry.shutdown();
+        }
+      });
+    }
+  }
+});
+
 test("stall cancellation leaves notification ownership to the terminal subscription", async (t) => {
-  for (const disposeBeforeCleanup of [false, true]) {
-    await t.test(`dispose before cleanup: ${disposeBeforeCleanup}`, async () => {
+  for (const { disposeBeforeCleanup, wake } of [
+    { disposeBeforeCleanup: false, wake: true },
+    { disposeBeforeCleanup: false, wake: false },
+    { disposeBeforeCleanup: true, wake: true },
+  ]) {
+    await t.test(`dispose before cleanup: ${disposeBeforeCleanup}, wake: ${wake}`, async () => {
       let cleanup: (() => void) | undefined;
       let aborted = false;
       const registry = new TaskRegistry({
@@ -115,7 +197,7 @@ test("stall cancellation leaves notification ownership to the terminal subscript
         const task = registry.spawn({ task: "Wait", profile: {
           id: "worker", label: "Worker", description: "Test worker", promptGuidelines: [], appendPrompt: "",
           deniedTools: [], deniedSkills: [], mcpServers: {}, subagents: { maxDepth: 2, maxConcurrent: 2 },
-          supervision: { wakeOn: new Set() },
+          supervision: { wakeOn: new Set(wake ? ["stalled"] : []) },
         } });
         await new Promise((resolve) => setTimeout(resolve, 30));
         assert.equal(aborted, true);
@@ -127,8 +209,9 @@ test("stall cancellation leaves notification ownership to the terminal subscript
         await registry.wait(task.id);
         await new Promise((resolve) => setTimeout(resolve, 30));
         assert.equal(task.status, "aborted");
-        assert.equal(messages.length, disposeBeforeCleanup ? 0 : 1);
-        if (!disposeBeforeCleanup) assert.match(messages[0]!, /aborted/);
+        assert.equal(task.cancellationCause, "stalled");
+        assert.equal(messages.length, !disposeBeforeCleanup && wake ? 1 : 0);
+        if (!disposeBeforeCleanup && wake) assert.match(messages[0]!, /aborted/);
       } finally {
         supervisor.dispose();
         unsubscribe();

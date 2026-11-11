@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { TaskRegistry } from "../src/runtime/task-registry.ts";
 import type { ResolvedProfile } from "../src/core/resolver.ts";
 import type { SubagentTaskResult } from "../src/runtime/session-runner.ts";
@@ -18,6 +18,95 @@ function createMockProfile(id = "worker"): ResolvedProfile {
     supervision: Object.freeze({ wakeOn: Object.freeze(new Set<"completed" | "failed" | "needs_input" | "stalled">()) }),
   };
 }
+
+function registryFixture(t: TestContext): TaskRegistry {
+  const registry = new TaskRegistry({
+    createRunner: ({ signal }) => ({
+      run: async () => new Promise<SubagentTaskResult>((resolve) => {
+        assert.ok(signal);
+        const finish = () => resolve({
+          status: "aborted",
+          error: signal.reason instanceof Error ? signal.reason.message : String(signal.reason),
+          turns: 0, durationMs: 0,
+          usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0 },
+        });
+        if (signal.aborted) finish();
+        else signal.addEventListener("abort", finish, { once: true });
+      }),
+    }),
+  });
+  t.after(() => registry.shutdown());
+  return registry;
+}
+
+test("TaskRegistry snapshots wake settings independently for the same agent", async () => {
+  const wakeOn = new Set<"completed" | "failed">(["completed"]);
+  const profile = { ...createMockProfile(), supervision: { wakeOn } };
+  const registry = new TaskRegistry({ createRunner: () => ({ run: async () => ({
+    status: "completed", result: "done", turns: 1, durationMs: 1,
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0 },
+  }) }) });
+  try {
+    const tasks = [];
+    for (const triggers of [["completed"], ["failed"], []] as const) {
+      wakeOn.clear();
+      for (const trigger of triggers) wakeOn.add(trigger);
+      const task = registry.spawn({ profile, task: "Work" });
+      await registry.wait(task.id);
+      tasks.push(task);
+    }
+    wakeOn.add("completed");
+    assert.deepEqual(tasks.map((task) => task.wakeOn), [["completed"], ["failed"], []]);
+    assert.ok(tasks.every((task) => Object.isFrozen(task.wakeOn) && task.result === "done"));
+  } finally {
+    await registry.shutdown();
+  }
+});
+
+test("shutdown waits for cancellation already in progress without replacing its cause", async (t) => {
+  for (const cause of ["abort", "stalled"] as const) {
+    await t.test(cause, async () => {
+      let release!: () => void;
+      const registry = new TaskRegistry({
+        createRunner: ({ signal }) => ({
+          run: async () => new Promise<SubagentTaskResult>((resolve) => {
+            release = () => resolve({
+              status: "aborted", error: "Original cancellation", turns: 0, durationMs: 0,
+              usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0 },
+            });
+            assert.ok(signal);
+          }),
+        }),
+      });
+      const task = registry.spawn({ profile: createMockProfile(), task: "Wait" });
+      let shutDown = false;
+      const cancellation = registry.cancel(task.id, "Original cancellation", cause);
+      const shutdown = registry.shutdown();
+      void shutdown.then(() => { shutDown = true; });
+      try {
+        // Both shutdown and an explicit repeated cancel must wait for the first cleanup.
+        let repeatedSettled = false;
+        const repeated = registry.cancel(task.id, "Replacement reason", "abort");
+        void repeated.then(() => { repeatedSettled = true; });
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(shutDown, false);
+        assert.equal(repeatedSettled, false);
+        assert.equal(task.cancellationCause, cause);
+        release();
+        assert.equal(await cancellation, true);
+        assert.equal(await repeated, false);
+        await shutdown;
+        assert.equal(shutDown, true);
+        assert.equal(task.cancellationCause, cause);
+        assert.equal(task.error, "Original cancellation");
+      } finally {
+        release();
+        await cancellation;
+        await shutdown;
+      }
+    });
+  }
+});
 
 test("TaskRegistry shutdown cancels all tasks and waits for runner cleanup", async (t) => {
   for (const count of [0, 1, 2]) {
@@ -60,8 +149,8 @@ test("TaskRegistry shutdown cancels all tasks and waits for runner cleanup", asy
   }
 });
 
-test("TaskRegistry spawns task and tracks status", () => {
-  const registry = new TaskRegistry();
+test("TaskRegistry spawns task and tracks status", (t) => {
+  const registry = registryFixture(t);
   const profile = createMockProfile();
 
   const task = registry.spawn({
@@ -78,8 +167,8 @@ test("TaskRegistry spawns task and tracks status", () => {
   assert.equal(fetched?.id, task.id);
 });
 
-test("TaskRegistry enforces maxConcurrent limit per profile", () => {
-  const registry = new TaskRegistry();
+test("TaskRegistry enforces maxConcurrent limit per profile", (t) => {
+  const registry = registryFixture(t);
   const profile = createMockProfile("constrained");
 
   registry.spawn({ profile, task: "Task 1" });
@@ -93,8 +182,8 @@ test("TaskRegistry enforces maxConcurrent limit per profile", () => {
   );
 });
 
-test("TaskRegistry cancels active task", async () => {
-  const registry = new TaskRegistry();
+test("TaskRegistry cancels active task", async (t) => {
+  const registry = registryFixture(t);
   const profile = createMockProfile();
 
   const task = registry.spawn({ profile, task: "To be cancelled" });
@@ -108,8 +197,8 @@ test("TaskRegistry cancels active task", async () => {
   assert.equal(updated?.error, "Stop now");
 });
 
-test("TaskRegistry prevents overlapping targetFiles write scopes across running tasks", () => {
-  const registry = new TaskRegistry();
+test("TaskRegistry prevents overlapping targetFiles write scopes across running tasks", (t) => {
+  const registry = registryFixture(t);
   const profile = createMockProfile();
 
   registry.spawn({
@@ -130,8 +219,8 @@ test("TaskRegistry prevents overlapping targetFiles write scopes across running 
   );
 });
 
-test("TaskRegistry aborts task when caller signal fires", async () => {
-  const registry = new TaskRegistry();
+test("TaskRegistry aborts task when caller signal fires", async (t) => {
+  const registry = registryFixture(t);
   const profile = createMockProfile();
   const callerController = new AbortController();
 
@@ -148,8 +237,8 @@ test("TaskRegistry aborts task when caller signal fires", async () => {
   assert.equal(awaited.status, "aborted");
 });
 
-test("TaskRegistry wait resolves on revision update or settle", async () => {
-  const registry = new TaskRegistry();
+test("TaskRegistry wait resolves on revision update or settle", async (t) => {
+  const registry = registryFixture(t);
   const profile = createMockProfile();
 
   const task = registry.spawn({ profile, task: "Wait test" });

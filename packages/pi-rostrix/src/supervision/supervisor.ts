@@ -45,6 +45,13 @@ export class TaskSupervisor {
 
   public notifyTaskSettled(task: TaskRecord): void {
     if (this._disposed) return;
+
+    // The runtime has no blocked/input event; needs_input is not synthesized.
+    const trigger = task.status === "completed" || task.status === "failed"
+      ? task.status
+      : task.status === "aborted" && task.cancellationCause === "stalled" ? "stalled" : undefined;
+    if (!trigger || !task.wakeOn.includes(trigger)) return;
+
     const durationMs = task.startedAt ? (task.finishedAt ?? Date.now()) - task.startedAt : undefined;
 
     this._inbox.enqueue({
@@ -75,7 +82,7 @@ export class TaskSupervisor {
       // Check stall timeout
       const inactiveDuration = now - task.lastActivityAt;
       if (inactiveDuration > this._defaultStallTimeoutMs) {
-        void this._taskRegistry.cancel(task.id, `Task stalled: no activity for ${Math.round(inactiveDuration / 1000)}s`);
+        void this._taskRegistry.cancel(task.id, `Task stalled: no activity for ${Math.round(inactiveDuration / 1000)}s`, "stalled");
       }
     }
   }

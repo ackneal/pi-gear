@@ -147,6 +147,7 @@ export class TaskRegistry {
       parentTaskId: options.parentTaskId,
       depth,
       targetFiles: Object.freeze(options.targetFiles ? [...options.targetFiles] : []),
+      wakeOn: Object.freeze([...agent.supervision.wakeOn]),
       status: "running",
       revision: 1,
       createdAt: now,
@@ -163,6 +164,7 @@ export class TaskRegistry {
 
     if (options.signal) {
       if (options.signal.aborted) {
+        taskRecord.cancellationCause = "abort";
         controller.abort(options.signal.reason);
       } else {
         options.signal.addEventListener("abort", () => {
@@ -207,6 +209,7 @@ export class TaskRegistry {
         let finalStatus: TaskStatus = "completed";
         if (result.status === "failed") finalStatus = "failed";
         else if (result.status === "aborted") finalStatus = "aborted";
+        if (controller.signal.aborted) finalStatus = "aborted";
 
         this._updateTask(taskId, {
           status: finalStatus,
@@ -246,7 +249,11 @@ export class TaskRegistry {
     return this._shutdownPromise;
   }
 
-  public async cancel(taskId: string, reason = "Cancelled by user or supervisor"): Promise<boolean> {
+  public async cancel(
+    taskId: string,
+    reason = "Cancelled by user or supervisor",
+    cause: "abort" | "stalled" = "abort",
+  ): Promise<boolean> {
     const task = this._tasks.get(taskId);
     if (!task) return false;
     if (task.status === "completed" || task.status === "failed" || task.status === "aborted") {
@@ -254,6 +261,12 @@ export class TaskRegistry {
     }
 
     const controller = this._abortControllers.get(taskId);
+    if (controller?.signal.aborted) {
+      await this._runnerPromises.get(taskId);
+      return false;
+    }
+
+    task.cancellationCause = cause;
     if (controller) {
       controller.abort(new Error(reason));
     }

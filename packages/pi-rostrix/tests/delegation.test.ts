@@ -31,7 +31,7 @@ test("delegation preserves the parent authorization and execution context", asyn
         spawns.push(options);
         return {
           id: "spawned", agentId: "child", profileId: "child", task: options.task,
-          depth: options.depth ?? 0, targetFiles: options.targetFiles ?? [], status: "running",
+          depth: options.depth ?? 0, targetFiles: options.targetFiles ?? [], wakeOn: [...options.agent!.supervision.wakeOn], status: "running",
           revision: 1, createdAt: 0, lastActivityAt: 0, items: [],
         };
       };

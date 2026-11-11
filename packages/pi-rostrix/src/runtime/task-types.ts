@@ -1,3 +1,5 @@
+import type { SupervisionWakeTrigger } from "../core/schema.ts";
+
 export type TaskStatus = "pending" | "running" | "blocked" | "completed" | "failed" | "aborted";
 
 export type TaskUsage = {
@@ -31,6 +33,8 @@ export interface TaskRecord {
   readonly parentTaskId?: string | undefined;
   readonly depth: number;
   readonly targetFiles: readonly string[];
+  readonly wakeOn: readonly SupervisionWakeTrigger[];
+  cancellationCause?: "abort" | "stalled" | undefined;
   status: TaskStatus;
   revision: number;
   readonly createdAt: number;

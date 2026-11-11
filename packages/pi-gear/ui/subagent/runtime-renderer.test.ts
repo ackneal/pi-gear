@@ -15,7 +15,7 @@ for (const source of ["snapshot", "subscription"] as const) {
       t.after(clearSubagentRegistry);
       const record: TaskRecord = {
         id: "task-evidence", agentId: "researcher", profileId: "researcher", task: "Inspect",
-        depth: 0, targetFiles: [], status: "completed", revision: 5,
+        depth: 0, targetFiles: [], wakeOn: [], status: "completed", revision: 5,
         createdAt: 1000, startedAt: 1000, lastActivityAt: 3000, finishedAt: 3000,
         result: "Verified answer", itemsTruncated: true,
         items: [
