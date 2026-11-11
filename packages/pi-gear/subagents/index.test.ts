@@ -45,8 +45,12 @@ function harness(sessionManager?: SessionManager) {
       entries.push({ type: "custom", customType, data, id: `entry-${entries.length}`, parentId: null, timestamp: new Date().toISOString() });
     },
   } as unknown as ExtensionAPI;
+  let lastSpawnOptions: unknown;
   const tasks = {
-    spawn: () => record,
+    spawn: (options: unknown) => {
+      lastSpawnOptions = options;
+      return record;
+    },
     subscribe: (_id: string, listener: (task: TaskRecord) => void) => {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
@@ -67,8 +71,10 @@ function harness(sessionManager?: SessionManager) {
     tasks, resolveProfile: () => ({ id: "gear:worker" }),
     registerDelegationTools: (names: readonly string[]) => { delegationTools.push(...names); },
   } as unknown as RostrixRuntime;
+  const fakeModelRegistry = { getAvailable: () => [] };
   const ctx = {
     cwd: "/tmp",
+    modelRegistry: fakeModelRegistry,
     get sessionManager() {
       if (!contextValid) throw new Error("Extension context is invalid");
       return sessionManager ?? {
@@ -83,6 +89,7 @@ function harness(sessionManager?: SessionManager) {
 
   return {
     record, entries, listeners, tools, delegationTools, acknowledgments,
+    getLastSpawnOptions: () => lastSpawnOptions,
     emit: async (event: string) => {
       for (const handler of handlers.get(event) ?? []) await handler({}, ctx);
     },
@@ -402,6 +409,22 @@ test("observe acknowledges only delivered live terminal results", async (t) => {
       if (status === "persisted") assert.equal(details.result, "Saved answer");
       if (status === "error") assert.match((result.content[0] as { text: string }).text, /Unknown task/);
       assert.deepEqual(h.acknowledgments, ["completed", "failed", "aborted"].includes(status) ? [h.record.id] : []);
+    });
+  }
+});
+
+test("Gear subagent dispatch passes context modelRegistry to tasks.spawn", async (t) => {
+  for (const tool of ["researcher", "worker", "reviewer"] as const) {
+    await t.test(tool, async () => {
+      clearSubagentRegistry();
+      t.after(clearSubagentRegistry);
+      const h = harness();
+      const params = tool === "researcher" ? { question: "Why?" }
+        : tool === "worker" ? { task: "Do it" }
+        : { scope: "Changes" };
+      await h.execute(tool, params);
+      const options = h.getLastSpawnOptions() as { modelRegistry?: unknown };
+      assert.ok(options.modelRegistry);
     });
   }
 });

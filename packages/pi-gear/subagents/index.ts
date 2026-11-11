@@ -154,6 +154,7 @@ export function setupSubagents(
         cwd: ctx.cwd,
         model: dispatch.model,
         thinkingLevel: dispatch.thinkingLevel,
+        modelRegistry: ctx.modelRegistry,
         signal,
       });
 
@@ -190,6 +191,7 @@ export function setupSubagents(
         cwd: ctx.cwd,
         model: dispatch.model,
         thinkingLevel: dispatch.thinkingLevel,
+        modelRegistry: ctx.modelRegistry,
         signal,
       });
 
@@ -225,6 +227,7 @@ export function setupSubagents(
         cwd: ctx.cwd,
         model: dispatch.model,
         thinkingLevel: dispatch.thinkingLevel,
+        modelRegistry: ctx.modelRegistry,
         signal,
       });
 

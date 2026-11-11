@@ -1,6 +1,7 @@
 import type { TaskFilter, TaskRecord, TaskStatus, TaskUsage } from "./task-types.ts";
 import type { ResolvedAgent } from "../core/resolver.ts";
 import { InProcessSubagentRunner, type SubagentSessionOptions, type SubagentUsage } from "./session-runner.ts";
+import type { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { TaskEventRecorder } from "./task-events.ts";
 
 function taskUsage(usage: SubagentUsage): TaskUsage {
@@ -30,6 +31,8 @@ export interface SpawnTaskOptions {
   readonly cwd?: string | undefined;
   readonly model?: string | undefined;
   readonly thinkingLevel?: import("../core/schema.ts").ThinkingLevel | undefined;
+  readonly modelRegistry?: ModelRegistry | undefined;
+  readonly modelRuntime?: ModelRuntime | undefined;
   readonly signal?: AbortSignal | undefined;
   readonly extensionFactories?: SubagentSessionOptions["extensionFactories"];
 }
@@ -188,6 +191,7 @@ export class TaskRegistry {
       cwd: options.cwd,
       model: options.model,
       thinkingLevel: options.thinkingLevel,
+      modelRuntime: options.modelRuntime ?? (options.modelRegistry ? (options.modelRegistry as any).runtime : undefined),
       extensionFactories: options.extensionFactories,
       signal: controller.signal,
       onEvent: (event) => {

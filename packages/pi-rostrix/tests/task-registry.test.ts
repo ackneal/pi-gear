@@ -3,6 +3,10 @@ import test, { type TestContext } from "node:test";
 import { TaskRegistry } from "../src/runtime/task-registry.ts";
 import type { ResolvedProfile } from "../src/core/resolver.ts";
 import type { SubagentTaskResult } from "../src/runtime/session-runner.ts";
+import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
 
 function createMockProfile(id = "worker"): ResolvedProfile {
   return {
@@ -249,4 +253,42 @@ test("TaskRegistry wait resolves on revision update or settle", async (t) => {
   const waited = await registry.wait(task.id, { afterRevision: 1, timeoutSeconds: 2 });
   assert.equal(waited.status, "aborted");
   assert.ok(waited.revision > 1);
+});
+
+test("TaskRegistry forwards modelRuntime and extracts runtime from modelRegistry", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "rostrix-model-registry-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const modelRuntime = await ModelRuntime.create({ authPath: join(directory, "auth.json"), modelsPath: null, refreshOnCreate: false });
+  const modelRegistry = new ModelRegistry(modelRuntime);
+
+  for (const row of [
+    { name: "explicit modelRuntime", options: { modelRuntime }, expected: modelRuntime },
+    { name: "modelRegistry facade", options: { modelRegistry }, expected: modelRuntime },
+    { name: "neither supplied", options: {}, expected: undefined },
+  ] as const) {
+    await t.test(row.name, async () => {
+      let forwardedRuntime: ModelRuntime | undefined;
+      const registry = new TaskRegistry({
+        createRunner: (options) => {
+          forwardedRuntime = options.modelRuntime;
+          return {
+            run: async () => ({
+              status: "completed",
+              turns: 0,
+              durationMs: 0,
+              usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0 },
+            }),
+          };
+        },
+      });
+
+      registry.spawn({
+        profile: createMockProfile(),
+        task: "Verify runtime forwarding",
+        ...row.options,
+      });
+
+      assert.equal(forwardedRuntime, row.expected);
+    });
+  }
 });

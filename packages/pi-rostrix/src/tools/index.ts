@@ -80,6 +80,7 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
         cwd: taskCwd,
         depth,
         parentTaskId: parent?.task?.id,
+        modelRegistry: ctx.modelRegistry,
       });
 
       return {

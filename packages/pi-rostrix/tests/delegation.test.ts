@@ -94,8 +94,39 @@ test("delegation preserves the parent authorization and execution context", asyn
       assert.deepEqual(spawned.agent?.subagents.allowedAgents, row.allowed);
       assert.equal(spawned.depth, row.parentDepth === undefined ? 0 : row.parentDepth + 1);
       assert.equal(spawned.parentTaskId, row.parentDepth === undefined ? undefined : "parent-task");
+      assert.equal(spawned.modelRegistry, undefined);
     });
   }
+});
+
+test("delegate forwards tool context modelRegistry to tasks.spawn", async () => {
+  const registry = new AgentRegistry();
+  registry.register({ id: "child", label: "Child", description: "Child agent" });
+  const tools = new Map<string, ToolDefinition>();
+  const pi = {
+    registerTool: (tool: ToolDefinition) => { tools.set(tool.name, tool); },
+    getActiveTools: () => ["read", "delegate"],
+  } as unknown as ExtensionAPI;
+  const tasks = new TaskRegistry();
+  let receivedRegistry: unknown;
+  tasks.spawn = (options) => {
+    receivedRegistry = options.modelRegistry;
+    return {
+      id: "spawned", agentId: "child", profileId: "child", task: options.task,
+      depth: 0, targetFiles: [], wakeOn: [], status: "running",
+      revision: 1, createdAt: 0, lastActivityAt: 0, activities: [],
+    };
+  };
+  registerRostrixTools({ pi, taskRegistry: tasks, agentResolver: new AgentResolver(registry) });
+  const fakeModelRegistry = { getAvailable: () => [] };
+  await tools.get("delegate")!.execute(
+    "call",
+    { agent: "child", task: "Inspect" },
+    undefined,
+    undefined,
+    { cwd: "/session/project", modelRegistry: fakeModelRegistry } as unknown as ExtensionToolContext,
+  );
+  assert.equal(receivedRegistry, fakeModelRegistry);
 });
 
 test("task_status acknowledges individual terminal results but not listings", async (t) => {
