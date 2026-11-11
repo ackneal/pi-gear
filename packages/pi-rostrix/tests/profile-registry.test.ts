@@ -47,7 +47,6 @@ test("ProfileRegistry registers fully configured profile with all sections", () 
     model: {
       preferred: "anthropic/claude-sonnet-4-5",
       fallback: "anthropic/claude-haiku-3-5",
-      thinkingLevel: "high",
     },
     subagents: {
       allowedProfiles: ["gear:researcher", "gear:reviewer"],
@@ -87,13 +86,13 @@ test("ProfileRegistry rejects invalid definitions with ProfileValidationError", 
     registry.register({ id: "agent", label: "Agent" } as any);
   }, ProfileValidationError);
 
-  // Invalid thinking level
+  // Invalid preferred model
   assert.throws(() => {
     registry.register({
       id: "agent",
       label: "Agent",
       description: "Test",
-      model: { thinkingLevel: "ultra" as any },
+      model: { preferred: 42 as any },
     });
   }, ProfileValidationError);
 

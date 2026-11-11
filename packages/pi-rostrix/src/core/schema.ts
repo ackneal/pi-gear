@@ -59,7 +59,6 @@ export type AgentSkills = Static<typeof AgentSkillsSchema>;
 export const AgentModelSchema = Type.Object({
   preferred: Type.Optional(Type.String({ description: "Preferred model identifier (e.g. anthropic/claude-sonnet-4-5)" })),
   fallback: Type.Optional(Type.String({ description: "Fallback model identifier" })),
-  thinkingLevel: Type.Optional(ThinkingLevelSchema),
 });
 export type AgentModel = Static<typeof AgentModelSchema>;
 

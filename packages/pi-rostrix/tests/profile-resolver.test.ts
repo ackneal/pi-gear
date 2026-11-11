@@ -35,7 +35,6 @@ test("ProfileResolver resolves single profile without inheritance", () => {
     },
     model: {
       preferred: "anthropic/claude-sonnet-4-5",
-      thinkingLevel: "medium",
     },
   });
 
@@ -48,7 +47,6 @@ test("ProfileResolver resolves single profile without inheritance", () => {
   assert.deepEqual(resolved.allowedTools, ["read", "bash"]);
   assert.deepEqual(resolved.deniedTools, ["edit"]);
   assert.equal(resolved.model?.preferred, "anthropic/claude-sonnet-4-5");
-  assert.equal(resolved.model?.thinkingLevel, "medium");
 });
 
 test("ProfileResolver resolves multi-level inheritance chain with correct merging", () => {
@@ -69,7 +67,6 @@ test("ProfileResolver resolves multi-level inheritance chain with correct mergin
     model: {
       preferred: "anthropic/claude-haiku-3-5",
       fallback: "openai/gpt-4o-mini",
-      thinkingLevel: "low",
     },
     subagents: {
       allowedProfiles: ["researcher", "reviewer"],
@@ -99,7 +96,6 @@ test("ProfileResolver resolves multi-level inheritance chain with correct mergin
     },
     model: {
       preferred: "anthropic/claude-sonnet-4-5",
-      thinkingLevel: "high",
     },
     subagents: {
       maxDepth: 2,
@@ -125,10 +121,9 @@ test("ProfileResolver resolves multi-level inheritance chain with correct mergin
   assert.deepEqual(resolved.allowedTools, ["read", "edit", "write", "lsp_*"]);
   assert.deepEqual(resolved.deniedTools, ["bash_rm", "write_temp"]);
 
-  // Model: preferred overridden, fallback inherited, thinking level overridden
+  // Model: preferred overridden, fallback inherited
   assert.equal(resolved.model?.preferred, "anthropic/claude-sonnet-4-5");
   assert.equal(resolved.model?.fallback, "openai/gpt-4o-mini");
-  assert.equal(resolved.model?.thinkingLevel, "high");
 
   // Subagents: maxDepth min(3, 2) = 2, maxConcurrent = 4, allowedProfiles inherited
   assert.equal(resolved.subagents.maxDepth, 2);

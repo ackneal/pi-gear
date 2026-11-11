@@ -1,12 +1,6 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, McpServerConfig } from "@earendil-works/pi-coding-agent";
 import { isAgentToolAllowed, type ResolvedAgent } from "./resolver.ts";
-import type { ThinkingLevel } from "./schema.ts";
-
-export interface ActiveAgentSnapshot {
-  readonly agentId: string;
-  readonly thinkingLevel?: ThinkingLevel | undefined;
-  readonly registeredMcpServers: readonly string[];
-}
+import type { AgentMcpServer } from "./schema.ts";
 
 export class AgentActivationError extends Error {
   readonly rollbackSuccessful: boolean;
@@ -43,12 +37,7 @@ export class AgentActivator {
 
     this._pi.setActiveTools([...this._baselineTools!]);
 
-    for (const current of this._registeredMcpServers) {
-      if (typeof (this._pi as any).unregisterMcpServer === "function") {
-        (this._pi as any).unregisterMcpServer(current);
-      }
-    }
-    this._registeredMcpServers.clear();
+    this._applyMcpServers({});
 
     this._removeBeforeAgentStartHook?.();
     this._removeBeforeAgentStartHook = undefined;
@@ -57,35 +46,23 @@ export class AgentActivator {
   }
 
   async activate(agent: ResolvedAgent): Promise<void> {
-    const priorSnapshot = this._createSnapshot();
     const priorTools = [...this._pi.getActiveTools()];
 
     try {
       this._applyTools(agent);
-      this._applyMcpServers(agent);
-      this._applyThinkingLevel(agent);
-      this._installPromptHook(agent);
+      this._applyMcpServers(agent.mcpServers);
+      this._ensurePromptHook();
 
       this._baselineTools ??= priorTools;
       this._activeAgent = agent;
     } catch (error) {
-      const rollbackSuccess = await this._rollback(priorSnapshot, priorTools);
+      const rollbackSuccess = this._rollback(priorTools);
       throw new AgentActivationError(
         `Failed to activate agent '${agent.id}': ${error instanceof Error ? error.message : String(error)}`,
         rollbackSuccess,
         error,
       );
     }
-  }
-
-  private _createSnapshot(): ActiveAgentSnapshot | undefined {
-    if (!this._activeAgent) return undefined;
-
-    return {
-      agentId: this._activeAgent.id,
-      thinkingLevel: this._pi.getThinkingLevel ? this._pi.getThinkingLevel() : undefined,
-      registeredMcpServers: Object.freeze(Array.from(this._registeredMcpServers)),
-    };
   }
 
   private _applyTools(agent: ResolvedAgent): void {
@@ -97,46 +74,29 @@ export class AgentActivator {
     this._pi.setActiveTools(targetTools);
   }
 
-  private _applyMcpServers(agent: ResolvedAgent): void {
-    const desired = new Set(Object.keys(agent.mcpServers));
-
+  private _applyMcpServers(servers: Readonly<Record<string, AgentMcpServer>>): void {
     for (const current of this._registeredMcpServers) {
-      if (!desired.has(current)) {
-        if (typeof (this._pi as any).unregisterMcpServer === "function") {
-          (this._pi as any).unregisterMcpServer(current);
-        }
+      if (!Object.hasOwn(servers, current)) {
+        this._pi.unregisterMcpServer(current);
         this._registeredMcpServers.delete(current);
       }
     }
 
-    for (const [name, config] of Object.entries(agent.mcpServers)) {
-      if (typeof (this._pi as any).registerMcpServer === "function") {
-        (this._pi as any).registerMcpServer(name, config);
-        this._registeredMcpServers.add(name);
-      }
+    for (const [name, config] of Object.entries(servers)) {
+      // Track attempted registrations so rollback also cleans up partial SDK failures.
+      this._registeredMcpServers.add(name);
+      // The SDK validates transports and normalizes exposure aliases at this boundary.
+      this._pi.registerMcpServer(name, config as McpServerConfig);
     }
   }
 
-  private _applyThinkingLevel(agent: ResolvedAgent): void {
-    const level = agent.model?.thinkingLevel;
-    if (level && typeof this._pi.setThinkingLevel === "function") {
-      this._pi.setThinkingLevel(level);
-    }
-  }
+  private _ensurePromptHook(): void {
+    if (this._removeBeforeAgentStartHook) return;
 
-  private _installPromptHook(agent: ResolvedAgent): void {
-    this._removeBeforeAgentStartHook?.();
+    this._removeBeforeAgentStartHook = this._pi.on("before_agent_start", async (event) => {
+      const agent = this._activeAgent;
+      if (!agent) return;
 
-    if (
-      !agent.systemPrompt &&
-      !agent.appendPrompt &&
-      agent.promptGuidelines.length === 0
-    ) {
-      this._removeBeforeAgentStartHook = undefined;
-      return;
-    }
-
-    const unsubscribe = this._pi.on("before_agent_start", async (event) => {
       if (agent.promptGuidelines.length > 0 && event.systemPromptOptions?.promptGuidelines) {
         event.systemPromptOptions.promptGuidelines.push(...agent.promptGuidelines);
       }
@@ -153,38 +113,22 @@ export class AgentActivator {
         event.systemPromptOptions.customPrompt = agent.systemPrompt;
       }
     });
-
-    this._removeBeforeAgentStartHook = unsubscribe;
   }
 
-  private async _rollback(snapshot: ActiveAgentSnapshot | undefined, priorTools: string[]): Promise<boolean> {
+  private _rollback(priorTools: string[]): boolean {
+    let successful = true;
+    try {
+      this._applyMcpServers(this._activeAgent?.mcpServers ?? {});
+    } catch {
+      successful = false;
+    }
+
     try {
       this._pi.setActiveTools(priorTools);
-
-      if (!snapshot) {
-        this._activeAgent = undefined;
-        this._removeBeforeAgentStartHook?.();
-        this._removeBeforeAgentStartHook = undefined;
-        return true;
-      }
-
-      if (snapshot.thinkingLevel && typeof this._pi.setThinkingLevel === "function") {
-        this._pi.setThinkingLevel(snapshot.thinkingLevel);
-      }
-
-      for (const mcp of this._registeredMcpServers) {
-        if (!snapshot.registeredMcpServers.includes(mcp)) {
-          if (typeof (this._pi as any).unregisterMcpServer === "function") {
-            (this._pi as any).unregisterMcpServer(mcp);
-          }
-          this._registeredMcpServers.delete(mcp);
-        }
-      }
-
-      return true;
     } catch {
-      return false;
+      successful = false;
     }
+    return successful;
   }
 
   dispose(): void {
@@ -201,4 +145,3 @@ export const ProfileActivationError = AgentActivationError;
 export type ProfileActivationError = AgentActivationError;
 export const ProfileActivator = AgentActivator;
 export type ProfileActivator = AgentActivator;
-export type ActiveProfileSnapshot = ActiveAgentSnapshot;

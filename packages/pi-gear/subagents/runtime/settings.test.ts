@@ -52,6 +52,28 @@ test("runtime defaults override main settings and explicit inherit follows main"
   assert.equal(current.settings.summaries(ctx)[1]?.source, "runtime");
 });
 
+test("dynamic model and thinking settings remain independent for every Gear subagent", async (t) => {
+  for (const id of ["researcher", "worker", "reviewer"] as const) {
+    for (const mode of ["inherit", "override"] as const) {
+      await t.test(`${id}: ${mode}`, async () => {
+        const current = harness({ [id]: mode === "inherit" ? { mode } : {
+          mode, provider: "saved", model: "worker", thinkingLevel: "high",
+        } });
+        const before = current.context();
+        const after = current.context({ model: { provider: "changed", id: "next" }, thinkingLevel: "off" });
+        await current.handlers.session_start?.({}, before);
+
+        assert.deepEqual(current.settings.resolve(id, before), mode === "inherit"
+          ? { model: "main/current", thinkingLevel: "low" }
+          : { model: "saved/worker", thinkingLevel: "high" });
+        assert.deepEqual(current.settings.resolve(id, after), mode === "inherit"
+          ? { model: "changed/next", thinkingLevel: "off" }
+          : { model: "saved/worker", thinkingLevel: "high" });
+      });
+    }
+  }
+});
+
 test("saved models missing from the available registry remain configured but are reported unavailable", async () => {
   const current = harness({
     worker: { mode: "override", provider: "registered", model: "no-auth", thinkingLevel: "low" },

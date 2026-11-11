@@ -19,7 +19,6 @@ tools:
   allow: [read, grep]
 model:
   preferred: anthropic/claude-sonnet-4-5
-  thinkingLevel: high
 ---
 You are an expert analyst.
 Guidelines:
@@ -34,7 +33,7 @@ Guidelines:
             systemPrompt: "You are an expert analyst.\nGuidelines:\n- Analyze logs carefully.",
           },
           tools: { allow: ["read", "grep"] },
-          model: { preferred: "anthropic/claude-sonnet-4-5", thinkingLevel: "high" },
+          model: { preferred: "anthropic/claude-sonnet-4-5" },
         },
       },
       {

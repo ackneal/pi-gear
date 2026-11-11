@@ -212,6 +212,30 @@ test("runner resolves requested models with the session runtime", async (t) => {
   }
 });
 
+test("runner forwards only per-run thinking levels", async (t) => {
+  for (const thinkingLevel of [undefined, "off", "minimal", "low", "medium", "high", "xhigh", "max"] as const) {
+    await t.test(thinkingLevel ?? "omitted", async () => {
+      let created = false;
+      const runner = new InProcessSubagentRunner({
+        agent: agent(), ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
+      }, async (options) => {
+        created = true;
+        assert.equal(options.thinkingLevel, thinkingLevel);
+        assert.equal(Object.hasOwn(options, "thinkingLevel"), thinkingLevel !== undefined);
+        return { session: {
+          bindExtensions: async () => {}, subscribe: () => () => {}, prompt: async () => {},
+          abort: async () => {}, dispose: () => {}, extensionRunner: { emit: async () => {} },
+        } };
+      });
+
+      const result = await runner.run("Work");
+
+      assert.equal(result.status, "completed");
+      assert.equal(created, true);
+    });
+  }
+});
+
 test("pre-aborted runner does not create a session", async () => {
   const controller = new AbortController();
   controller.abort();

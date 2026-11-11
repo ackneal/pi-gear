@@ -120,7 +120,7 @@ export class InProcessSubagentRunner {
 
     let sessionResult;
     try {
-      const thinkingLevel = this._options.thinkingLevel ?? this._agent.model?.thinkingLevel;
+      const thinkingLevel = this._options.thinkingLevel;
       const modelStr = this._options.model ?? this._agent.model?.preferred;
 
       let resolvedModelInstance: ReturnType<ModelRuntime["getModel"]>;

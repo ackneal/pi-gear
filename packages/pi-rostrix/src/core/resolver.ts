@@ -2,7 +2,6 @@ import {
   type AgentDefinition,
   type AgentMcpServer,
   type SupervisionWakeTrigger,
-  type ThinkingLevel,
 } from "./schema.ts";
 import type { AgentRegistry } from "./registry.ts";
 
@@ -32,7 +31,6 @@ export interface ResolvedAgent {
   readonly model?: {
     readonly preferred?: string | undefined;
     readonly fallback?: string | undefined;
-    readonly thinkingLevel?: ThinkingLevel | undefined;
   } | undefined;
   readonly subagents: {
     readonly allowedAgents?: readonly string[] | undefined;
@@ -136,7 +134,6 @@ export class AgentResolver {
 
     let preferredModel: string | undefined;
     let fallbackModel: string | undefined;
-    let thinkingLevel: ThinkingLevel | undefined;
 
     let allowedAgents: string[] | undefined;
     let maxDepth: number | undefined;
@@ -190,9 +187,6 @@ export class AgentResolver {
       if (agent.model?.fallback !== undefined) {
         fallbackModel = agent.model.fallback;
       }
-      if (agent.model?.thinkingLevel !== undefined) {
-        thinkingLevel = agent.model.thinkingLevel;
-      }
 
       const rawAllowedAgents = agent.subagents?.allowedAgents ?? agent.subagents?.allowedProfiles;
       if (rawAllowedAgents !== undefined) {
@@ -230,11 +224,10 @@ export class AgentResolver {
       allowedSkills = allowedSkills.filter((s) => !deniedSkills.includes(s));
     }
 
-    const modelConfig = (preferredModel || fallbackModel || thinkingLevel)
+    const modelConfig = (preferredModel || fallbackModel)
       ? {
           ...(preferredModel !== undefined ? { preferred: preferredModel } : {}),
           ...(fallbackModel !== undefined ? { fallback: fallbackModel } : {}),
-          ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
         }
       : undefined;
 
