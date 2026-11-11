@@ -1,9 +1,22 @@
 import type { TaskFilter, TaskRecord, TaskStatus, TaskUsage } from "./task-types.ts";
 import type { ResolvedAgent } from "../core/resolver.ts";
-import { InProcessSubagentRunner, type SubagentSessionOptions } from "./session-runner.ts";
+import { InProcessSubagentRunner, type SubagentSessionOptions, type SubagentUsage } from "./session-runner.ts";
+import { TaskEventRecorder } from "./task-events.ts";
+
+function taskUsage(usage: SubagentUsage): TaskUsage {
+  return {
+    input: usage.inputTokens,
+    output: usage.outputTokens,
+    cacheRead: usage.cacheReadTokens,
+    cacheWrite: usage.cacheWriteTokens,
+    totalTokens: usage.totalTokens,
+    cost: { total: usage.cost },
+  };
+}
 
 export interface TaskRegistryOptions {
   readonly maxGlobalConcurrent?: number | undefined;
+  readonly createRunner?: (options: SubagentSessionOptions) => Pick<InProcessSubagentRunner, "run">;
 }
 
 export interface SpawnTaskOptions {
@@ -29,14 +42,17 @@ export function scopesOverlap(left: readonly string[], right: readonly string[])
 
 export class TaskRegistry {
   private readonly _tasks: Map<string, TaskRecord> = new Map();
-  private readonly _runners: Map<string, InProcessSubagentRunner> = new Map();
+  private readonly _runners: Map<string, Pick<InProcessSubagentRunner, "run">> = new Map();
   private readonly _runnerPromises: Map<string, Promise<void>> = new Map();
   private readonly _abortControllers: Map<string, AbortController> = new Map();
   private readonly _listeners: Map<string, Set<TaskListener>> = new Map();
   private readonly _maxGlobalConcurrent: number;
   private _nextId = 1;
 
+  private readonly options: TaskRegistryOptions | undefined;
+
   public constructor(options?: TaskRegistryOptions) {
+    this.options = options;
     this._maxGlobalConcurrent = options?.maxGlobalConcurrent ?? 4;
   }
 
@@ -158,18 +174,21 @@ export class TaskRegistry {
       timeoutTimer.unref();
     }
 
-    const runner = new InProcessSubagentRunner({
+    const recorder = new TaskEventRecorder(taskRecord);
+    const createRunner = this.options?.createRunner ?? ((options) => new InProcessSubagentRunner(options));
+    const runner = createRunner({
       agent,
       cwd: options.cwd,
       model: options.model,
       thinkingLevel: options.thinkingLevel,
       extensionFactories: options.extensionFactories,
       signal: controller.signal,
-      onEvent: () => {
+      onEvent: (event) => {
+        recorder.record(event);
         this._updateTask(taskId, {});
       },
-      onTextDelta: () => {
-        this._updateTask(taskId, {});
+      onUsage: (usage) => {
+        this._updateTask(taskId, { usage: taskUsage(usage) });
       },
     });
     this._runners.set(taskId, runner);
@@ -189,16 +208,7 @@ export class TaskRegistry {
           finishedAt: Date.now(),
           result: result.result,
           error: result.error,
-          usage: {
-            input: result.usage.inputTokens,
-            output: result.usage.outputTokens,
-            cacheRead: result.usage.cacheReadTokens,
-            cacheWrite: result.usage.cacheWriteTokens,
-            totalTokens: result.usage.totalTokens,
-            cost: {
-              total: result.usage.cost,
-            },
-          },
+          usage: taskUsage(result.usage),
         });
       } catch (err) {
         if (timeoutTimer) clearTimeout(timeoutTimer);
