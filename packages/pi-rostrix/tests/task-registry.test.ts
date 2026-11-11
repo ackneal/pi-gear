@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { TaskRegistry } from "../src/runtime/task-registry.ts";
 import type { ResolvedProfile } from "../src/core/resolver.ts";
+import type { SubagentTaskResult } from "../src/runtime/session-runner.ts";
 
 function createMockProfile(id = "worker"): ResolvedProfile {
   return {
@@ -17,6 +18,47 @@ function createMockProfile(id = "worker"): ResolvedProfile {
     supervision: Object.freeze({ wakeOn: Object.freeze(new Set<"completed" | "failed" | "needs_input" | "stalled">()) }),
   };
 }
+
+test("TaskRegistry shutdown cancels all tasks and waits for runner cleanup", async (t) => {
+  for (const count of [0, 1, 2]) {
+    await t.test(`${count} active tasks`, async () => {
+      const aborted: AbortSignal[] = [];
+      const cleanups: Array<() => void> = [];
+      const registry = new TaskRegistry({
+        createRunner: ({ signal }) => ({
+          run: async () => new Promise<SubagentTaskResult>((resolve) => {
+            assert.ok(signal);
+            signal.addEventListener("abort", () => {
+              aborted.push(signal);
+              cleanups.push(() => resolve({
+                status: "aborted",
+                usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0 },
+                turns: 0,
+                durationMs: 0,
+              }));
+            }, { once: true });
+          }),
+        }),
+      });
+      const tasks = Array.from({ length: count }, () => registry.spawn({ profile: createMockProfile(), task: "Wait" }));
+      let settled = false;
+
+      const shutdown = registry.shutdown();
+      void shutdown.then(() => { settled = true; });
+      assert.strictEqual(registry.shutdown(), shutdown);
+      assert.throws(() => registry.spawn({ profile: createMockProfile(), task: "Too late" }), /shut down/);
+      await Promise.resolve();
+      assert.equal(aborted.length, count);
+      if (count > 0) assert.equal(settled, false);
+      for (const cleanup of cleanups) cleanup();
+      await shutdown;
+
+      assert.equal(settled, true);
+      assert.ok(tasks.every((task) => task.status === "aborted"));
+      assert.equal(registry.getRunningCount(), 0);
+    });
+  }
+});
 
 test("TaskRegistry spawns task and tracks status", () => {
   const registry = new TaskRegistry();

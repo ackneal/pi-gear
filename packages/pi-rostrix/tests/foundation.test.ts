@@ -3,11 +3,11 @@ import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { initRostrix, ROSTRIX_RUNTIME_SYMBOL, ProfileValidationError } from "../src/index.ts";
 
-function createMockPi(): { pi: ExtensionAPI; shutdown: () => void } {
-  const listeners = new Map<string, Array<() => void>>();
+function createMockPi(): { pi: ExtensionAPI; shutdown: () => Promise<void> } {
+  const listeners = new Map<string, Array<() => void | Promise<void>>>();
   const tools: any[] = [];
   const pi = {
-    on: (event: string, handler: () => void) => {
+    on: (event: string, handler: () => void | Promise<void>) => {
       const list = listeners.get(event) ?? [];
       list.push(handler);
       listeners.set(event, list);
@@ -19,15 +19,40 @@ function createMockPi(): { pi: ExtensionAPI; shutdown: () => void } {
 
   return {
     pi,
-    shutdown: () => {
+    shutdown: async () => {
       for (const handler of listeners.get("session_shutdown") ?? []) {
-        handler();
+        await handler();
       }
     },
   };
 }
 
-test("initRostrix creates a singleton runtime and attaches to globalThis", () => {
+test("session shutdown awaits task cleanup before disposing runtime state", async () => {
+  const { pi, shutdown } = createMockPi();
+  const runtime = initRostrix(pi, { autoLoadAgents: false, autoRegisterInteractive: false });
+  let release!: () => void;
+  const cleanup = new Promise<void>((resolve) => { release = resolve; });
+  const originalShutdown = runtime.tasks.shutdown.bind(runtime.tasks);
+  runtime.tasks.shutdown = async () => {
+    await originalShutdown();
+    await cleanup;
+  };
+
+  try {
+    const pending = shutdown();
+    await Promise.resolve();
+    assert.equal(runtime.isInitialized, true);
+    release();
+    await pending;
+    assert.equal(runtime.isInitialized, false);
+    assert.equal((globalThis as any)[ROSTRIX_RUNTIME_SYMBOL], undefined);
+  } finally {
+    release();
+    await runtime.dispose();
+  }
+});
+
+test("initRostrix creates a singleton runtime and attaches to globalThis", async () => {
   const { pi, shutdown } = createMockPi();
   try {
     const runtime1 = initRostrix(pi);
@@ -54,7 +79,7 @@ test("initRostrix creates a singleton runtime and attaches to globalThis", () =>
       runtime1.registerProfile({} as any);
     }, ProfileValidationError);
   } finally {
-    shutdown();
+    await shutdown();
     assert.equal((globalThis as any)[ROSTRIX_RUNTIME_SYMBOL], undefined);
   }
 });

@@ -218,6 +218,61 @@ test("ProfileActivator rolls back previous state on activation failure", async (
   assert.strictEqual(activator.activeProfile, initialProfile);
 });
 
+for (const row of [
+  { name: "inactive tools stay inactive", initial: ["bash", "read"], switches: 1, fail: false },
+  { name: "empty baseline survives switching", initial: [], switches: 2, fail: false },
+  { name: "original baseline survives switching", initial: ["bash"], switches: 2, fail: false },
+  { name: "first activation failure restores tools", initial: ["bash"], switches: 0, fail: true },
+  { name: "failed switch preserves original baseline", initial: ["bash"], switches: 1, fail: true },
+]) {
+  test(`ProfileActivator restores baseline: ${row.name}`, async () => {
+    const { pi, state } = createMockPi({ activeTools: [...row.initial] });
+    const activator = new ProfileActivator(pi);
+    const profile = createTestProfile({
+      id: "tools", label: "Tools", description: "Tool policy",
+      allowedTools: ["edit"],
+    });
+
+    try {
+      for (let i = 0; i < row.switches; i++) {
+        await activator.activate({ ...profile, id: `tools-${i}`, allowedTools: i ? ["write"] : ["edit"] });
+        assert.deepEqual(state.activeTools, i ? ["write"] : ["edit"]);
+      }
+
+      if (row.fail) {
+        const priorTools = [...state.activeTools];
+        const setThinkingLevel = pi.setThinkingLevel;
+        pi.setThinkingLevel = () => {
+          pi.setThinkingLevel = setThinkingLevel;
+          throw new Error("thinking failed");
+        };
+        await assert.rejects(
+          activator.activate({ ...profile, model: { thinkingLevel: "high" } }),
+          (error: unknown) => {
+            assert.ok(error instanceof ProfileActivationError);
+            assert.match(error.message, /thinking failed/);
+            assert.equal(error.rollbackSuccessful, true);
+            return true;
+          },
+        );
+        assert.deepEqual(state.activeTools, priorTools);
+      }
+
+      activator.deactivate();
+      assert.deepEqual(state.activeTools, row.initial);
+      assert.equal(activator.activeAgent, undefined);
+
+      // A new activation interval owns a fresh baseline.
+      state.activeTools = ["write"];
+      await activator.activate(profile);
+      activator.deactivate();
+      assert.deepEqual(state.activeTools, ["write"]);
+    } finally {
+      activator.dispose();
+    }
+  });
+}
+
 test("RostrixRuntime activates registered profiles end-to-end", async () => {
   const { pi, state } = createMockPi();
   const runtime = initRostrix(pi);
@@ -238,6 +293,6 @@ test("RostrixRuntime activates registered profiles end-to-end", async () => {
     assert.deepEqual(state.activeTools, ["read", "edit"]);
     assert.equal(state.thinkingLevel, "high");
   } finally {
-    runtime.dispose();
+    await runtime.dispose();
   }
 });

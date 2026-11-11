@@ -3,6 +3,7 @@ import test from "node:test";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ModelRuntime, getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { AgentSession, AgentSessionEvent, SessionShutdownEvent, ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import { InProcessSubagentRunner, type SubagentUsage } from "../src/runtime/session-runner.ts";
 import { agent, assistant } from "./runtime-fixtures.ts";
@@ -166,6 +167,48 @@ test("runner isolates discovered resources but retains explicit factories", asyn
     assert.match(result.error!, /Verified isolated loader/);
   } finally {
     await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("runner resolves requested models with the session runtime", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "rostrix-models-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const runtime = await ModelRuntime.create({ authPath: join(directory, "auth.json"), modelsPath: null, refreshOnCreate: false });
+  const model = runtime.getModels()[0]!;
+  assert.ok(model);
+  for (const row of [
+    { name: "no injected runtime", injected: false, requested: `${model.provider}/${model.id}`, valid: true },
+    { name: "injected runtime", injected: true, requested: `${model.provider}/${model.id}`, valid: true },
+    { name: "unknown model without runtime", injected: false, requested: "missing-provider/missing-model", valid: false },
+    { name: "unknown model with runtime", injected: true, requested: "missing-provider/missing-model", valid: false },
+    { name: "malformed model", injected: false, requested: "missing-provider", valid: false },
+    { name: "empty model", injected: true, requested: "", valid: false },
+  ]) {
+    await t.test(row.name, async (t) => {
+      const createRuntime = t.mock.method(ModelRuntime, "create", async (options: Parameters<typeof ModelRuntime.create>[0]) => {
+        assert.deepEqual(options, { authPath: join(getAgentDir(), "auth.json"), modelsPath: join(getAgentDir(), "models.json") });
+        return runtime;
+      });
+      let created = false;
+      const runner = new InProcessSubagentRunner({
+        agent: agent(), model: row.requested, ...(row.injected ? { modelRuntime: runtime } : {}),
+      }, async (options) => {
+        created = true;
+        assert.equal(options.modelRuntime, runtime);
+        assert.equal(options.model, model);
+        return { session: {
+          bindExtensions: async () => {}, subscribe: () => () => {}, prompt: async () => {},
+          abort: async () => {}, dispose: () => {}, extensionRunner: { emit: async () => {} },
+        } };
+      });
+
+      const result = await runner.run("Work");
+
+      assert.equal(result.status, row.valid ? "completed" : "failed");
+      assert.equal(created, row.valid);
+      if (!row.valid) assert.match(result.error!, /(?:Invalid|Unknown) requested model:/);
+      assert.equal(createRuntime.mock.callCount(), !row.injected && row.requested.includes("/") ? 1 : 0);
+    });
   }
 });
 

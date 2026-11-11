@@ -48,6 +48,7 @@ export class TaskRegistry {
   private readonly _listeners: Map<string, Set<TaskListener>> = new Map();
   private readonly _maxGlobalConcurrent: number;
   private _nextId = 1;
+  private _shutdownPromise?: Promise<void>;
 
   private readonly options: TaskRegistryOptions | undefined;
 
@@ -93,6 +94,10 @@ export class TaskRegistry {
   }
 
   public spawn(options: SpawnTaskOptions): TaskRecord {
+    if (this._shutdownPromise) {
+      throw new Error("Task registry is shut down");
+    }
+
     const agent = options.agent ?? options.profile;
     if (!agent) {
       throw new Error("spawn requires an agent or profile option");
@@ -227,6 +232,18 @@ export class TaskRegistry {
     this._runnerPromises.set(taskId, runPromise);
 
     return taskRecord;
+  }
+
+  public shutdown(): Promise<void> {
+    if (!this._shutdownPromise) {
+      // Defer cancellation so admission closes before abort listeners run.
+      this._shutdownPromise = Promise.resolve().then(async () => {
+        await Promise.all(
+          Array.from(this._abortControllers.keys(), (id) => this.cancel(id, "Session shut down")),
+        );
+      });
+    }
+    return this._shutdownPromise;
   }
 
   public async cancel(taskId: string, reason = "Cancelled by user or supervisor"): Promise<boolean> {

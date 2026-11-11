@@ -4,7 +4,6 @@ import type { ThinkingLevel } from "./schema.ts";
 
 export interface ActiveAgentSnapshot {
   readonly agentId: string;
-  readonly activeTools: readonly string[];
   readonly thinkingLevel?: ThinkingLevel | undefined;
   readonly registeredMcpServers: readonly string[];
 }
@@ -22,6 +21,7 @@ export class AgentActivationError extends Error {
 export class AgentActivator {
   private readonly _pi: ExtensionAPI;
   private _activeAgent?: ResolvedAgent | undefined;
+  private _baselineTools?: string[] | undefined;
   private _registeredMcpServers = new Set<string>();
   private _removeBeforeAgentStartHook?: (() => void) | undefined;
 
@@ -41,8 +41,7 @@ export class AgentActivator {
   deactivate(): void {
     if (!this._activeAgent) return;
 
-    const allTools = this._pi.getAllTools().map((t) => t.name);
-    this._pi.setActiveTools(allTools);
+    this._pi.setActiveTools([...this._baselineTools!]);
 
     for (const current of this._registeredMcpServers) {
       if (typeof (this._pi as any).unregisterMcpServer === "function") {
@@ -54,10 +53,12 @@ export class AgentActivator {
     this._removeBeforeAgentStartHook?.();
     this._removeBeforeAgentStartHook = undefined;
     this._activeAgent = undefined;
+    this._baselineTools = undefined;
   }
 
   async activate(agent: ResolvedAgent): Promise<void> {
     const priorSnapshot = this._createSnapshot();
+    const priorTools = [...this._pi.getActiveTools()];
 
     try {
       this._applyTools(agent);
@@ -65,9 +66,10 @@ export class AgentActivator {
       this._applyThinkingLevel(agent);
       this._installPromptHook(agent);
 
+      this._baselineTools ??= priorTools;
       this._activeAgent = agent;
     } catch (error) {
-      const rollbackSuccess = await this._rollback(priorSnapshot);
+      const rollbackSuccess = await this._rollback(priorSnapshot, priorTools);
       throw new AgentActivationError(
         `Failed to activate agent '${agent.id}': ${error instanceof Error ? error.message : String(error)}`,
         rollbackSuccess,
@@ -81,7 +83,6 @@ export class AgentActivator {
 
     return {
       agentId: this._activeAgent.id,
-      activeTools: Object.freeze([...this._pi.getActiveTools()]),
       thinkingLevel: this._pi.getThinkingLevel ? this._pi.getThinkingLevel() : undefined,
       registeredMcpServers: Object.freeze(Array.from(this._registeredMcpServers)),
     };
@@ -156,16 +157,17 @@ export class AgentActivator {
     this._removeBeforeAgentStartHook = unsubscribe;
   }
 
-  private async _rollback(snapshot: ActiveAgentSnapshot | undefined): Promise<boolean> {
-    if (!snapshot) {
-      this._activeAgent = undefined;
-      this._removeBeforeAgentStartHook?.();
-      this._removeBeforeAgentStartHook = undefined;
-      return true;
-    }
-
+  private async _rollback(snapshot: ActiveAgentSnapshot | undefined, priorTools: string[]): Promise<boolean> {
     try {
-      this._pi.setActiveTools([...snapshot.activeTools]);
+      this._pi.setActiveTools(priorTools);
+
+      if (!snapshot) {
+        this._activeAgent = undefined;
+        this._removeBeforeAgentStartHook?.();
+        this._removeBeforeAgentStartHook = undefined;
+        return true;
+      }
+
       if (snapshot.thinkingLevel && typeof this._pi.setThinkingLevel === "function") {
         this._pi.setThinkingLevel(snapshot.thinkingLevel);
       }
@@ -190,6 +192,7 @@ export class AgentActivator {
     this._removeBeforeAgentStartHook = undefined;
     this._activeAgent = undefined;
     this._registeredMcpServers.clear();
+    this._baselineTools = undefined;
   }
 }
 

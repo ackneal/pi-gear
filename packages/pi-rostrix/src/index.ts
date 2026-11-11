@@ -67,18 +67,20 @@ export interface RostrixRuntime {
   getActiveProfile(): ResolvedAgent | undefined; // alias
   loadDiscoveredAgents(options?: DiscoverAgentsOptions): Promise<AgentDiscoveryResult>;
   loadDiscoveredProfiles(options?: DiscoverAgentsOptions): Promise<AgentDiscoveryResult>; // alias
-  dispose(): void;
+  dispose(): Promise<void>;
 }
 
 class InProcessRostrixRuntime implements RostrixRuntime {
   readonly version = "0.1.0";
   private _initialized = false;
+  private _disposePromise?: Promise<void>;
   private readonly _agents = new AgentRegistry();
   private readonly _resolver = new AgentResolver(this._agents);
   private readonly _activator: AgentActivator;
   private readonly _tasks: TaskRegistry;
   private readonly _supervisor: TaskSupervisor;
   private readonly _pi: ExtensionAPI;
+  private readonly _unsubscribeTasks: () => void;
   private _discoveredAgents: DiscoveredAgent[] = [];
 
   constructor(pi: ExtensionAPI, options: RostrixOptions = {}) {
@@ -88,7 +90,7 @@ class InProcessRostrixRuntime implements RostrixRuntime {
     this._supervisor = new TaskSupervisor(this._tasks, pi);
     this._initialized = true;
 
-    this._tasks.subscribe("*", (task) => {
+    this._unsubscribeTasks = this._tasks.subscribe("*", (task) => {
       if (task.status === "completed" || task.status === "failed" || task.status === "aborted") {
         this._supervisor.notifyTaskSettled(task);
       }
@@ -118,9 +120,7 @@ class InProcessRostrixRuntime implements RostrixRuntime {
       this.loadDiscoveredAgents().catch(() => {});
     }
 
-    pi.on("session_shutdown", () => {
-      this.dispose();
-    });
+    pi.on("session_shutdown", () => this.dispose());
   }
 
   get isInitialized(): boolean {
@@ -231,13 +231,19 @@ class InProcessRostrixRuntime implements RostrixRuntime {
     return this.loadDiscoveredAgents(options);
   }
 
-  dispose(): void {
-    this._supervisor.dispose();
-    this._activator.dispose();
-    this._agents.clear();
-    this._discoveredAgents = [];
-    this._initialized = false;
-    delete (globalThis as any)[ROSTRIX_RUNTIME_SYMBOL];
+  dispose(): Promise<void> {
+    if (!this._disposePromise) {
+      this._unsubscribeTasks();
+      this._supervisor.dispose();
+      this._disposePromise = this._tasks.shutdown().finally(() => {
+        this._activator.dispose();
+        this._agents.clear();
+        this._discoveredAgents = [];
+        this._initialized = false;
+        delete (globalThis as any)[ROSTRIX_RUNTIME_SYMBOL];
+      });
+    }
+    return this._disposePromise;
   }
 }
 

@@ -77,7 +77,7 @@ function createMockExtensionApi() {
 }
 
 describe("Interactive Profile Cycling & Commands", () => {
-  test("registers rostrix:agents command by default, supports custom commandName, and registers shortcut only when configured", () => {
+  test("registers rostrix:agents command by default, supports custom commandName, and registers shortcut only when configured", async () => {
     const { pi, registeredShortcuts, registeredCommands } = createMockExtensionApi();
     const runtime = initRostrix(pi, {
       autoRegisterTools: false,
@@ -105,7 +105,7 @@ describe("Interactive Profile Cycling & Commands", () => {
     setupInteractiveProfiles({ pi, runtime, shortcut: "alt+a" });
     assert.ok(registeredShortcuts.has("alt+a"), "Explicit shortcut must be registered");
 
-    runtime.dispose();
+    await runtime.dispose();
   });
 
   test("rostrix:agents command with no arguments opens interactive picker and updates rostrix:agent status", async () => {
@@ -185,7 +185,7 @@ describe("Interactive Profile Cycling & Commands", () => {
     assert.ok(notifications.some((n) => n.message.includes("default (unrestricted)")));
     assert.deepEqual(pi.getActiveTools().sort(), ["bash", "edit", "read", "write"].sort());
 
-    runtime.dispose();
+    await runtime.dispose();
   });
 
   test("rostrix:agents notifies when no directory agents are found", async () => {
@@ -205,7 +205,7 @@ describe("Interactive Profile Cycling & Commands", () => {
     assert.ok(notifications.some((n) => n.message.includes("No agents found") && n.type === "warning"));
     assert.equal(runtime.getActiveAgent(), undefined);
 
-    runtime.dispose();
+    await runtime.dispose();
   });
 
   test("rostrix:agents command allows direct switching by ID and resetting via default", async () => {
@@ -242,6 +242,6 @@ describe("Interactive Profile Cycling & Commands", () => {
     assert.equal(runtime.getActiveProfile(), undefined);
     assert.equal(statuses.get("rostrix:agent"), "");
 
-    runtime.dispose();
+    await runtime.dispose();
   });
 });

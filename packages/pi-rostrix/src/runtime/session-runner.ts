@@ -1,3 +1,4 @@
+import { join, resolve } from "node:path";
 import {
   createAgentSession,
   createCodemodeExtension,
@@ -10,7 +11,7 @@ import {
   type AgentSessionEvent,
   type ExtensionAPI,
   type ExtensionFactory,
-  type ModelRuntime,
+  ModelRuntime,
   type SessionShutdownEvent,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
@@ -110,25 +111,34 @@ export class InProcessSubagentRunner {
     let latestAssistantText = "";
 
     const cwd = this._options.cwd ?? (this._options.parentSession ? (this._options.parentSession as any)._cwd : process.cwd());
-    const agentDir = (this._options.parentSession as any)?._agentDir ?? getAgentDir();
+    const agentDir = resolve((this._options.parentSession as any)?._agentDir ?? getAgentDir());
 
     // Use in-memory session manager so no session JSONL files pollute the disk
     const inMemorySessionManager = SessionManager.inMemory();
 
-    const modelRuntime = this._options.modelRuntime ?? (this._options.parentSession ? this._options.parentSession.modelRuntime : undefined);
+    let modelRuntime = this._options.modelRuntime ?? this._options.parentSession?.modelRuntime;
 
     let sessionResult;
     try {
       const thinkingLevel = this._options.thinkingLevel ?? this._agent.model?.thinkingLevel;
       const modelStr = this._options.model ?? this._agent.model?.preferred;
 
-      let resolvedModelInstance: any = undefined;
-      if (modelStr && modelRuntime) {
+      let resolvedModelInstance: ReturnType<ModelRuntime["getModel"]>;
+      if (modelStr !== undefined) {
         const slashIdx = modelStr.indexOf("/");
-        if (slashIdx > 0) {
-          const providerId = modelStr.slice(0, slashIdx);
-          const modelId = modelStr.slice(slashIdx + 1);
-          resolvedModelInstance = modelRuntime.getModel(providerId, modelId) ?? modelRuntime.getPhysicalModel(providerId, modelId);
+        if (slashIdx <= 0 || slashIdx === modelStr.length - 1) {
+          throw new Error(`Invalid requested model: ${modelStr}; expected provider/model`);
+        }
+
+        modelRuntime ??= await ModelRuntime.create({
+          authPath: join(agentDir, "auth.json"),
+          modelsPath: join(agentDir, "models.json"),
+        });
+        const providerId = modelStr.slice(0, slashIdx);
+        const modelId = modelStr.slice(slashIdx + 1);
+        resolvedModelInstance = modelRuntime.getModel(providerId, modelId) ?? modelRuntime.getPhysicalModel(providerId, modelId);
+        if (!resolvedModelInstance) {
+          throw new Error(`Unknown requested model: ${modelStr}`);
         }
       }
 
