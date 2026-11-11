@@ -10,6 +10,8 @@ export class WakeUpManager {
   private readonly _pi?: ExtensionAPI | undefined;
   private readonly _inbox: ParentInbox;
   private _isParentIdle = true;
+  private _disposed = false;
+  private readonly _subscriptions: Array<() => void> = [];
   private readonly _queuedMessages: string[] = [];
 
   public constructor(inbox: ParentInbox, pi?: ExtensionAPI) {
@@ -18,22 +20,23 @@ export class WakeUpManager {
 
     if (pi) {
       // Listen to agent loop states
-      pi.on("agent_start" as any, () => {
+      this._subscriptions.push(pi.on("agent_start", () => {
         this._isParentIdle = false;
-      });
+      }));
 
-      pi.on("agent_settle" as any, () => {
+      this._subscriptions.push(pi.on("agent_settled", () => {
         this._isParentIdle = true;
         this._flushQueued();
-      });
+      }));
 
-      pi.on("session_shutdown" as any, () => {
+      this._subscriptions.push(pi.on("session_shutdown", () => {
         this.dispose();
-      });
+      }));
     }
   }
 
   public setParentIdle(idle: boolean): void {
+    if (this._disposed) return;
     this._isParentIdle = idle;
     if (idle) {
       this._flushQueued();
@@ -41,6 +44,7 @@ export class WakeUpManager {
   }
 
   public async deliverOrQueue(message: string): Promise<void> {
+    if (this._disposed) return;
     if (this._isParentIdle) {
       await this._wakeParent(message);
     } else {
@@ -49,12 +53,12 @@ export class WakeUpManager {
   }
 
   private async _wakeParent(message: string): Promise<void> {
-    if (this._pi && typeof (this._pi as any).sendUserMessage === "function") {
+    if (!this._disposed && this._pi) {
       try {
-        await (this._pi as any).sendUserMessage(message);
+        await this._pi.sendUserMessage(message);
       } catch {
         // Fallback: queue if send fails
-        this._queuedMessages.push(message);
+        if (!this._disposed) this._queuedMessages.push(message);
       }
     }
   }
@@ -67,6 +71,9 @@ export class WakeUpManager {
   }
 
   public dispose(): void {
+    this._disposed = true;
+    for (const unsubscribe of this._subscriptions) unsubscribe();
+    this._subscriptions.length = 0;
     this._queuedMessages.length = 0;
     this._inbox.clear();
   }

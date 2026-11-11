@@ -11,6 +11,10 @@ function createMockPi(): { pi: ExtensionAPI; shutdown: () => Promise<void> } {
       const list = listeners.get(event) ?? [];
       list.push(handler);
       listeners.set(event, list);
+      return () => {
+        const index = list.indexOf(handler);
+        if (index >= 0) list.splice(index, 1);
+      };
     },
     registerTool: (tool: any) => {
       tools.push(tool);
@@ -20,7 +24,7 @@ function createMockPi(): { pi: ExtensionAPI; shutdown: () => Promise<void> } {
   return {
     pi,
     shutdown: async () => {
-      for (const handler of listeners.get("session_shutdown") ?? []) {
+      for (const handler of [...(listeners.get("session_shutdown") ?? [])]) {
         await handler();
       }
     },

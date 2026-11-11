@@ -17,7 +17,7 @@ export class TaskSupervisor {
   private readonly _checkIntervalMs: number;
   private readonly _defaultStallTimeoutMs: number;
   private _intervalTimer?: NodeJS.Timeout | undefined;
-  private readonly _activeSubscriptions: Array<() => void> = [];
+  private _disposed = false;
 
   public constructor(taskRegistry: TaskRegistry, pi?: ExtensionAPI, options?: TaskSupervisorOptions) {
     this._taskRegistry = taskRegistry;
@@ -44,6 +44,7 @@ export class TaskSupervisor {
   }
 
   public notifyTaskSettled(task: TaskRecord): void {
+    if (this._disposed) return;
     const durationMs = task.startedAt ? (task.finishedAt ?? Date.now()) - task.startedAt : undefined;
 
     this._inbox.enqueue({
@@ -75,20 +76,16 @@ export class TaskSupervisor {
       const inactiveDuration = now - task.lastActivityAt;
       if (inactiveDuration > this._defaultStallTimeoutMs) {
         void this._taskRegistry.cancel(task.id, `Task stalled: no activity for ${Math.round(inactiveDuration / 1000)}s`);
-        this.notifyTaskSettled(task);
       }
     }
   }
 
   public dispose(): void {
+    this._disposed = true;
     if (this._intervalTimer) {
       clearInterval(this._intervalTimer);
       this._intervalTimer = undefined;
     }
-    for (const unsub of this._activeSubscriptions) {
-      unsub();
-    }
-    this._activeSubscriptions.length = 0;
     this._wakeUpManager.dispose();
   }
 }

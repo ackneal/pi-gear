@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { TaskSupervisor } from "../src/supervision/supervisor.ts";
+import { TaskRegistry } from "../src/runtime/task-registry.ts";
+import type { SubagentTaskResult } from "../src/runtime/session-runner.ts";
 import { ParentInbox } from "../src/supervision/inbox.ts";
 import { WakeUpManager } from "../src/supervision/wake-up.ts";
 
@@ -40,33 +44,97 @@ test("ParentInbox coalesces multiple notifications within debounce window", asyn
   assert.ok(first.includes("Review passed"));
 });
 
-test("WakeUpManager wakes parent when idle and queues when busy", async () => {
+function sdkFixture() {
   const messages: string[] = [];
-  const mockPi: any = {
-    on: () => {},
-    sendUserMessage: async (msg: string) => {
-      messages.push(msg);
+  const handlers = new Map<string, () => void>();
+  const api = {
+    on: (event: string, handler: () => void) => {
+      handlers.set(event, handler);
+      return () => { handlers.delete(event); };
     },
+    sendUserMessage: (message: string) => { messages.push(message); },
   };
+  // Only the SDK surface used by supervision is supplied by this fixture.
+  return { messages, handlers, pi: api as unknown as ExtensionAPI };
+}
 
-  const inbox = new ParentInbox({ debounceMs: 10 });
-  const wakeUp = new WakeUpManager(inbox, mockPi);
+test("WakeUpManager uses SDK lifecycle hooks and removes them on disposal", async (t) => {
+  for (const end of ["agent_settled", "dispose", "session_shutdown"] as const) {
+    await t.test(end, async () => {
+      const { pi, messages, handlers } = sdkFixture();
+      const manager = new WakeUpManager(new ParentInbox(), pi);
+      try {
+        assert.deepEqual([...handlers.keys()], ["agent_start", "agent_settled", "session_shutdown"]);
+        await manager.deliverOrQueue("idle");
+        handlers.get("agent_start")!();
+        await manager.deliverOrQueue("queued one");
+        await manager.deliverOrQueue("queued two");
+        assert.deepEqual(messages, ["idle"]);
 
-  // When idle, delivers immediately
-  wakeUp.setParentIdle(true);
-  await wakeUp.deliverOrQueue("Wake up 1");
-  assert.deepEqual(messages, ["Wake up 1"]);
+        if (end === "dispose") manager.dispose();
+        else handlers.get(end)!();
 
-  // When busy, queues message
-  wakeUp.setParentIdle(false);
-  await wakeUp.deliverOrQueue("Queued message 1");
-  await wakeUp.deliverOrQueue("Queued message 2");
-  assert.equal(messages.length, 1);
+        if (end === "agent_settled") {
+          assert.deepEqual(messages, ["idle", "queued one\n\nqueued two"]);
+        } else {
+          manager.setParentIdle(true);
+          await manager.deliverOrQueue("after disposal");
+          assert.deepEqual(messages, ["idle"]);
+          assert.equal(handlers.size, 0);
+        }
+      } finally {
+        manager.dispose();
+      }
+      assert.equal(handlers.size, 0);
+    });
+  }
+});
 
-  // Setting parent idle flushes the queued messages
-  wakeUp.setParentIdle(true);
-  assert.equal(messages.length, 2);
-  const second = messages[1]!;
-  assert.ok(second.includes("Queued message 1"));
-  assert.ok(second.includes("Queued message 2"));
+test("stall cancellation leaves notification ownership to the terminal subscription", async (t) => {
+  for (const disposeBeforeCleanup of [false, true]) {
+    await t.test(`dispose before cleanup: ${disposeBeforeCleanup}`, async () => {
+      let cleanup: (() => void) | undefined;
+      let aborted = false;
+      const registry = new TaskRegistry({
+        createRunner: ({ signal }) => ({
+          run: async () => new Promise<SubagentTaskResult>((resolve) => {
+            signal!.addEventListener("abort", () => {
+              aborted = true;
+              cleanup = () => resolve({ status: "aborted", turns: 0, durationMs: 0,
+                usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0 } });
+            }, { once: true });
+          }),
+        }),
+      });
+      const { pi, messages } = sdkFixture();
+      const supervisor = new TaskSupervisor(registry, pi, { checkIntervalMs: 5, defaultStallTimeoutMs: 1, debounceMs: 1 });
+      const unsubscribe = registry.subscribe("*", (task) => {
+        if (["completed", "failed", "aborted"].includes(task.status)) supervisor.notifyTaskSettled(task);
+      });
+      try {
+        const task = registry.spawn({ task: "Wait", profile: {
+          id: "worker", label: "Worker", description: "Test worker", promptGuidelines: [], appendPrompt: "",
+          deniedTools: [], deniedSkills: [], mcpServers: {}, subagents: { maxDepth: 2, maxConcurrent: 2 },
+          supervision: { wakeOn: new Set() },
+        } });
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        assert.equal(aborted, true);
+        assert.equal(task.status, "running");
+        assert.deepEqual(messages, []);
+        if (disposeBeforeCleanup) supervisor.dispose();
+
+        cleanup!();
+        await registry.wait(task.id);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        assert.equal(task.status, "aborted");
+        assert.equal(messages.length, disposeBeforeCleanup ? 0 : 1);
+        if (!disposeBeforeCleanup) assert.match(messages[0]!, /aborted/);
+      } finally {
+        supervisor.dispose();
+        unsubscribe();
+        cleanup?.();
+        await registry.shutdown();
+      }
+    });
+  }
 });
