@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { initRostrix, type RostrixRuntime, type TaskRecord, type TaskStatus } from "pi-rostrix";
 import { resolve } from "node:path";
 import { Type } from "typebox";
@@ -25,10 +25,11 @@ import {
   workerParameters,
   workerProfile,
 } from "./agents/worker/index.ts";
-import type { SubagentRun } from "./runtime/types.ts";
-import { setupGear } from "../index.ts";
+import type { SubagentDispatch, SubagentRun } from "./runtime/types.ts";
 import type { WorkspaceServices } from "../workspace/setup.ts";
 import { setupSubagentSettings, type SubagentSettings } from "./settings.ts";
+import { taskRun } from "./task-run.ts";
+import { setupGear } from "../index.ts";
 
 export interface SubagentServices {
   settings: SubagentSettings;
@@ -50,7 +51,7 @@ function mapStatus(status: TaskStatus): SubagentRun["status"] {
   }
 }
 
-function recordStart(toolCallId: string | undefined, runId: string, task: string, dispatch?: any): void {
+function recordStart(toolCallId: string | undefined, runId: string, task: string, dispatch?: SubagentDispatch): void {
   const initialRun: SubagentRun = {
     status: "running",
     startedAt: Date.now(),
@@ -61,18 +62,33 @@ function recordStart(toolCallId: string | undefined, runId: string, task: string
   recordSubagentLiveStart(runId, task, initialRun);
 }
 
-function recordProgress(toolCallId: string | undefined, runId: string, task: TaskRecord, dispatch?: any): void {
-  const run: SubagentRun = {
-    status: mapStatus(task.status),
-    startedAt: task.startedAt ?? task.createdAt,
-    lastActivityAt: task.lastActivityAt,
-    items: [],
-    ...(task.result !== undefined ? { result: task.result } : {}),
-    ...(task.error !== undefined ? { error: task.error } : {}),
-    ...(dispatch ? { dispatch } : {}),
-  };
+function recordProgress(toolCallId: string | undefined, runId: string, task: TaskRecord, dispatch?: SubagentDispatch): void {
+  const run = taskRun(task, dispatch);
   if (toolCallId) recordSubagentLiveUpdate(toolCallId, run);
   recordSubagentLiveUpdate(runId, run);
+}
+
+const COMPLETION_ENTRY = "gear:subagent-completion";
+type RunDetails = SubagentRun & { runId: string; revision: number };
+
+function observation(details: RunDetails) {
+  const tools = details.items.filter((item) => item.kind === "tool");
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify({
+      ...details,
+      // Keep complete evidence in details, but bound repeated model-facing output.
+      items: tools.slice(-8).map((item) => {
+        const args = item.args === undefined ? undefined : JSON.stringify(item.args);
+        return {
+          ...item,
+          ...(args !== undefined && args.length > 2000 ? { args: args.slice(0, 2000), argsTruncated: true } : {}),
+          ...(item.result !== undefined ? { result: item.result.slice(0, 2000), resultTruncated: item.result.length > 2000 } : {}),
+        };
+      }),
+      itemsTruncated: details.itemsTruncated || tools.length > 8,
+    }) }],
+    details,
+  };
 }
 
 export function setupSubagents(
@@ -82,6 +98,40 @@ export function setupSubagents(
 ): SubagentServices {
   const runtime = rostrix ?? initRostrix(pi, { autoRegisterTools: false });
   const settings = setupSubagentSettings(pi);
+  let sessionContext: ExtensionContext | undefined;
+  pi.on("session_start", (_event, ctx) => { sessionContext = ctx; });
+  pi.on("session_shutdown", () => { sessionContext = undefined; });
+
+  function savedRun(runId: string, ctx = sessionContext): RunDetails | undefined {
+    const entry = ctx?.sessionManager.getEntries().reverse().find((entry) =>
+      entry.type === "custom" && entry.customType === COMPLETION_ENTRY &&
+      (entry.data as RunDetails | undefined)?.runId === runId);
+    return entry?.type === "custom" ? entry.data as RunDetails : undefined;
+  }
+
+  function track(toolCallId: string, record: TaskRecord, dispatch: SubagentDispatch, ctx: ExtensionContext): void {
+    recordStart(toolCallId, record.id, record.task, dispatch);
+    sessionContext = ctx;
+    const sessionId = ctx.sessionManager.getSessionId();
+    const sessionFile = ctx.sessionManager.getSessionFile();
+    const update = (updated: TaskRecord) => {
+      recordProgress(toolCallId, record.id, updated, dispatch);
+      if (mapStatus(updated.status) === "running") return;
+
+      unsubscribe();
+      const completion: RunDetails = {
+        ...taskRun(updated, dispatch), runId: updated.id, revision: updated.revision,
+      };
+      if (sessionContext?.sessionManager.getSessionId() === sessionId) {
+        pi.appendEntry<RunDetails>(COMPLETION_ENTRY, completion);
+      } else if (sessionFile) {
+        // The old extension context is invalid after switching sessions.
+        SessionManager.open(sessionFile).appendCustomEntry(COMPLETION_ENTRY, completion);
+      }
+    };
+    const unsubscribe = runtime.tasks.subscribe(record.id, update);
+    update(record);
+  }
 
   // 1. researcher tool -> delegates to gear:researcher profile
   pi.registerTool({
@@ -105,28 +155,16 @@ export function setupSubagents(
         signal,
       });
 
-      recordStart(toolCallId, record.id, task, dispatch);
-
-      runtime.tasks.subscribe(record.id, (updated) => {
-        recordProgress(toolCallId, record.id, updated, dispatch);
-      });
+      track(toolCallId, record, dispatch, ctx);
 
       return {
         content: [{ type: "text", text: JSON.stringify({ runId: record.id, status: record.status, revision: record.revision }) }],
-        details: {
-          runId: record.id,
-          status: "running" as const,
-          startedAt: record.startedAt ?? record.createdAt,
-          lastActivityAt: record.lastActivityAt,
-          items: [],
-          dispatch,
-          revision: record.revision,
-        },
+        details: { ...taskRun(record, dispatch), runId: record.id, revision: record.revision },
       };
     },
     renderCall: renderSubagentCall,
     renderResult: (toolResult, options, theme, context) =>
-      renderSubagentResult(researcherProfile, toolResult as any, options, theme, context as any, runtime),
+      renderSubagentResult(researcherProfile, toolResult as any, options, theme, context as any, runtime, savedRun),
     renderShell: "self",
   });
 
@@ -153,28 +191,16 @@ export function setupSubagents(
         signal,
       });
 
-      recordStart(toolCallId, record.id, task, dispatch);
-
-      runtime.tasks.subscribe(record.id, (updated) => {
-        recordProgress(toolCallId, record.id, updated, dispatch);
-      });
+      track(toolCallId, record, dispatch, ctx);
 
       return {
         content: [{ type: "text", text: JSON.stringify({ runId: record.id, status: record.status, revision: record.revision }) }],
-        details: {
-          runId: record.id,
-          status: "running" as const,
-          startedAt: record.startedAt ?? record.createdAt,
-          lastActivityAt: record.lastActivityAt,
-          items: [],
-          dispatch,
-          revision: record.revision,
-        },
+        details: { ...taskRun(record, dispatch), runId: record.id, revision: record.revision },
       };
     },
     renderCall: renderSubagentCall,
     renderResult: (toolResult, options, theme, context) =>
-      renderSubagentResult(workerProfile, toolResult as any, options, theme, context as any, runtime),
+      renderSubagentResult(workerProfile, toolResult as any, options, theme, context as any, runtime, savedRun),
     renderShell: "self",
   });
 
@@ -200,28 +226,16 @@ export function setupSubagents(
         signal,
       });
 
-      recordStart(toolCallId, record.id, task, dispatch);
-
-      runtime.tasks.subscribe(record.id, (updated) => {
-        recordProgress(toolCallId, record.id, updated, dispatch);
-      });
+      track(toolCallId, record, dispatch, ctx);
 
       return {
         content: [{ type: "text", text: JSON.stringify({ runId: record.id, status: record.status, revision: record.revision }) }],
-        details: {
-          runId: record.id,
-          status: "running" as const,
-          startedAt: record.startedAt ?? record.createdAt,
-          lastActivityAt: record.lastActivityAt,
-          items: [],
-          dispatch,
-          revision: record.revision,
-        },
+        details: { ...taskRun(record, dispatch), runId: record.id, revision: record.revision },
       };
     },
     renderCall: renderSubagentCall,
     renderResult: (toolResult, options, theme, context) =>
-      renderSubagentResult(reviewerProfile, toolResult as any, options, theme, context as any, runtime),
+      renderSubagentResult(reviewerProfile, toolResult as any, options, theme, context as any, runtime, savedRun),
     renderShell: "self",
   });
 
@@ -235,8 +249,13 @@ export function setupSubagents(
       afterRevision: Type.Optional(Type.Integer({ minimum: 0, description: "Last observed revision. Returns when a newer revision is available." })),
       timeoutSeconds: Type.Optional(Type.Number({ minimum: 0, description: "Maximum seconds to wait. Defaults to 30; values above 60 are clamped." })),
     }),
-    async execute(_toolCallId, { runId, afterRevision, timeoutSeconds }): Promise<any> {
+    async execute(_toolCallId, { runId, afterRevision, timeoutSeconds }, _signal, _onUpdate, ctx) {
       try {
+        if (!runtime.tasks.getTask(runId)) {
+          const saved = savedRun(runId, ctx);
+          if (saved) return observation(saved);
+        }
+
         const task = await runtime.tasks.wait(runId, {
           ...(afterRevision !== undefined ? { afterRevision } : {}),
           timeoutSeconds: timeoutSeconds ? Math.min(timeoutSeconds, 60) : 30,
@@ -245,26 +264,7 @@ export function setupSubagents(
         const status = mapStatus(task.status);
         recordProgress(undefined, task.id, task);
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                runId: task.id,
-                status,
-                revision: task.revision,
-                result: task.result,
-                error: task.error,
-              }),
-            },
-          ],
-          details: {
-            runId: task.id,
-            status,
-            revision: task.revision,
-            items: [],
-          },
-        };
+        return observation({ ...taskRun(task), runId: task.id, status, revision: task.revision });
       } catch (err) {
         return {
           isError: true,

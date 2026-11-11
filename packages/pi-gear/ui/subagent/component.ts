@@ -1,6 +1,6 @@
 import type { ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
 import { Text, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import type { SubagentRun } from "../../subagents/runtime/types.ts";
+import type { SubagentViewRun as SubagentRun } from "./types.ts";
 import { Spinner } from "./spinner.ts";
 
 export class SubagentResultComponent extends Text {

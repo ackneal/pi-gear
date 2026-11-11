@@ -1,4 +1,5 @@
-import type { SubagentItem, SubagentPresentation, SubagentRun } from "../../subagents/runtime/types.ts";
+import type { SubagentItem, SubagentPresentation } from "../../subagents/runtime/types.ts";
+import type { SubagentViewRun as SubagentRun } from "./types.ts";
 import { readableProvider, usefulText } from "./text-policy.ts";
 
 export type Theme = {
@@ -22,7 +23,7 @@ export type Theme = {
 export type SubagentRendererProfile = { id: string; label: string; presentation?: SubagentPresentation };
 
 export const STALLED_THRESHOLD_MS = 15_000;
-export const STATUS_ICON = { running: "◌", success: "●", error: "✗", aborted: "✗" } as const;
+export const STATUS_ICON = { running: "◌", success: "●", error: "✗", aborted: "✗", unknown: "?" } as const;
 
 export function titleCase(value: string): string {
   return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -58,6 +59,7 @@ function failure(run: SubagentRun, profile: SubagentRendererProfile): string {
 function activity(run: SubagentRun | undefined, profile: SubagentRendererProfile): string {
   const label = profileLabel(profile);
   if (!run) return activityPhrase(profile, "starting", `Starting ${label.toLowerCase()}`);
+  if (run.status === "unknown") return "Status unavailable";
   if (run.status === "success") return activityPhrase(profile, "complete", `${label} complete`);
   if (run.status === "error" || run.status === "aborted") return failure(run, profile);
   const latestRunning = [...run.items].reverse().find((item): item is Extract<SubagentItem, { kind: "tool" }> => item.kind === "tool" && item.status === "running");
@@ -113,7 +115,7 @@ function metadata(run: SubagentRun | undefined, profile: SubagentRendererProfile
   if (!tools.length) {
     const hasThought = run?.items.some((item) => item.kind === "thinking" && Boolean(usefulText(item.text)));
     const name = profileLabel(profile);
-    const label = hasThought ? "Thinking" : run?.status === "success" ? activityPhrase(profile, "complete", `${name} complete`) : run?.status === "error" || run?.status === "aborted" ? failure(run, profile) : activityPhrase(profile, "starting", `Starting ${name.toLowerCase()}`);
+    const label = run?.status === "unknown" ? "Status unavailable" : hasThought ? "Thinking" : run?.status === "success" ? activityPhrase(profile, "complete", `${name} complete`) : run?.status === "error" || run?.status === "aborted" ? failure(run, profile) : activityPhrase(profile, "starting", `Starting ${name.toLowerCase()}`);
     toolStr = compact(label);
   } else {
     toolStr = formatToolCount(tools);

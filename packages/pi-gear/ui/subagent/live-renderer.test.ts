@@ -196,7 +196,7 @@ test("expanded arguments and answer wrap completely with inner indentation", (t)
   }
 });
 
-test("cleared running history renders interrupted without recreating a live subscription", (t) => {
+test("cleared running history reports unavailable status without inventing an abort", (t) => {
   clearSubagentRegistry();
   t.after(clearSubagentRegistry);
   const details = {
@@ -212,7 +212,9 @@ test("cleared running history renders interrupted without recreating a live subs
     { isPartial: false, expanded: true }, theme,
     { toolCallId: "history", args: { task: "Inspect" }, invalidate() { invalidations++; } });
   t.after(() => (component as SubagentResultComponent).dispose());
-  assert.match(rendered(component), /Read · interrupted/);
+  assert.match(rendered(component), /Status unavailable/);
+  assert.doesNotMatch(rendered(component), /Research aborted/);
+  assert.match(rendered(component), /Read · unknown/);
   assert.equal(getSubagentEntry("history"), undefined);
   recordSubagentLiveUpdate("history", { ...details, status: "success" });
   assert.equal(getSubagentEntry("history"), undefined);
@@ -220,7 +222,7 @@ test("cleared running history renders interrupted without recreating a live subs
   recordSubagentLiveStart("history", "New task", details);
   recordSubagentLiveUpdate("history", { ...details, status: "success" });
   assert.equal(invalidations, 0);
-  assert.match(rendered(component), /Read · interrupted/);
+  assert.match(rendered(component), /Read · unknown/);
   assert.deepEqual(result, original);
 });
 
@@ -240,6 +242,7 @@ test("renderSubagentResult queries TaskRegistry directly from runtime when avail
             finishedAt: 2000,
             lastActivityAt: 2000,
             result: "Authoritative result from runtime TaskRegistry",
+            items: [],
           };
         }
         return undefined;
@@ -289,6 +292,7 @@ test("renderSubagentResult updates live from TaskRegistry even when UI registry 
   let taskListener: ((task: any) => void) | undefined;
   const mockTask = {
     taskId: "task-live-cleared",
+    items: [],
     status: "running" as const,
     createdAt: 1000,
     startedAt: 1000,

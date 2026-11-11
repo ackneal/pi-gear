@@ -1,6 +1,6 @@
 import { stripVTControlCharacters } from "node:util";
 import { truncateToWidth } from "@earendil-works/pi-tui";
-import type { SubagentRun } from "../../subagents/runtime/types.ts";
+import type { SubagentViewRun as SubagentRun } from "./types.ts";
 import { readableProvider } from "./text-policy.ts";
 import type { Theme } from "./format.ts";
 
@@ -18,7 +18,9 @@ export function expandedActivity(run: SubagentRun | undefined, theme: Theme, wid
   const lines = [theme.fg("muted", "Activity")];
   if (omitted) lines.push(theme.fg("muted", truncateToWidth("Earlier activity omitted", width)));
   for (const tool of tools) {
-    const status = tool.status === "running" && run.status !== "running" ? "interrupted" : tool.status;
+    const status = tool.status === "running" && run.status !== "running"
+      ? run.status === "unknown" ? "unknown" : "interrupted"
+      : tool.status;
     const target = ["path", "file_path", "filepath", "command", "pattern", "action"].map((key) => tool.args?.[key]).find((value) => typeof value === "string" && value.trim());
     const name = readableProvider(oneLine(tool.name));
     const row = `${name} · ${status}${typeof target === "string" ? ` · ${oneLine(target)}` : ""}`;

@@ -1,0 +1,258 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { SessionManager, type ExtensionAPI, type ExtensionToolContext, type ToolDefinition, type SessionEntry } from "@earendil-works/pi-coding-agent";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { RostrixRuntime, TaskRecord, TaskStatus } from "pi-rostrix";
+import { setupSubagents } from "./index.ts";
+import { clearSubagentRegistry, getSubagentEntry } from "../ui/subagent/registry.ts";
+import { SubagentResultComponent } from "../ui/subagent/component.ts";
+
+function harness(sessionManager?: SessionManager) {
+  const tools = new Map<string, ToolDefinition>();
+  const entries: SessionEntry[] = [];
+  const listeners = new Set<(task: TaskRecord) => void>();
+  let sessionId = "session-1";
+  let available = true;
+  let contextValid = true;
+  const record: TaskRecord = {
+    id: "test-run", agentId: "gear:worker", profileId: "gear:worker", task: "Inspect code",
+    depth: 0, targetFiles: [], status: "running", revision: 1, createdAt: 10,
+    startedAt: 20, lastActivityAt: 30,
+    items: [
+      { kind: "thinking", text: "Inspect the implementation", contentIndex: 0, messageId: 1 },
+      { kind: "message", role: "assistant", text: "Not an activity item" },
+      { kind: "tool", id: "read-1", name: "read", args: { path: "index.ts" }, status: "success", result: "actual source" },
+    ],
+    usage: { input: 100, output: 20, cacheRead: 5, cacheWrite: 2, cacheWrite1h: 1, reasoning: 3, totalTokens: 131, cost: { input: 0.1, output: 0.2, cacheRead: 0.01, cacheWrite: 0.02, total: 0.33 } },
+    itemsTruncated: false,
+  };
+  const handlers = new Map<string, Array<(event: unknown, ctx: ExtensionToolContext) => unknown>>();
+  const pi = {
+    on(name: string, handler: (event: unknown, ctx: ExtensionToolContext) => unknown) {
+      const list = handlers.get(name) ?? [];
+      list.push(handler);
+      handlers.set(name, list);
+    },
+    registerTool(tool: ToolDefinition) { tools.set(tool.name, tool); },
+    appendEntry(customType: string, data: unknown) {
+      if (sessionManager) {
+        sessionManager.appendCustomEntry(customType, data);
+        return;
+      }
+      entries.push({ type: "custom", customType, data, id: `entry-${entries.length}`, parentId: null, timestamp: new Date().toISOString() });
+    },
+  } as unknown as ExtensionAPI;
+  const tasks = {
+    spawn: () => record,
+    subscribe: (_id: string, listener: (task: TaskRecord) => void) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+    getTask: () => available ? record : undefined,
+    wait: async () => {
+      if (!available) throw new Error("Unknown task");
+      return record;
+    },
+  };
+  const runtime = { tasks, resolveProfile: () => ({ id: "gear:worker" }) } as unknown as RostrixRuntime;
+  const ctx = {
+    cwd: "/tmp",
+    get sessionManager() {
+      if (!contextValid) throw new Error("Extension context is invalid");
+      return sessionManager ?? {
+        getSessionId: () => sessionId,
+        getSessionFile: () => undefined,
+        getBranch: () => [...entries],
+        getEntries: () => [...entries],
+      };
+    },
+  } as unknown as ExtensionToolContext;
+  setupSubagents(pi, undefined, runtime);
+
+  return {
+    record, entries, listeners, tools,
+    emit: async (event: string) => {
+      for (const handler of handlers.get(event) ?? []) await handler({}, ctx);
+    },
+    switchSession: () => { sessionId = "session-2"; },
+    invalidateContext: () => { contextValid = false; },
+    forgetTask: () => { available = false; },
+    update: (patch: Partial<TaskRecord>) => {
+      Object.assign(record, patch);
+      for (const listener of [...listeners]) listener(record);
+    },
+    execute: (name: string, params: Record<string, unknown>) => tools.get(name)!.execute("call-1", params, undefined, undefined, ctx),
+  };
+}
+
+test("completion persistence survives branch changes and invalidated session contexts", async (t) => {
+  for (const scenario of ["branch", "switched session"] as const) {
+    await t.test(scenario, async (t) => {
+      clearSubagentRegistry();
+      t.after(clearSubagentRegistry);
+      const dir = await mkdtemp(join(tmpdir(), "gear-completion-"));
+      t.after(() => rm(dir, { recursive: true, force: true }));
+      const manager = SessionManager.create(dir, dir);
+      const originLeaf = manager.appendMessage({ role: "user", content: "Inspect", timestamp: 1 });
+      const file = manager.getSessionFile()!;
+      const h = harness(manager);
+      await h.execute("worker", { task: "Inspect" });
+      if (scenario === "switched session") {
+        await h.emit("session_shutdown");
+        h.invalidateContext();
+      }
+      h.update({ status: "completed", finishedAt: 50, result: "Durable result" });
+      assert.equal(h.listeners.size, 0);
+      const restored = SessionManager.open(file);
+      assert.ok(restored.getEntries().some((entry) => entry.type === "custom" && entry.customType === "gear:subagent-completion"));
+      if (scenario === "branch") {
+        restored.branch(originLeaf);
+        restored.appendMessage({ role: "user", content: "New branch", timestamp: 2 });
+        assert.ok(!restored.getBranch().some((entry) => entry.type === "custom" && entry.customType === "gear:subagent-completion"));
+      }
+      clearSubagentRegistry();
+      const reopened = harness(restored);
+      reopened.forgetTask();
+      const observed = await reopened.execute("subagent_observe", { runId: h.record.id });
+      assert.equal(observed.isError, undefined);
+      const details = observed.details as { status: string; result: string; usage: unknown };
+      assert.equal(details.status, "success");
+      assert.equal(details.result, "Durable result");
+      assert.deepEqual(details.usage, h.record.usage);
+    });
+  }
+});
+
+test("completed evidence survives a session reload in the original agent card", async (t) => {
+  clearSubagentRegistry();
+  t.after(clearSubagentRegistry);
+  const h = harness();
+  const initial = await h.execute("worker", { task: "Inspect code" });
+  h.update({ status: "completed", finishedAt: 50, result: "Persisted answer" });
+  h.forgetTask();
+  clearSubagentRegistry();
+  await h.emit("session_start");
+  const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
+  const component = h.tools.get("worker")!.renderResult!(initial, { expanded: true, isPartial: false }, theme as never, {
+    args: { task: "Inspect code" }, invalidate() {}, toolCallId: "call-1",
+  } as never);
+  assert.ok(component instanceof SubagentResultComponent);
+  t.after(() => component.dispose());
+  const output = component.render(160).join("\n");
+  assert.match(output, /● Agent\(worker\)/);
+  assert.match(output, /Read · success · index\.ts/);
+  assert.match(output, /↑107 ↓20 · \$0\.330 · 30ms/);
+  assert.match(output, /Persisted answer/);
+  assert.doesNotMatch(output, /aborted|Status unavailable/);
+});
+
+const agents = [
+  { name: "researcher", params: { question: "Inspect code" } },
+  { name: "worker", params: { task: "Inspect code" } },
+  { name: "reviewer", params: { scope: "Inspect code" } },
+];
+
+for (const agent of agents) {
+  for (const terminal of [
+    { status: "completed", mapped: "success" },
+    { status: "failed", mapped: "error" },
+    { status: "aborted", mapped: "aborted" },
+  ] satisfies { status: TaskStatus; mapped: string }[]) {
+    test(`${agent.name}: ${terminal.status} preserves live, observe, and persisted evidence`, async () => {
+      clearSubagentRegistry();
+      try {
+        const h = harness();
+        const initial = await h.execute(agent.name, agent.params);
+        const expectedItems = h.record.items.filter((item) => item.kind !== "message");
+        assert.deepEqual((initial.details as { items: unknown }).items, expectedItems);
+        for (const key of ["call-1", h.record.id]) {
+          assert.deepEqual(getSubagentEntry(key)?.run.items, expectedItems);
+          assert.deepEqual(getSubagentEntry(key)?.run.usage, h.record.usage);
+        }
+
+        h.update({ status: terminal.status, revision: 2, finishedAt: 50, lastActivityAt: 50, result: "Evidence-backed answer", itemsTruncated: true });
+        for (const key of ["call-1", h.record.id]) {
+          const run = getSubagentEntry(key)?.run;
+          assert.equal(run?.status, terminal.mapped);
+          assert.equal(run?.finishedAt, 50);
+          assert.equal(run?.itemsTruncated, true);
+          assert.deepEqual(run?.items, expectedItems);
+          assert.deepEqual(run?.usage, h.record.usage);
+        }
+        assert.equal(h.listeners.size, 0);
+        assert.equal(h.entries.length, 1);
+
+        const observed = await h.execute("subagent_observe", { runId: h.record.id });
+        const details = observed.details as Record<string, unknown>;
+        assert.equal(details.status, terminal.mapped);
+        assert.equal(details.finishedAt, 50);
+        assert.equal(details.itemsTruncated, true);
+        assert.deepEqual(details.items, expectedItems);
+        assert.deepEqual(details.usage, h.record.usage);
+        const content = JSON.parse((observed.content[0] as { text: string }).text);
+        assert.deepEqual(content.items, expectedItems.filter((item) => item.kind === "tool").map((item) => ({ ...item, resultTruncated: false })));
+        assert.deepEqual(content.usage, h.record.usage);
+        assert.equal(content.finishedAt, 50);
+
+        h.forgetTask();
+        clearSubagentRegistry();
+        const restored = await h.execute("subagent_observe", { runId: h.record.id });
+        assert.deepEqual(restored.details, { ...details, dispatch: {} });
+      } finally {
+        clearSubagentRegistry();
+      }
+    });
+  }
+}
+
+for (const scenario of ["bounded evidence", "changed session", "unknown run", "already finished", "running observation", "optional fields"] as const) {
+  test(`observe/persistence: ${scenario}`, async () => {
+    clearSubagentRegistry();
+    try {
+      const h = harness();
+      if (scenario === "already finished") h.update({ status: "completed", finishedAt: 50 });
+      if (scenario === "optional fields") h.update({ startedAt: undefined, usage: undefined, itemsTruncated: undefined });
+      await h.execute("worker", { task: "Inspect code" });
+      if (scenario === "bounded evidence") {
+        h.update({ items: Array.from({ length: 10 }, (_, i) => ({ kind: "tool", name: `tool-${i}`, status: "success", args: { text: "y".repeat(3000) }, result: "x".repeat(3000) })) });
+        const observed = await h.execute("subagent_observe", { runId: h.record.id });
+        const content = JSON.parse((observed.content[0] as { text: string }).text);
+        assert.equal(content.items.length, 8);
+        assert.equal(content.items[0].name, "tool-2");
+        assert.equal(content.items[0].result.length, 2000);
+        assert.equal(content.items[0].resultTruncated, true);
+        assert.equal(content.items[0].argsTruncated, true);
+        assert.equal(content.items[0].args.length, 2000);
+        assert.equal(content.itemsTruncated, true);
+        assert.equal((observed.details as { items: unknown[] }).items.length, 10);
+      } else if (scenario === "changed session") {
+        h.switchSession();
+        h.update({ status: "completed", finishedAt: 50 });
+        assert.equal(h.entries.length, 0);
+        assert.equal(h.listeners.size, 0);
+      } else if (scenario === "already finished") {
+        assert.equal(h.entries.length, 1);
+        assert.equal(h.listeners.size, 0);
+        assert.equal(getSubagentEntry("call-1")?.run.finishedAt, 50);
+      } else if (scenario === "running observation" || scenario === "optional fields") {
+        const observed = await h.execute("subagent_observe", { runId: h.record.id });
+        const details = observed.details as Record<string, unknown>;
+        assert.equal(details.status, "running");
+        assert.equal(details.finishedAt, undefined);
+        assert.deepEqual(details.items, h.record.items.filter((item) => item.kind !== "message"));
+        assert.deepEqual(details.usage, h.record.usage);
+        assert.equal(details.startedAt, h.record.startedAt ?? h.record.createdAt);
+        assert.equal(h.entries.length, 0);
+      } else {
+        h.forgetTask();
+        const observed = await h.execute("subagent_observe", { runId: "missing" });
+        assert.equal(observed.isError, true);
+        assert.match((observed.content[0] as { text: string }).text, /Unknown task/);
+      }
+    } finally {
+      clearSubagentRegistry();
+    }
+  });
+}
