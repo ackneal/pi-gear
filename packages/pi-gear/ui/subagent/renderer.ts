@@ -1,3 +1,4 @@
+import { normalizeRunActivities } from "../../subagents/activities.ts";
 import { expandedActivity } from "./activity.ts";
 import { padOutput } from "../tools/padding.ts";
 import type { AgentToolResult, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
@@ -34,9 +35,7 @@ export function renderSubagentResult(
   runtime?: Pick<RostrixRuntime, "tasks">,
   savedRun?: (runId: string) => SubagentRun | undefined,
 ): Text {
-  const details = result.details && !Array.isArray(result.details.items)
-    ? { ...result.details, items: [] }
-    : result.details;
+  const details = result.details ? normalizeRunActivities(result.details) : undefined;
 
   const runId = (details as SubagentRun & { runId?: string } | undefined)?.runId;
   const taskRecord = runId && runtime ? runtime.tasks.getTask(runId) : undefined;

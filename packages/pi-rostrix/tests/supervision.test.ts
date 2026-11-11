@@ -283,7 +283,7 @@ test("terminal wake filtering preserves results and evidence", async (t) => {
           assert.equal(task.status, status);
           assert.equal(task.result, "observable result");
           assert.equal(task.usage?.totalTokens, 3);
-          assert.deepEqual(task.items, [{ kind: "tool", id: "tool-1", name: "read", status: "running", args: { path: "evidence.txt" } }]);
+          assert.deepEqual(task.activities, [{ kind: "tool", id: "tool-1", name: "read", status: "running", args: { path: "evidence.txt" } }]);
         } finally {
           unsubscribe();
           supervisor.dispose();

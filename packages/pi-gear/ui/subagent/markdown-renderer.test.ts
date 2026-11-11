@@ -89,14 +89,14 @@ const cases: {
     name: "task and activity remain literal while the answer renders markdown",
     run: {
       result: "**Rendered answer**",
-      items: [{ kind: "tool", name: "read", status: "success", args: { path: "activity **literal**" } }],
+      activities: [{ kind: "tool", name: "read", status: "success", args: { path: "activity **literal**" } }],
     },
     expanded: true,
     width: 100,
     task: "task **literal**",
     assertOutput: (text) => {
       assert.match(text, /task \*\*literal\*\*/);
-      assert.match(text, /Activity/);
+      assert.match(text, /Execution history/);
       assert.match(text, /activity \*\*literal\*\*/);
       assert.match(text, /Rendered answer/);
       assert.doesNotMatch(text, /\*\*Rendered answer\*\*/);
@@ -116,7 +116,7 @@ const cases: {
 
 for (const entry of cases) {
   test(entry.name, () => {
-    const run: SubagentRun = { status: "success", startedAt: 0, finishedAt: 1000, items: [], ...entry.run };
+    const run: SubagentRun = { status: "success", startedAt: 0, finishedAt: 1000, activities: [], ...entry.run };
     const result: AgentToolResult<SubagentRun> = { content: [], details: run };
     const options: ToolRenderResultOptions = { expanded: entry.expanded, isPartial: false };
     const component = renderSubagentResult(researcherProfile, result, options, theme, {

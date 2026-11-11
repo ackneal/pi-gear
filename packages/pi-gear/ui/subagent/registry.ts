@@ -30,7 +30,7 @@ export function recordSubagentLiveStart(toolCallId: string, task: string, initia
   const now = Date.now();
   if (!registry.has(toolCallId)) evictIfNeeded();
   const existing = registry.get(toolCallId);
-  const run = initialRun ?? existing?.run ?? { status: "running", startedAt: now, items: [] };
+  const run = initialRun ?? existing?.run ?? { status: "running", startedAt: now, activities: [] };
   registry.set(toolCallId, { task, run });
   notify(toolCallId, run);
 }

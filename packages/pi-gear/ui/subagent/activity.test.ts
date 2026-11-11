@@ -9,9 +9,9 @@ const theme: Theme = { fg: (_color, text) => text, bold: (text) => text };
 
 for (const status of ["running", "success", "error", "aborted"] as const) {
   test(`activity retains all starts and projects safe rows for ${status}`, () => {
-    const run: SubagentRun & { itemsTruncated: boolean } = {
-      status, startedAt: 0, itemsTruncated: true,
-      items: [
+    const run: SubagentRun & { activitiesTruncated: boolean } = {
+      status, startedAt: 0, activitiesTruncated: true,
+      activities: [
         { kind: "thinking", text: "PRIVATE_THOUGHT" },
         ...Array.from({ length: 9 }, (_, index) => ({
           kind: "tool" as const, name: `read_${index}`, status: index === 0 ? "running" as const : index === 1 ? "error" as const : "success" as const,
@@ -36,8 +36,8 @@ for (const status of ["running", "success", "error", "aborted"] as const) {
   });
 }
 
-for (const items of [[], [{ kind: "thinking" as const, text: "private" }]]) {
-  test(`empty tool activity is hidden (${items.length} items)`, () => {
-    assert.equal(expandedActivity({ status: "success", startedAt: 0, items }, theme, 80), "");
+for (const activities of [[], [{ kind: "thinking" as const, text: "private" }]]) {
+  test(`empty tool activity is hidden (${activities.length} activities)`, () => {
+    assert.equal(expandedActivity({ status: "success", startedAt: 0, activities }, theme, 80), "");
   });
 }

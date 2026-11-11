@@ -19,7 +19,7 @@ export type TaskUsage = {
   } | undefined;
 };
 
-export type TaskItem =
+export type TaskActivity =
   | { kind: "thinking"; text: string; contentIndex?: number; messageId?: number }
   | { kind: "tool"; id?: string; name: string; args?: Record<string, unknown>; status: "running" | "success" | "error"; result?: string }
   | { kind: "message"; role: "user" | "assistant"; text: string };
@@ -44,8 +44,8 @@ export interface TaskRecord {
   result?: string | undefined;
   error?: string | undefined;
   usage?: TaskUsage | undefined;
-  items: TaskItem[];
-  itemsTruncated?: boolean | undefined;
+  activities: TaskActivity[];
+  activitiesTruncated?: boolean | undefined;
   readonly timeoutSeconds?: number | undefined;
 }
 

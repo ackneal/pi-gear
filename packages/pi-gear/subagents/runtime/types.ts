@@ -1,6 +1,6 @@
 import type { CapabilitySpec } from "../../capabilities/index.ts";
 
-export type SubagentItem =
+export type SubagentActivity =
   | { kind: "thinking"; text: string; contentIndex?: number; messageId?: number }
   | { kind: "tool"; id?: string; name: string; args?: Record<string, unknown>; status: "running" | "success" | "error"; result?: string };
 export interface SubagentRun {
@@ -8,8 +8,8 @@ export interface SubagentRun {
   startedAt: number;
   finishedAt?: number;
   lastActivityAt?: number;
-  items: SubagentItem[];
-  itemsTruncated?: boolean;
+  activities: SubagentActivity[];
+  activitiesTruncated?: boolean;
   dispatch?: SubagentDispatch;
   result?: string;
   modelError?: string;

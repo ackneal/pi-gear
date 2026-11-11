@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentSessionEvent, AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { TaskRegistry } from "../src/runtime/task-registry.ts";
-import type { TaskItem } from "../src/runtime/task-types.ts";
+import type { TaskActivity } from "../src/runtime/task-types.ts";
 import { agent, assistant } from "./runtime-fixtures.ts";
 
 const message = assistant({ content: [{ type: "thinking", thinking: "Plan" }] });
@@ -11,7 +11,7 @@ const partialResult: AgentToolResult<undefined> = { content: [{ type: "text", te
 const result: AgentToolResult<{ lines: number }> = { content: [{ type: "text", text: "done" }], details: { lines: 1 } };
 const circularDetails: { self?: unknown } = {};
 circularDetails.self = circularDetails;
-const cases: { name: string; events: AgentSessionEvent[]; expected: TaskItem[]; truncated?: boolean }[] = [
+const cases: { name: string; events: AgentSessionEvent[]; expected: TaskActivity[]; truncated?: boolean }[] = [
   {
     name: "tool start preserves args and running state",
     events: [start],
@@ -23,7 +23,7 @@ const cases: { name: string; events: AgentSessionEvent[]; expected: TaskItem[]; 
       { type: "tool_execution_update", toolCallId: "call-1", toolName: "read", args: { path: "updated.ts" }, partialResult },
       { type: "tool_execution_end", toolCallId: "call-1", toolName: "read", result, isError },
     ] satisfies AgentSessionEvent[],
-    expected: [{ kind: "tool", id: "call-1", name: "read", args: { path: "updated.ts" }, status: isError ? "error" : "success", result: JSON.stringify(result) }] satisfies TaskItem[],
+    expected: [{ kind: "tool", id: "call-1", name: "read", args: { path: "updated.ts" }, status: isError ? "error" : "success", result: JSON.stringify(result) }] satisfies TaskActivity[],
   })),
   {
     name: "tool update is visible before completion",
@@ -53,7 +53,7 @@ const cases: { name: string; events: AgentSessionEvent[]; expected: TaskItem[]; 
     expected: [{ kind: "thinking", messageId: 0, contentIndex: 0, text: "Plan" }],
   },
   {
-    name: "history keeps only the latest 100 items",
+    name: "history keeps only the latest 100 activities",
     events: Array.from({ length: 105 }, (_, index) => ({ ...start, toolCallId: String(index) })),
     expected: Array.from({ length: 100 }, (_, index) => ({ kind: "tool", id: String(index + 5), name: "read", args: { path: "file.ts" }, status: "running" })),
     truncated: true,
@@ -91,7 +91,7 @@ test("registry records bounded SDK events and live usage", async (t) => {
             options.onUsage?.(usage);
             const running = registry.listTasks()[0]!;
             assert.equal(running.status, "running");
-            assert.deepEqual(running.items, row.expected);
+            assert.deepEqual(running.activities, row.expected);
             assert.deepEqual(running.usage, expectedUsage);
             return { status: "completed", usage, turns: 1, durationMs: 1 };
           },
@@ -100,9 +100,9 @@ test("registry records bounded SDK events and live usage", async (t) => {
       const task = registry.spawn({ agent: agent(), task: "Work" });
       const finished = await registry.wait(task.id);
       assert.equal(finished.status, "completed", finished.error ?? "Task must complete");
-      assert.deepEqual(finished.items, row.expected);
+      assert.deepEqual(finished.activities, row.expected);
       assert.deepEqual(finished.usage, expectedUsage);
-      assert.equal(finished.itemsTruncated ?? false, row.truncated ?? false);
+      assert.equal(finished.activitiesTruncated ?? false, row.truncated ?? false);
       assert.ok(finished.revision > 1);
     });
   }

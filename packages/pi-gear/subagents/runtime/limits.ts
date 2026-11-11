@@ -1,6 +1,6 @@
 export const MAX_DECODER_BUFFER_CHARS = 64_000;
 export const MAX_RETAINED_TEXT_CHARS = 16_000;
-export const MAX_RETAINED_ITEMS = 200;
+export const MAX_RETAINED_ACTIVITIES = 200;
 export const MAX_STDERR_CHARS = 16_000;
 export const TRUNCATION_MARKER = "\n[truncated]";
 

@@ -20,7 +20,7 @@ export interface RunChildSubagentOptions extends RunSubagentOptions {
 const snapshot = (run: SubagentRun): SubagentRun => ({
   ...run,
   ...(run.dispatch ? { dispatch: { ...run.dispatch } } : {}),
-  items: run.items.map((item) => ({ ...item })),
+  activities: run.activities.map((activity) => ({ ...activity })),
 });
 
 export async function runChildSubagent(options: RunChildSubagentOptions): Promise<SubagentRun> {
@@ -29,7 +29,7 @@ export async function runChildSubagent(options: RunChildSubagentOptions): Promis
     status: "running",
     startedAt,
     lastActivityAt: startedAt,
-    items: [],
+    activities: [],
     ...(options.dispatch ? { dispatch: { ...options.dispatch } } : {}),
   };
   let child: ChildProcess;

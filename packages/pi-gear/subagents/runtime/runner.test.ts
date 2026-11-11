@@ -5,7 +5,7 @@ import { PiJsonDecoder } from "./protocol.ts";
 import { reduceSubagentEvent } from "./state.ts";
 import { runChildSubagent } from "./runner.ts";
 import { childArgs, resolvePiInvocation, spawnPiChild } from "./process.ts";
-import { MAX_DECODER_BUFFER_CHARS, MAX_RETAINED_ITEMS, MAX_RETAINED_TEXT_CHARS, TRUNCATION_MARKER } from "./limits.ts";
+import { MAX_DECODER_BUFFER_CHARS, MAX_RETAINED_ACTIVITIES, MAX_RETAINED_TEXT_CHARS, TRUNCATION_MARKER } from "./limits.ts";
 import type { SubagentProfile } from "./types.ts";
 import type { SubagentRun } from "./types.ts";
 import { researcherProfile } from "../agents/researcher/profile.ts";
@@ -29,7 +29,7 @@ test("protocol handles fragmented JSON, trailing data, malformed diagnostics, an
   assert.deepEqual(decoder.push('{"type":"tool_execution_start","toolCallId":"x","toolName":"read"}\n{"bad"'), [{ type: "tool_start", id: "x", name: "read" }]);
   assert.equal(decoder.push('', true)[0]?.type, "diagnostic");
 
-  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, items: [] };
+  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, activities: [] };
   run = reduceSubagentEvent(run, { type: "tool_start", id: "x", name: "read" }, 1_000);
   assert.equal(run.lastActivityAt, 1_000);
   run = reduceSubagentEvent(run, { type: "tool_start", id: "x", name: "read" }, 2_000);
@@ -38,7 +38,7 @@ test("protocol handles fragmented JSON, trailing data, malformed diagnostics, an
   assert.equal(run.lastActivityAt, 2_000);
   run = reduceSubagentEvent(run, { type: "tool_end", id: "x", isError: false, result: "ok" }, 4_000);
   assert.equal(run.lastActivityAt, 4_000);
-  assert.deepEqual(run.items, [{ kind: "tool", id: "x", name: "read", status: "success", result: "ok" }]);
+  assert.deepEqual(run.activities, [{ kind: "tool", id: "x", name: "read", status: "success", result: "ok" }]);
   run = reduceSubagentEvent(run, { type: "thinking", text: "hmm" }, 5_000);
   assert.equal(run.lastActivityAt, 5_000);
   run = reduceSubagentEvent(run, { type: "result", text: "done" }, 6_000);
@@ -95,12 +95,12 @@ test("decoder and reducer bound retained data and aggregate multipart reports", 
   assert.equal(decoder.push("x".repeat(MAX_DECODER_BUFFER_CHARS + 1))[0]?.type, "diagnostic");
   const events = decodeMessage("one", "two");
   assert.deepEqual(events.filter((event) => event.type === "result"), [{ type: "result", text: "onetwo" }]);
-  let run: SubagentRun = { status: "running", startedAt: 0, items: [] };
-  for (let i = 0; i < MAX_RETAINED_ITEMS + 2; i++) run = reduceSubagentEvent(run, { type: "tool_start", id: `t_${i}`, name: "read" });
-  assert.equal(run.items.length, MAX_RETAINED_ITEMS);
+  let run: SubagentRun = { status: "running", startedAt: 0, activities: [] };
+  for (let i = 0; i < MAX_RETAINED_ACTIVITIES + 2; i++) run = reduceSubagentEvent(run, { type: "tool_start", id: `t_${i}`, name: "read" });
+  assert.equal(run.activities.length, MAX_RETAINED_ACTIVITIES);
   run = reduceSubagentEvent(run, { type: "thinking", text: "x".repeat(MAX_RETAINED_TEXT_CHARS + 1) });
-  const lastItem = run.items[run.items.length - 1];
-  assert.ok(lastItem && lastItem.kind === "thinking" && lastItem.text.endsWith(TRUNCATION_MARKER));
+  const lastActivity = run.activities[run.activities.length - 1];
+  assert.ok(lastActivity && lastActivity.kind === "thinking" && lastActivity.text.endsWith(TRUNCATION_MARKER));
 });
 
 // Hand-written minimized transcript, not a literal `pi --mode json` capture.
@@ -116,10 +116,10 @@ test("decodes the minimized Pi JSON-mode transcript", async () => {
   assert.ok(events.some((event) => event.type === "tool_end" && event.id === "call_bad" && event.isError));
   assert.equal(events.filter((event) => event.type === "usage").length, 2);
 
-  let run: SubagentRun = { status: "running", startedAt: 0, items: [] };
+  let run: SubagentRun = { status: "running", startedAt: 0, activities: [] };
   for (const event of events) run = reduceSubagentEvent(run, event);
   assert.equal(run.result, "Final report");
-  const failedTool = run.items.find((item) => item.kind === "tool" && item.id === "call_bad");
+  const failedTool = run.activities.find((activity) => activity.kind === "tool" && activity.id === "call_bad");
   assert.equal(failedTool?.kind === "tool" ? failedTool.status : undefined, "error");
   assert.equal(run.usage?.input, 150);
 });
@@ -265,7 +265,7 @@ test("decoder emits usage only once from message_end", () => {
 });
 
 test("reduceSubagentEvent sums per-message usage and every numeric cost field", () => {
-  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, items: [] };
+  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, activities: [] };
   const usage = {
     input: 1000,
     output: 500,
@@ -289,26 +289,26 @@ test("reduceSubagentEvent sums per-message usage and every numeric cost field", 
   });
 });
 
-test("thinking deltas are incremental and accumulate into one retained item", () => {
+test("thinking deltas are incremental and accumulate into one retained activity", () => {
   const decoder = new PiJsonDecoder();
-  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, items: [] };
+  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, activities: [] };
 
   // thinking_delta "Hel" + thinking_delta "lo" must accumulate to "Hello"
-  // in a single retained thinking item.
+  // in a single retained thinking activity.
   decoder.push(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } }) + "\n");
   for (const delta of ["Hel", "lo"]) {
     const events = decoder.push(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta } }) + "\n");
     for (const ev of events) run = reduceSubagentEvent(run, ev);
   }
-  assert.equal(run.items.length, 1);
-  if (run.items[0]?.kind === "thinking") assert.equal(run.items[0].text, "Hello");
+  assert.equal(run.activities.length, 1);
+  if (run.activities[0]?.kind === "thinking") assert.equal(run.activities[0].text, "Hello");
 
-  // Block B: a new contentIndex creates a separate item.
+  // Block B: a new contentIndex creates a separate activity.
   decoder.push(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_start", contentIndex: 1 } }) + "\n");
   const events = decoder.push(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 1, delta: "Another reasoning block" } }) + "\n");
   for (const ev of events) run = reduceSubagentEvent(run, ev);
 
-  assert.deepEqual(run.items, [
+  assert.deepEqual(run.activities, [
     { kind: "thinking", text: "Hello", contentIndex: 0 },
     { kind: "thinking", text: "Another reasoning block", contentIndex: 1 },
   ]);
@@ -316,7 +316,7 @@ test("thinking deltas are incremental and accumulate into one retained item", ()
 
 test("thinking content indexes are scoped to an assistant message", () => {
   const decoder = new PiJsonDecoder();
-  let run: SubagentRun = { status: "running", startedAt: 0, items: [] };
+  let run: SubagentRun = { status: "running", startedAt: 0, activities: [] };
   // The live delta only carries a prefix; ThinkingContent carries the full text
   // as { type: "thinking", thinking }, so this fails unless message_end decoding
   // reads the finalized message correctly.
@@ -328,7 +328,7 @@ test("thinking content indexes are scoped to an assistant message", () => {
     ].map((event) => JSON.stringify(event)).join("\n") + "\n";
     for (const event of decoder.push(input)) run = reduceSubagentEvent(run, event);
   }
-  assert.deepEqual(run.items.map((item) => item.kind === "thinking" ? item.text : ""), ["first", "second"]);
+  assert.deepEqual(run.activities.map((activity) => activity.kind === "thinking" ? activity.text : ""), ["first", "second"]);
 });
 
 test("decoder discards an oversized complete line without parsing it", () => {
@@ -340,13 +340,13 @@ test("decoder discards an oversized complete line without parsing it", () => {
 });
 
 test("cumulative streaming snapshots do not consume retained history", () => {
-  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, items: [] };
+  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, activities: [] };
   for (let i = 0; i < 5; i++) run = reduceSubagentEvent(run, { type: "tool_start", id: `t_${i}`, name: "read" });
 
   // Stream many cumulative snapshots for a single in-flight block.
   for (let i = 0; i < 50; i++) run = reduceSubagentEvent(run, { type: "thinking", text: `snapshot ${i}`, contentIndex: 7 });
 
-  const kinds = run.items.map((item) => item.kind);
+  const kinds = run.activities.map((activity) => activity.kind);
   assert.equal(kinds.filter((kind) => kind === "thinking").length, 1);
   assert.equal(kinds.filter((kind) => kind === "tool").length, 5);
 });

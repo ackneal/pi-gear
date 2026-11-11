@@ -153,7 +153,7 @@ export class TaskRegistry {
       createdAt: now,
       startedAt: now,
       lastActivityAt: now,
-      items: [],
+      activities: [],
       timeoutSeconds: options.timeoutSeconds,
     };
 

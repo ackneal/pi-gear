@@ -8,7 +8,7 @@ import {
 
 const run = (result = ""): SubagentRun => ({
   status: "running", startedAt: 1, result,
-  items: [{ kind: "tool", id: "read", name: "read", status: "success" }],
+  activities: [{ kind: "tool", id: "read", name: "read", status: "success" }],
 });
 
 beforeEach(clearSubagentRegistry);

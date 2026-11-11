@@ -1,7 +1,7 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import type { TaskItem, TaskRecord } from "./task-types.ts";
+import type { TaskActivity, TaskRecord } from "./task-types.ts";
 
-const MAX_ITEMS = 100;
+const MAX_ACTIVITIES = 100;
 const MAX_TEXT = 16_384;
 
 /** Owns bounded task history, not the SDK's live message objects. */
@@ -16,7 +16,7 @@ export class TaskEventRecorder {
 
   private text(value: string): string {
     if (value.length <= MAX_TEXT) return value;
-    this.task.itemsTruncated = true;
+    this.task.activitiesTruncated = true;
     return value.slice(0, MAX_TEXT);
   }
 
@@ -24,25 +24,25 @@ export class TaskEventRecorder {
     try {
       return JSON.stringify(value) ?? "null";
     } catch {
-      this.task.itemsTruncated = true;
+      this.task.activitiesTruncated = true;
       return JSON.stringify({ error: "Unserializable tool event payload" });
     }
   }
 
-  private append(item: TaskItem): void {
-    this.task.items.push(item);
-    if (this.task.items.length > MAX_ITEMS) {
-      this.task.items.shift();
-      this.task.itemsTruncated = true;
+  private append(activity: TaskActivity): void {
+    this.task.activities.push(activity);
+    if (this.task.activities.length > MAX_ACTIVITIES) {
+      this.task.activities.shift();
+      this.task.activitiesTruncated = true;
     }
   }
 
   private thinking(contentIndex: number, text: string, append: boolean): void {
-    const item = this.task.items.find((item) =>
-      item.kind === "thinking" && item.messageId === this.messageId && item.contentIndex === contentIndex,
+    const activity = this.task.activities.find((activity) =>
+      activity.kind === "thinking" && activity.messageId === this.messageId && activity.contentIndex === contentIndex,
     );
-    if (item?.kind === "thinking") {
-      item.text = this.text(append ? item.text + text : text);
+    if (activity?.kind === "thinking") {
+      activity.text = this.text(append ? activity.text + text : text);
     } else {
       this.append({ kind: "thinking", messageId: this.messageId, contentIndex, text: this.text(text) });
     }
@@ -70,22 +70,22 @@ export class TaskEventRecorder {
 
     if (event.type !== "tool_execution_start" && event.type !== "tool_execution_update" && event.type !== "tool_execution_end") return;
 
-    let item = this.task.items.find((item) => item.kind === "tool" && item.id === event.toolCallId);
-    if (item?.kind !== "tool") {
-      item = { kind: "tool", id: event.toolCallId, name: event.toolName, status: "running" };
-      this.append(item);
+    let activity = this.task.activities.find((activity) => activity.kind === "tool" && activity.id === event.toolCallId);
+    if (activity?.kind !== "tool") {
+      activity = { kind: "tool", id: event.toolCallId, name: event.toolName, status: "running" };
+      this.append(activity);
     }
 
     if (event.type !== "tool_execution_end") {
       const args = this.serialize(event.args ?? {});
-      item.args = args.length > MAX_TEXT
+      activity.args = args.length > MAX_TEXT
         ? { truncated: this.text(args) }
         : JSON.parse(args);
     }
     if (event.type === "tool_execution_update" || event.type === "tool_execution_end") {
       const result = event.type === "tool_execution_end" ? event.result : event.partialResult;
-      item.result = this.text(this.serialize(result));
+      activity.result = this.text(this.serialize(result));
     }
-    if (event.type === "tool_execution_end") item.status = event.isError ? "error" : "success";
+    if (event.type === "tool_execution_end") activity.status = event.isError ? "error" : "success";
   }
 }

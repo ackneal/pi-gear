@@ -1,6 +1,6 @@
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { Markdown } from "@earendil-works/pi-tui";
-import type { SubagentItem, SubagentPresentation } from "../../subagents/runtime/types.ts";
+import type { SubagentActivity, SubagentPresentation } from "../../subagents/runtime/types.ts";
 import type { SubagentViewRun as SubagentRun } from "./types.ts";
 import { readableProvider, usefulText } from "./text-policy.ts";
 
@@ -31,7 +31,7 @@ export function titleCase(value: string): string {
   return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-export function formatToolCount(tools: readonly Extract<SubagentItem, { kind: "tool" }>[]): string {
+export function formatToolCount(tools: readonly Extract<SubagentActivity, { kind: "tool" }>[]): string {
   const completed = tools.filter((item) => item.status === "success").length;
   const failed = tools.filter((item) => item.status === "error").length;
   return failed > 0 ? `${completed}/${tools.length} tools · ${failed} failed` : `${completed}/${tools.length} tools`;
@@ -64,11 +64,11 @@ function activity(run: SubagentRun | undefined, profile: SubagentRendererProfile
   if (run.status === "unknown") return "Status unavailable";
   if (run.status === "success") return activityPhrase(profile, "complete", `${label} complete`);
   if (run.status === "error" || run.status === "aborted") return failure(run, profile);
-  const latestRunning = [...run.items].reverse().find((item): item is Extract<SubagentItem, { kind: "tool" }> => item.kind === "tool" && item.status === "running");
+  const latestRunning = [...run.activities].reverse().find((item): item is Extract<SubagentActivity, { kind: "tool" }> => item.kind === "tool" && item.status === "running");
   if (latestRunning) return `${readableProvider(latestRunning.name)} running`;
-  const latestThought = [...run.items].reverse().find((item): item is Extract<SubagentItem, { kind: "thinking" }> => item.kind === "thinking" && Boolean(usefulText(item.text)));
+  const latestThought = [...run.activities].reverse().find((item): item is Extract<SubagentActivity, { kind: "thinking" }> => item.kind === "thinking" && Boolean(usefulText(item.text)));
   if (latestThought) return usefulText(latestThought.text).replace(/\s+/g, " ");
-  const latestCompleted = [...run.items].reverse().find((item): item is Extract<SubagentItem, { kind: "tool" }> => item.kind === "tool" && item.status !== "running");
+  const latestCompleted = [...run.activities].reverse().find((item): item is Extract<SubagentActivity, { kind: "tool" }> => item.kind === "tool" && item.status !== "running");
   if (latestCompleted) return `${readableProvider(latestCompleted.name)} ${latestCompleted.status === "success" ? "complete" : "failed"}`;
   return run.result ? activityPhrase(profile, "drafting", `Drafting ${label.toLowerCase()}`) : activityPhrase(profile, "starting", `Starting ${label.toLowerCase()}`);
 }
@@ -112,10 +112,10 @@ export function formatDuration(durationMs: number): string {
 }
 
 function metadata(run: SubagentRun | undefined, profile: SubagentRendererProfile, now = Date.now()): string {
-  const tools = run?.items.filter((item): item is Extract<SubagentItem, { kind: "tool" }> => item.kind === "tool") ?? [];
+  const tools = run?.activities.filter((item): item is Extract<SubagentActivity, { kind: "tool" }> => item.kind === "tool") ?? [];
   let toolStr: string;
   if (!tools.length) {
-    const hasThought = run?.items.some((item) => item.kind === "thinking" && Boolean(usefulText(item.text)));
+    const hasThought = run?.activities.some((item) => item.kind === "thinking" && Boolean(usefulText(item.text)));
     const name = profileLabel(profile);
     const label = run?.status === "unknown" ? "Status unavailable" : hasThought ? "Thinking" : run?.status === "success" ? activityPhrase(profile, "complete", `${name} complete`) : run?.status === "error" || run?.status === "aborted" ? failure(run, profile) : activityPhrase(profile, "starting", `Starting ${name.toLowerCase()}`);
     toolStr = compact(label);

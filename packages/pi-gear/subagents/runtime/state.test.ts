@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SubagentEvent } from "./events.ts";
-import { MAX_RETAINED_ITEMS, MAX_RETAINED_TEXT_CHARS } from "./limits.ts";
+import { MAX_RETAINED_ACTIVITIES, MAX_RETAINED_TEXT_CHARS } from "./limits.ts";
 import { reduceSubagentEvent } from "./state.ts";
 import type { SubagentRun } from "./types.ts";
 
 function mixedRun(count: number): SubagentRun {
-  let run: SubagentRun = { status: "running", startedAt: 0, items: [] };
+  let run: SubagentRun = { status: "running", startedAt: 0, activities: [] };
   for (let i = 0; i < count; i++) {
     run = reduceSubagentEvent(run, i % 2 === 0
       ? { type: "thinking", text: String(i), contentIndex: i }
@@ -15,13 +15,13 @@ function mixedRun(count: number): SubagentRun {
   return run;
 }
 
-for (const count of [MAX_RETAINED_ITEMS - 1, MAX_RETAINED_ITEMS, MAX_RETAINED_ITEMS + 1]) {
-  test(`mixed activity retains the rolling cap at ${count} items`, () => {
+for (const count of [MAX_RETAINED_ACTIVITIES - 1, MAX_RETAINED_ACTIVITIES, MAX_RETAINED_ACTIVITIES + 1]) {
+  test(`mixed activity retains the rolling cap at ${count} activities`, () => {
     const run = mixedRun(count);
-    assert.equal(run.items.length, Math.min(count, MAX_RETAINED_ITEMS));
-    assert.equal(run.itemsTruncated, count > MAX_RETAINED_ITEMS ? true : undefined);
-    assert.deepEqual(run.items, mixedRun(MAX_RETAINED_ITEMS).items.slice(count > MAX_RETAINED_ITEMS ? 1 : 0, count)
-      .concat(count > MAX_RETAINED_ITEMS ? [{ kind: "thinking", text: String(count - 1), contentIndex: count - 1 }] : []));
+    assert.equal(run.activities.length, Math.min(count, MAX_RETAINED_ACTIVITIES));
+    assert.equal(run.activitiesTruncated, count > MAX_RETAINED_ACTIVITIES ? true : undefined);
+    assert.deepEqual(run.activities, mixedRun(MAX_RETAINED_ACTIVITIES).activities.slice(count > MAX_RETAINED_ACTIVITIES ? 1 : 0, count)
+      .concat(count > MAX_RETAINED_ACTIVITIES ? [{ kind: "thinking", text: String(count - 1), contentIndex: count - 1 }] : []));
   });
 }
 
@@ -40,11 +40,11 @@ const updates: { name: string; event: SubagentEvent }[] = [
 for (const truncated of [false, true]) {
   for (const { name, event } of updates) {
     test(`${name} ${truncated ? "preserves truncation" : "does not falsely mark truncation"}`, () => {
-      const run = mixedRun(MAX_RETAINED_ITEMS + Number(truncated));
+      const run = mixedRun(MAX_RETAINED_ACTIVITIES + Number(truncated));
       const before = structuredClone(run);
       const next = reduceSubagentEvent(run, event);
-      assert.equal(next.itemsTruncated, truncated ? true : undefined);
-      assert.equal(next.items.length, MAX_RETAINED_ITEMS);
+      assert.equal(next.activitiesTruncated, truncated ? true : undefined);
+      assert.equal(next.activities.length, MAX_RETAINED_ACTIVITIES);
       assert.deepEqual(run, before);
     });
   }

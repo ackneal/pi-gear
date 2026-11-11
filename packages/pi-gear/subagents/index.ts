@@ -29,6 +29,7 @@ import type { SubagentDispatch, SubagentRun } from "./runtime/types.ts";
 import type { WorkspaceServices } from "../workspace/setup.ts";
 import { setupSubagentSettings, SUBAGENTS, type SubagentSettings } from "./settings.ts";
 import { taskRun } from "./task-run.ts";
+import { normalizeRunActivities } from "./activities.ts";
 import { setupGear } from "../index.ts";
 
 export interface SubagentServices {
@@ -55,7 +56,7 @@ function recordStart(toolCallId: string | undefined, runId: string, task: string
   const initialRun: SubagentRun = {
     status: "running",
     startedAt: Date.now(),
-    items: [],
+    activities: [],
     ...(dispatch ? { dispatch } : {}),
   };
   if (toolCallId) recordSubagentLiveStart(toolCallId, task, initialRun);
@@ -72,12 +73,12 @@ const COMPLETION_ENTRY = "gear:subagent-completion";
 type RunDetails = SubagentRun & { runId: string; revision: number };
 
 function observation(details: RunDetails) {
-  const tools = details.items.filter((item) => item.kind === "tool");
+  const tools = details.activities.filter((activity) => activity.kind === "tool");
   return {
     content: [{ type: "text" as const, text: JSON.stringify({
       ...details,
       // Keep complete evidence in details, but bound repeated model-facing output.
-      items: tools.slice(-8).map((item) => {
+      activities: tools.slice(-8).map((item) => {
         const args = item.args === undefined ? undefined : JSON.stringify(item.args);
         return {
           ...item,
@@ -85,7 +86,7 @@ function observation(details: RunDetails) {
           ...(item.result !== undefined ? { result: item.result.slice(0, 2000), resultTruncated: item.result.length > 2000 } : {}),
         };
       }),
-      itemsTruncated: details.itemsTruncated || tools.length > 8,
+      activitiesTruncated: details.activitiesTruncated || tools.length > 8,
     }) }],
     details,
   };
@@ -107,7 +108,7 @@ export function setupSubagents(
     const entry = ctx?.sessionManager.getEntries().reverse().find((entry) =>
       entry.type === "custom" && entry.customType === COMPLETION_ENTRY &&
       (entry.data as RunDetails | undefined)?.runId === runId);
-    return entry?.type === "custom" ? entry.data as RunDetails : undefined;
+    return entry?.type === "custom" ? normalizeRunActivities(entry.data as RunDetails) : undefined;
   }
 
   function track(toolCallId: string, record: TaskRecord, dispatch: SubagentDispatch, ctx: ExtensionContext): void {
@@ -274,7 +275,7 @@ export function setupSubagents(
         return {
           isError: true,
           content: [{ type: "text", text: String(err) }],
-          details: { error: String(err), runId, status: "error", revision: 0, items: [] },
+          details: { error: String(err), runId, status: "error", revision: 0, activities: [] },
         };
       }
     },
@@ -296,7 +297,7 @@ export function setupSubagents(
       if (task) {
         recordProgress(undefined, runId, task);
       } else {
-        recordSubagentLiveUpdate(runId, { status: "aborted", startedAt: Date.now(), items: [] });
+        recordSubagentLiveUpdate(runId, { status: "aborted", startedAt: Date.now(), activities: [] });
       }
       return {
         content: [
@@ -308,7 +309,7 @@ export function setupSubagents(
             }),
           },
         ],
-        details: { runId, status, revision: task?.revision ?? 0, items: [] },
+        details: { runId, status, revision: task?.revision ?? 0, activities: [] },
       };
     },
     renderCall: () => ({ render: () => [], invalidate: () => {} }),

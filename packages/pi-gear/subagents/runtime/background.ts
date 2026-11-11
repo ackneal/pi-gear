@@ -87,10 +87,10 @@ export interface BackgroundRegistryOptions {
 }
 
 const terminal = (status: BackgroundStatus): boolean => status === "success" || status === "error" || status === "aborted";
-const cloneRun = (run: SubagentRun): SubagentRun => ({ ...run, items: run.items.map((item) => ({ ...item })), ...(run.dispatch ? { dispatch: { ...run.dispatch } } : {}) });
+const cloneRun = (run: SubagentRun): SubagentRun => ({ ...run, activities: run.activities.map((activity) => ({ ...activity })), ...(run.dispatch ? { dispatch: { ...run.dispatch } } : {}) });
 
 function progressKey(run: SubagentRun): string {
-  const tools = run.items.filter((item) => item.kind === "tool").map((item) => `${item.id ?? item.name}:${item.status}`).join("|");
+  const tools = run.activities.filter((activity) => activity.kind === "tool").map((activity) => `${activity.id ?? activity.name}:${activity.status}`).join("|");
   return `${run.status}:${tools}:${run.result === undefined ? "" : "result"}:${run.error ?? ""}`;
 }
 
@@ -152,7 +152,7 @@ export class BackgroundRunRegistry {
     const now = this.now();
     const controller = new AbortController();
     const runId = this.createRunId();
-    const initial: SubagentRun = { status: "running", startedAt: now, lastActivityAt: now, items: [], ...(options.dispatch ? { dispatch: { ...options.dispatch } } : {}) };
+    const initial: SubagentRun = { status: "running", startedAt: now, lastActivityAt: now, activities: [], ...(options.dispatch ? { dispatch: { ...options.dispatch } } : {}) };
     const entry: Entry = {
       runId, sessionId: this.sessionId, profile: options.profile, task: options.task,
       ...(options.dispatch ? { dispatch: { ...options.dispatch } } : {}),
@@ -296,10 +296,10 @@ export class BackgroundRunRegistry {
 
   private snapshot(entry: Entry): BackgroundSnapshot {
     const now = this.now();
-    const tools = entry.run.items.filter((item) => item.kind === "tool");
+    const tools = entry.run.activities.filter((activity) => activity.kind === "tool");
     let consecutiveToolErrors = 0;
     for (let index = tools.length - 1; index >= 0 && tools[index]?.status === "error"; index--) consecutiveToolErrors++;
-    const latest = entry.run.items[entry.run.items.length - 1];
+    const latest = entry.run.activities[entry.run.activities.length - 1];
     const latestUpdate = latest?.kind === "thinking" ? latest.text : latest?.kind === "tool" ? `${latest.name}: ${latest.status}` : undefined;
     return {
       runId: entry.runId, status: entry.status, revision: entry.revision, profile: entry.profile.id, task: entry.task,

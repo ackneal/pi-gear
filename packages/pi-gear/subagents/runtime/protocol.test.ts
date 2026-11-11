@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { test } from "node:test";
-import { MAX_RETAINED_ITEMS } from "./limits.ts";
+import { MAX_RETAINED_ACTIVITIES } from "./limits.ts";
 import { runChildSubagent } from "./runner.ts";
 import type { SubagentRun } from "./types.ts";
 
-for (const count of [MAX_RETAINED_ITEMS, MAX_RETAINED_ITEMS + 1]) {
+for (const count of [MAX_RETAINED_ACTIVITIES, MAX_RETAINED_ACTIVITIES + 1]) {
   for (const exitCode of [0, 1]) {
-    test(`runner snapshots preserve truncation with ${count} items and exit ${exitCode}`, async () => {
+    test(`runner snapshots preserve truncation with ${count} activities and exit ${exitCode}`, async () => {
       const updates: SubagentRun[] = [];
       const events = Array.from({ length: count }, (_, i) => i % 2 === 0
         ? { type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: String(i) }] } }
@@ -24,12 +24,12 @@ for (const count of [MAX_RETAINED_ITEMS, MAX_RETAINED_ITEMS + 1]) {
         onUpdate: (run) => updates.push(run),
       });
       assert.equal(result.status, exitCode === 0 ? "success" : "error");
-      assert.equal(result.itemsTruncated, count > MAX_RETAINED_ITEMS ? true : undefined);
-      assert.equal(result.items.length, MAX_RETAINED_ITEMS);
+      assert.equal(result.activitiesTruncated, count > MAX_RETAINED_ACTIVITIES ? true : undefined);
+      assert.equal(result.activities.length, MAX_RETAINED_ACTIVITIES);
       assert.deepEqual(updates.at(-1), result);
       assert.notEqual(updates.at(-1), result);
-      assert.equal(updates[0]?.itemsTruncated, undefined);
-      assert.equal(updates[0]?.items.length, 1);
+      assert.equal(updates[0]?.activitiesTruncated, undefined);
+      assert.equal(updates[0]?.activities.length, 1);
     });
   }
 }

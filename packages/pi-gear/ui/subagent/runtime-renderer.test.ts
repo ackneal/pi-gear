@@ -17,8 +17,8 @@ for (const source of ["snapshot", "subscription"] as const) {
         id: "task-evidence", agentId: "researcher", profileId: "researcher", task: "Inspect",
         depth: 0, targetFiles: [], wakeOn: [], status: "completed", revision: 5,
         createdAt: 1000, startedAt: 1000, lastActivityAt: 3000, finishedAt: 3000,
-        result: "Verified answer", itemsTruncated: true,
-        items: [
+        result: "Verified answer", activitiesTruncated: true,
+        activities: [
           { kind: "message", role: "assistant", text: "Not an activity row" },
           { kind: "tool", id: "tool-1", name: "read", args: { path: "evidence.txt" }, status: "success", result: "Evidence" },
         ],
@@ -27,7 +27,7 @@ for (const source of ["snapshot", "subscription"] as const) {
       const tasks = new TaskRegistry();
       let listener: ((task: TaskRecord) => void) | undefined;
       t.mock.method(tasks, "getTask", () => source === "snapshot" ? record : {
-        ...record, status: "running", items: [], usage: undefined, finishedAt: undefined,
+        ...record, status: "running", activities: [], usage: undefined, finishedAt: undefined,
       });
       t.mock.method(tasks, "subscribe", (_id: string, callback: (task: TaskRecord) => void) => {
         listener = callback;
@@ -35,7 +35,7 @@ for (const source of ["snapshot", "subscription"] as const) {
       });
 
       const component = renderSubagentResult(researcherProfile, {
-        content: [], details: { status: "running", startedAt: 1000, items: [], ...{ runId: record.id } },
+        content: [], details: { status: "running", startedAt: 1000, activities: [], ...{ runId: record.id } },
       }, { expanded, isPartial: false }, theme, {
         args: { question: "Inspect" }, invalidate() {},
       }, { tasks });

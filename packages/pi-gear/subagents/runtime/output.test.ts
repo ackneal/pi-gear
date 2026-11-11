@@ -26,7 +26,7 @@ function snapshot(status: BackgroundSnapshot["status"]): BackgroundSnapshot {
     run: {
       status: status === "cancelling" ? "running" : status,
       startedAt: 1,
-      items: [{ kind: "tool", id: "large", name: "bash", status: "running", result: "large retained output" }],
+      activities: [{ kind: "tool", id: "large", name: "bash", status: "running", result: "large retained output" }],
       result: "final result",
       error: "child failed",
       usage: { input: 100, output: 20 },
@@ -50,7 +50,7 @@ test("running observe output is compact and excludes retained runtime state", ()
     latestUpdate: "bash: running",
   });
   const text = JSON.stringify(output);
-  assert.doesNotMatch(text, /items|usage|large task metadata|provider\/model|large retained output/);
+  assert.doesNotMatch(text, /activities|usage|large task metadata|provider\/model|large retained output/);
 });
 
 test("terminal observe output includes only the useful terminal payload", () => {
@@ -73,6 +73,6 @@ test("control-tool results keep compact details without full runtime state", () 
   assert.deepEqual(result.details, compactSubagentOutput(base, "terminal"));
 
   const text = JSON.stringify(result);
-  assert.doesNotMatch(text, /"items"|"task"|"dispatch"|large retained output/);
+  assert.doesNotMatch(text, /"activities"|"task"|"dispatch"|large retained output/);
   assert.equal(result.content[0]?.type, "text");
 });

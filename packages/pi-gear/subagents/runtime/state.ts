@@ -1,6 +1,6 @@
 import type { SubagentEvent } from "./events.ts";
 import type { SubagentRun } from "./types.ts";
-import { MAX_RETAINED_ITEMS, truncateRetainedText } from "./limits.ts";
+import { MAX_RETAINED_ACTIVITIES, truncateRetainedText } from "./limits.ts";
 
 type Usage = NonNullable<SubagentRun["usage"]>;
 
@@ -27,14 +27,14 @@ function addUsage(left: Usage | undefined, right: Usage): Usage {
 }
 
 function applyToolEnd(
-  items: SubagentRun["items"],
+  activities: SubagentRun["activities"],
   event: Extract<SubagentEvent, { type: "tool_end" }>,
 ): void {
-  const item = items.find((candidate) => candidate.kind === "tool" && candidate.id === event.id);
-  if (item?.kind !== "tool") return;
+  const activity = activities.find((candidate) => candidate.kind === "tool" && candidate.id === event.id);
+  if (activity?.kind !== "tool") return;
 
-  item.status = event.isError ? "error" : "success";
-  if (event.result) item.result = truncateRetainedText(event.result);
+  activity.status = event.isError ? "error" : "success";
+  if (event.result) activity.result = truncateRetainedText(event.result);
 }
 
 export function reduceSubagentEvent(
@@ -58,29 +58,29 @@ export function reduceSubagentEvent(
     return { ...run, lastActivityAt: now, modelError: event.message };
   }
 
-  const items = run.items.map((item) => ({ ...item }));
+  const activities = run.activities.map((activity) => ({ ...activity }));
 
   if (event.type === "thinking") {
     const text = truncateRetainedText(event.text);
     if (event.contentIndex !== undefined) {
-      const existing = items.find(
-        (item) => item.kind === "thinking" && item.contentIndex === event.contentIndex && item.messageId === event.messageId,
+      const existing = activities.find(
+        (activity) => activity.kind === "thinking" && activity.contentIndex === event.contentIndex && activity.messageId === event.messageId,
       );
       if (existing?.kind === "thinking") {
         existing.text = text;
       } else {
-        items.push({ kind: "thinking", text, contentIndex: event.contentIndex, ...(event.messageId !== undefined ? { messageId: event.messageId } : {}) });
+        activities.push({ kind: "thinking", text, contentIndex: event.contentIndex, ...(event.messageId !== undefined ? { messageId: event.messageId } : {}) });
       }
     } else {
-      const lastItem = items[items.length - 1];
-      if (lastItem && lastItem.kind === "thinking") {
-        lastItem.text = text;
+      const lastActivity = activities[activities.length - 1];
+      if (lastActivity && lastActivity.kind === "thinking") {
+        lastActivity.text = text;
       } else {
-        items.push({ kind: "thinking", text });
+        activities.push({ kind: "thinking", text });
       }
     }
   } else if (event.type === "tool_start") {
-    const existing = items.find((item) => item.kind === "tool" && item.id === event.id);
+    const existing = activities.find((activity) => activity.kind === "tool" && activity.id === event.id);
     if (existing && existing.kind === "tool") {
       if (event.args && Object.keys(event.args).length > 0) {
         existing.args = event.args;
@@ -89,7 +89,7 @@ export function reduceSubagentEvent(
         existing.name = event.name;
       }
     } else {
-      items.push({
+      activities.push({
         kind: "tool",
         id: event.id,
         name: event.name,
@@ -98,15 +98,15 @@ export function reduceSubagentEvent(
       });
     }
   } else if (event.type === "tool_end") {
-    applyToolEnd(items, event);
+    applyToolEnd(activities, event);
   }
 
-  const retainedItems = items.slice(-MAX_RETAINED_ITEMS);
+  const retainedActivities = activities.slice(-MAX_RETAINED_ACTIVITIES);
   const next = {
     ...run,
     lastActivityAt: now,
-    items: retainedItems,
-    ...(items.length > MAX_RETAINED_ITEMS ? { itemsTruncated: true } : {}),
+    activities: retainedActivities,
+    ...(activities.length > MAX_RETAINED_ACTIVITIES ? { activitiesTruncated: true } : {}),
   };
   return event.type === "result"
     ? { ...next, result: truncateRetainedText(event.text) }

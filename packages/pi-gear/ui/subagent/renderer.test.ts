@@ -68,16 +68,16 @@ test("formatDuration and idleDuration handle units and running state", () => {
     status: "running" as const,
     startedAt: 10_000,
     lastActivityAt: 20_000,
-    items: [],
+    activities: [],
   };
   assert.equal(idleDuration(runningRun, 35_000), 15_000);
-  assert.equal(idleDuration({ status: "running", startedAt: 10_000, items: [] }, 25_000), 15_000);
+  assert.equal(idleDuration({ status: "running", startedAt: 10_000, activities: [] }, 25_000), 15_000);
 
   const finishedRun = {
     status: "success" as const,
     startedAt: 10_000,
     finishedAt: 30_000,
-    items: [],
+    activities: [],
   };
   assert.equal(idleDuration(finishedRun, 50_000), 0);
   assert.equal(idleDuration(undefined, 50_000), 0);
@@ -88,7 +88,7 @@ test("collapsed includes idle indication when stalled", () => {
     status: "running" as const,
     startedAt: 0,
     lastActivityAt: 5_000,
-    items: [{ kind: "tool" as const, id: "t1", name: "read", status: "running" as const }],
+    activities: [{ kind: "tool" as const, id: "t1", name: "read", status: "running" as const }],
   };
 
   const activeCollapsed = collapsed(stalledRun, researcher, theme, "●", 10_000);
@@ -145,7 +145,7 @@ test("collapsed metadata renders tool fraction and usage accurately", () => {
     status: "success" as const,
     startedAt: 0,
     finishedAt: 2_000,
-    items: [
+    activities: [
       { kind: "tool" as const, id: "t1", name: "read", status: "success" as const },
       { kind: "tool" as const, id: "t2", name: "bash", status: "success" as const },
     ],
@@ -158,7 +158,7 @@ test("collapsed metadata renders tool fraction and usage accurately", () => {
     status: "success" as const,
     startedAt: 0,
     finishedAt: 3_000,
-    items: [
+    activities: [
       { kind: "tool" as const, id: "t1", name: "read", status: "success" as const },
       { kind: "tool" as const, id: "t2", name: "bash", status: "error" as const },
       { kind: "tool" as const, id: "t3", name: "edit", status: "success" as const },

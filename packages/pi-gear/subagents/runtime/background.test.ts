@@ -14,7 +14,7 @@ function deferred<T>() {
 }
 
 function run(status: SubagentRun["status"] = "running", result?: string): SubagentRun {
-  return { status, startedAt: 0, items: [], ...(result === undefined ? {} : { result }) };
+  return { status, startedAt: 0, activities: [], ...(result === undefined ? {} : { result }) };
 }
 
 class Timers {
@@ -60,7 +60,7 @@ test("wait reports immediate changes, later changes, timeout, and terminal compl
 
   assert.equal((await subject.wait(initial.runId, 0)).reason, "changed");
   const changed = subject.wait(initial.runId, initial.revision);
-  update({ ...run(), result: "partial", items: [{ kind: "thinking", text: "progress" }] });
+  update({ ...run(), result: "partial", activities: [{ kind: "thinking", text: "progress" }] });
   const changedResult = await changed;
   assert.equal(changedResult.reason, "changed");
   assert.equal(changedResult.snapshot.latestUpdate, "progress");
@@ -163,7 +163,7 @@ test("cancelling one run is independent and preserves its latest partial state",
     { runId: a.runId, status: "running" },
     { runId: b.runId, status: "running" },
   ]);
-  firstUpdate({ ...run(), result: "useful partial", items: [
+  firstUpdate({ ...run(), result: "useful partial", activities: [
     { kind: "thinking", text: "kept" },
     { kind: "tool", id: "tool-1", name: "bash", status: "running" },
   ] });
@@ -175,7 +175,7 @@ test("cancelling one run is independent and preserves its latest partial state",
   assert.equal(cancelled.status, "aborted");
   assert.deepEqual(subject.listUnresolved().map(({ runId }) => runId), [b.runId]);
   assert.equal(cancelled.partialResult, "useful partial");
-  assert.equal(cancelled.run.items[0]?.kind, "thinking");
+  assert.equal(cancelled.run.activities[0]?.kind, "thinking");
   assert.deepEqual(cancelled.activeTools, ["bash"]);
   second.resolve(run("success"));
 });

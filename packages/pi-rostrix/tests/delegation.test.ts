@@ -65,7 +65,7 @@ test("delegation preserves the parent authorization and execution context", asyn
         return {
           id: "spawned", agentId: "child", profileId: "child", task: options.task,
           depth: options.depth ?? 0, targetFiles: options.targetFiles ?? [], wakeOn: [...options.agent!.supervision.wakeOn], status: "running",
-          revision: 1, createdAt: 0, lastActivityAt: 0, items: [],
+          revision: 1, createdAt: 0, lastActivityAt: 0, activities: [],
         };
       };
       const getParentContext: NonNullable<RegisterToolsOptions["getParentContext"]> = () => ({
@@ -108,7 +108,7 @@ test("task_status acknowledges individual terminal results but not listings", as
       tasks.getTask = () => status === "missing" ? undefined : {
         id: "observed", agentId: "child", profileId: "child", task: "Work", depth: 0,
         targetFiles: [], wakeOn: [], status: status === "listing" ? "completed" : status,
-        revision: 2, createdAt: 0, lastActivityAt: 0, items: [], result: "Available result",
+        revision: 2, createdAt: 0, lastActivityAt: 0, activities: [], result: "Available result",
       };
       const record = tasks.getTask("observed");
       if (record) t.mock.method(tasks, "listTasks", () => [record]);
@@ -143,7 +143,7 @@ test("task_wait acknowledges only delivered terminal results", async (t) => {
         if (status === "error") throw new Error("Wait failed");
         return {
           id: "observed", agentId: "child", profileId: "child", task: "Work", depth: 0,
-          targetFiles: [], wakeOn: [], status, revision: 2, createdAt: 0, lastActivityAt: 0, items: [],
+          targetFiles: [], wakeOn: [], status, revision: 2, createdAt: 0, lastActivityAt: 0, activities: [],
         };
       };
       const acknowledgments: string[] = [];
