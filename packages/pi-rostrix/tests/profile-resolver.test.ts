@@ -5,6 +5,7 @@ import {
   ProfileRegistry,
   ProfileResolver,
   matchesPattern,
+  isAgentToolAllowed,
   type ProfileDefinition,
 } from "../src/index.ts";
 
@@ -202,4 +203,35 @@ test("ProfileResolver enforces ParentContextLimits capability containment", () =
 
   // Max depth decremented by parent's current depth
   assert.equal(resolved.subagents.maxDepth, 2);
+});
+
+
+test("tool inheritance preserves complete glob conjunction and concrete parent limits", () => {
+  for (const row of [
+    { base: ["*"], child: ["prefix*"], deny: [], names: ["prefixsuffix", "other"], expected: [true, false] },
+    { base: ["prefix*"], child: ["*"], deny: [], names: ["prefixsuffix", "other"], expected: [true, false] },
+    { base: ["prefix*"], child: ["prefixnarrow*"], deny: [], names: ["prefixnarrowtool", "prefixother"], expected: [true, false] },
+    { base: ["prefixnarrow*"], child: ["prefix*"], deny: [], names: ["prefixnarrowtool", "prefixother"], expected: [true, false] },
+    { base: ["prefix*"], child: ["*suffix"], deny: [], names: ["prefixsuffix", "prefixother", "othersuffix"], expected: [true, false, false] },
+    { base: ["*suffix"], child: ["prefix*"], deny: ["prefixbad*"], names: ["prefixsuffix", "prefixbadsuffix", "prefixother"], expected: [true, false, false] },
+    { base: ["*"], child: [], deny: [], names: ["read"], expected: [false] },
+    { base: ["prefix*"], child: ["*suffix"], deny: ["prefixbad*"], parent: ["prefixsuffix", "prefixbadsuffix", "prefixother"], names: ["prefixsuffix", "prefixbadsuffix", "prefixother", "prefixnewsuffix"], expected: [true, false, false, false] },
+    { base: ["*"], child: ["*"], deny: [], parent: [], names: ["read"], expected: [false] },
+    { base: ["*"], child: ["*"], deny: [], parent: ["literal*"], names: ["literal*", "literalname"], expected: [true, false] },
+  ]) {
+    const registry = new ProfileRegistry();
+    registry.register({ id: "base", label: "Base", description: "Base policy", tools: { allow: row.base, deny: row.deny } });
+    registry.register({ id: "child", label: "Child", description: "Child policy", extends: "base", tools: { allow: row.child } });
+    const resolved = new ProfileResolver(registry).resolve("child", { activeTools: row.parent });
+    assert.deepEqual(row.names.map((name) => isAgentToolAllowed(name, resolved)), row.expected, JSON.stringify(row));
+    if (row.parent) assert.deepEqual(resolved.allowedTools, row.parent.filter((name) => isAgentToolAllowed(name, resolved)));
+  }
+});
+
+test("parent currentDepth subtracts from inherited maxDepth and clamps at zero", () => {
+  for (const [currentDepth, expected] of [[undefined, 3], [0, 3], [1, 2], [3, 0], [4, 0]] as const) {
+    const registry = new ProfileRegistry();
+    registry.register({ id: "agent", label: "Agent", description: "Depth policy", subagents: { maxDepth: 3 } });
+    assert.equal(new ProfileResolver(registry).resolve("agent", { currentDepth }).subagents.maxDepth, expected);
+  }
 });

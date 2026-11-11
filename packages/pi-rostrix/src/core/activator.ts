@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { isToolAllowed, type ResolvedAgent } from "./resolver.ts";
+import { isAgentToolAllowed, type ResolvedAgent } from "./resolver.ts";
 import type { ThinkingLevel } from "./schema.ts";
 
 export interface ActiveAgentSnapshot {
@@ -91,7 +91,7 @@ export class AgentActivator {
   private _applyTools(agent: ResolvedAgent): void {
     const available = this._pi.getAllTools().map((t) => t.name);
     const targetTools = available.filter((toolName) =>
-      isToolAllowed(toolName, agent.allowedTools, agent.deniedTools),
+      isAgentToolAllowed(toolName, agent),
     );
 
     this._pi.setActiveTools(targetTools);

@@ -20,7 +20,11 @@ export interface ResolvedAgent {
   readonly systemPrompt?: string | undefined;
   readonly appendPrompt?: string | undefined;
   readonly promptGuidelines: readonly string[];
+  /** One allow-list; additional lists are conjunctive, not alternative patterns. */
   readonly allowedTools?: readonly string[] | undefined;
+  readonly toolAllowConstraints?: readonly (readonly string[])[] | undefined;
+  /** Concrete parent tool identities, never glob patterns. */
+  readonly parentActiveTools?: readonly string[] | undefined;
   readonly deniedTools: readonly string[];
   readonly mcpServers: Readonly<Record<string, AgentMcpServer>>;
   readonly allowedSkills?: readonly string[] | undefined;
@@ -65,6 +69,13 @@ export function isToolAllowed(name: string, allow?: readonly string[] | undefine
     return true;
   }
   return allow.some((pat) => matchesPattern(name, pat));
+}
+
+/** Complete tool policy: every allow-list must match, denies always win. */
+export function isAgentToolAllowed(name: string, agent: ResolvedAgent): boolean {
+  return isToolAllowed(name, agent.allowedTools, agent.deniedTools)
+    && (agent.toolAllowConstraints ?? []).every((allow) => isToolAllowed(name, allow))
+    && (agent.parentActiveTools === undefined || agent.parentActiveTools.includes(name));
 }
 
 export class AgentResolver {
@@ -116,6 +127,7 @@ export class AgentResolver {
     const guidelines: string[] = [];
 
     let allowedTools: string[] | undefined;
+    const toolAllowConstraints: (readonly string[])[] = [];
     const deniedTools: string[] = [];
     const mcpServers: Record<string, AgentMcpServer> = {};
 
@@ -146,11 +158,10 @@ export class AgentResolver {
       }
 
       if (agent.tools?.allow !== undefined) {
-        if (allowedTools === undefined) {
-          allowedTools = [...agent.tools.allow];
-        } else {
-          allowedTools = allowedTools.filter((t) => agent.tools!.allow!.some((pat) => matchesPattern(t, pat)));
+        if (allowedTools !== undefined) {
+          toolAllowConstraints.push(Object.freeze(allowedTools));
         }
+        allowedTools = [...agent.tools.allow];
       }
       if (agent.tools?.deny) {
         deniedTools.push(...agent.tools.deny);
@@ -215,9 +226,6 @@ export class AgentResolver {
       }
     }
 
-    if (allowedTools !== undefined && deniedTools.length > 0) {
-      allowedTools = allowedTools.filter((t) => !deniedTools.some((denyPat) => matchesPattern(t, denyPat)));
-    }
     if (allowedSkills !== undefined && deniedSkills.length > 0) {
       allowedSkills = allowedSkills.filter((s) => !deniedSkills.includes(s));
     }
@@ -238,6 +246,7 @@ export class AgentResolver {
       ...(appendPrompts.length > 0 ? { appendPrompt: appendPrompts.join("\n\n") } : {}),
       promptGuidelines: Object.freeze(guidelines),
       ...(allowedTools !== undefined ? { allowedTools: Object.freeze(allowedTools) } : {}),
+      toolAllowConstraints: Object.freeze(toolAllowConstraints),
       deniedTools: Object.freeze(deniedTools),
       mcpServers: Object.freeze(mcpServers),
       ...(allowedSkills !== undefined ? { allowedSkills: Object.freeze(allowedSkills) } : {}),
@@ -260,18 +269,9 @@ export class AgentResolver {
     let effectiveAllowedTools = resolved.allowedTools;
 
     if (parentLimits.activeTools !== undefined) {
-      if (effectiveAllowedTools === undefined) {
-        effectiveAllowedTools = Object.freeze(
-          parentLimits.activeTools.filter((tool) => isToolAllowed(tool, undefined, resolved.deniedTools)),
-        );
-      } else {
-        effectiveAllowedTools = Object.freeze(
-          effectiveAllowedTools.filter((tool) => {
-            const matchesParent = parentLimits.activeTools!.some((pTool) => matchesPattern(pTool, tool));
-            return matchesParent && isToolAllowed(tool, undefined, resolved.deniedTools);
-          }),
-        );
-      }
+      effectiveAllowedTools = Object.freeze(
+        parentLimits.activeTools.filter((tool) => isAgentToolAllowed(tool, resolved)),
+      );
     }
 
     const parentAllowed = parentLimits.allowedAgents ?? parentLimits.allowedProfiles;
@@ -293,6 +293,7 @@ export class AgentResolver {
 
     return {
       ...resolved,
+      ...(parentLimits.activeTools !== undefined ? { parentActiveTools: effectiveAllowedTools } : {}),
       ...(effectiveAllowedTools !== undefined ? { allowedTools: effectiveAllowedTools } : {}),
       subagents: Object.freeze({
         ...resolved.subagents,

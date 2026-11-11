@@ -73,6 +73,23 @@ function createMockPi(initial?: Partial<MockPiState>): { pi: ExtensionAPI; state
   return { pi, state, triggerBeforeAgentStart };
 }
 
+test("ProfileActivator applies all allow constraints and concrete parent identities", async () => {
+  for (const row of [
+    { constraints: [["lsp_*"]], parent: undefined, deny: [], expected: ["lsp_find"] },
+    { constraints: [["*_find"]], parent: ["lsp_diag"], deny: [], expected: [] },
+    { constraints: [["lsp_*"]], parent: ["lsp_find"], deny: ["*_find"], expected: [] },
+  ]) {
+    const { pi, state } = createMockPi();
+    const activator = new ProfileActivator(pi);
+    await activator.activate(createTestProfile({
+      id: "policy", label: "Policy", description: "", allowedTools: ["*_find"],
+      toolAllowConstraints: row.constraints, parentActiveTools: row.parent, deniedTools: row.deny,
+    }));
+    assert.deepEqual(state.activeTools, row.expected);
+    activator.dispose();
+  }
+});
+
 test("ProfileActivator activates profile tools, thinking level, and MCP servers", async () => {
   const { pi, state } = createMockPi();
   const activator = new ProfileActivator(pi);

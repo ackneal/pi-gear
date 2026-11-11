@@ -138,7 +138,7 @@ test("runner isolates discovered resources but retains explicit factories", asyn
       assert.ok(toolNames.includes("tool_search"));
       assert.deepEqual(extensions.runtime.mcpServers.get("test")?.config, { url: "https://invalid.example/mcp" });
       const policy = extensions.extensions.at(-1)!.handlers.get("tool_call")![0]!;
-      for (const [toolName, blocked] of [["read", false], ["mcp__test__search", false], ["mcp__test__write", true], ["bash", true], ["mcp__other__search", true]] as const) {
+      for (const [toolName, blocked] of [["read", false], ["mcp__test__search", false], ["mcp__test__write", true], ["bash", true], ["mcp__other__search", true], ["mcp__test__outside", true], ["mcp__test__othersearch", true]] as const) {
         const event: ToolCallEvent = { type: "tool_call", toolCallId: "parent/1", parentToolCallId: "parent", toolName, input: {} };
         const response = await policy(event);
         if (blocked) assert.deepEqual(response, { block: true, reason: `Tool ${toolName} is not allowed for agent test:worker` });
@@ -159,7 +159,7 @@ test("runner isolates discovered resources but retains explicit factories", asyn
           if ("path" in event.input && event.input.path === "/denied") return { block: true, reason: "Filesystem policy" };
         });
       }],
-      agent: agent({ allowedTools: ["read", "mcp__test__*"], deniedTools: ["mcp__test__write"], mcpServers: { test: { url: "https://invalid.example/mcp" } } }),
+      agent: agent({ allowedTools: ["read", "mcp__test__*"], toolAllowConstraints: [["read", "*search", "*write"]], parentActiveTools: ["read", "mcp__test__search", "mcp__test__write", "mcp__test__outside"], deniedTools: ["mcp__test__write"], mcpServers: { test: { url: "https://invalid.example/mcp" } } }),
     }, createSession);
 
     const result = await runner.run("Work");

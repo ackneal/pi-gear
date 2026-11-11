@@ -15,7 +15,7 @@ import {
   type SessionShutdownEvent,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { isToolAllowed, type ResolvedAgent } from "../core/resolver.ts";
+import { isAgentToolAllowed, type ResolvedAgent } from "../core/resolver.ts";
 
 export type SubagentUsage = {
   readonly inputTokens: number;
@@ -162,7 +162,7 @@ export class InProcessSubagentRunner {
         }
 
         childPi.on("tool_call", async (event) => {
-          if (!isToolAllowed(event.toolName, this._agent.allowedTools, this._agent.deniedTools)) {
+          if (!isAgentToolAllowed(event.toolName, this._agent)) {
             return { block: true, reason: `Tool ${event.toolName} is not allowed for agent ${this._agent.id}` };
           }
         });
@@ -170,7 +170,7 @@ export class InProcessSubagentRunner {
         childPi.on("before_agent_start", async () => {
           const allTools = childPi.getAllTools().map((t) => t.name);
           const targetTools = allTools.filter((toolName) =>
-            isToolAllowed(toolName, this._agent.allowedTools, this._agent.deniedTools),
+            isAgentToolAllowed(toolName, this._agent),
           );
           childPi.setActiveTools(targetTools);
         });

@@ -2,7 +2,9 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { TaskRegistry } from "../runtime/task-registry.ts";
 import type { AgentRegistry } from "../core/registry.ts";
-import type { AgentResolver } from "../core/resolver.ts";
+import type { AgentResolver, ResolvedAgent } from "../core/resolver.ts";
+import type { TaskRecord } from "../runtime/task-types.ts";
+import { resolve } from "node:path";
 
 export interface RegisterToolsOptions {
   readonly pi: ExtensionAPI;
@@ -12,11 +14,14 @@ export interface RegisterToolsOptions {
   // Aliases for compatibility
   readonly profileRegistry?: AgentRegistry | undefined;
   readonly profileResolver?: AgentResolver | undefined;
-  readonly cwd?: string | undefined;
+  readonly getParentContext?: () => {
+    readonly agent?: ResolvedAgent | undefined;
+    readonly task?: Pick<TaskRecord, "id" | "depth"> | undefined;
+  };
 }
 
 export function registerRostrixTools(options: RegisterToolsOptions): void {
-  const { pi, taskRegistry, cwd } = options;
+  const { pi, taskRegistry } = options;
   const agentResolver = options.agentResolver ?? options.profileResolver;
   if (!agentResolver) {
     throw new Error("registerRostrixTools requires an agentResolver or profileResolver");
@@ -34,7 +39,7 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
       targetFiles: Type.Optional(Type.Array(Type.String(), { description: "Files the subagent is responsible for modifying" })),
       timeoutSeconds: Type.Optional(Type.Number({ description: "Optional execution timeout in seconds" })),
     }),
-    execute: async (_toolCallId, params): Promise<{ isError?: boolean; content: { type: "text"; text: string }[]; details: Record<string, unknown> }> => {
+    execute: async (_toolCallId, params, _signal, _onUpdate, ctx): Promise<{ isError?: boolean; content: { type: "text"; text: string }[]; details: Record<string, unknown> }> => {
       const targetAgentId = params.agent ?? params.profile;
       if (!targetAgentId) {
         return {
@@ -44,13 +49,35 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
         };
       }
 
-      const resolved = agentResolver.resolve(targetAgentId);
+      const parent = options.getParentContext?.();
+      const allowedAgents = parent?.agent?.subagents.allowedAgents ?? parent?.agent?.subagents.allowedProfiles;
+      if (allowedAgents && !allowedAgents.includes(targetAgentId)) {
+        throw new Error(`Agent '${targetAgentId}' is not allowed by the parent agent`);
+      }
+
+      const depth = parent?.task ? parent.task.depth + 1 : 0;
+      const maxDepth = parent?.agent?.subagents.maxDepth;
+      if (maxDepth !== undefined && depth >= maxDepth) {
+        throw new Error(`Exceeded parent maximum delegation depth of ${maxDepth}`);
+      }
+
+      const resolved = agentResolver.resolve(targetAgentId, {
+        activeTools: pi.getActiveTools(),
+        ...(allowedAgents !== undefined ? { allowedAgents } : {}),
+      });
+      const agent = maxDepth === undefined ? resolved : {
+        ...resolved,
+        subagents: { ...resolved.subagents, maxDepth: Math.min(maxDepth, resolved.subagents.maxDepth) },
+      };
+      const taskCwd = ctx.cwd;
       const taskRecord = taskRegistry.spawn({
-        agent: resolved,
+        agent,
         task: params.task,
-        targetFiles: params.targetFiles,
+        targetFiles: params.targetFiles?.map((path) => resolve(taskCwd, path)),
         timeoutSeconds: params.timeoutSeconds,
-        cwd,
+        cwd: taskCwd,
+        depth,
+        parentTaskId: parent?.task?.id,
       });
 
       return {
