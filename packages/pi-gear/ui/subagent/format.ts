@@ -1,3 +1,5 @@
+import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import { Markdown } from "@earendil-works/pi-tui";
 import type { SubagentItem, SubagentPresentation } from "../../subagents/runtime/types.ts";
 import type { SubagentViewRun as SubagentRun } from "./types.ts";
 import { readableProvider, usefulText } from "./text-policy.ts";
@@ -134,12 +136,17 @@ export function collapsed(run: SubagentRun | undefined, profile: SubagentRendere
   return `${theme.fg(iconColor, icon)} ${title}${showActivity ? theme.fg("muted", ` · ${compact(activity(run, profile))}`) : ""}\n  ${theme.fg("dim", "└")} ${theme.fg("muted", `${metadata(run, profile, now)}${idleSuffix}`)}`;
 }
 
-export function expandedDetails(run: SubagentRun | undefined, theme: Theme): string {
+export function expandedDetails(run: SubagentRun | undefined, theme: Theme, width: number): string {
   if (!run) return "";
 
   const lines: string[] = [];
-  const result = usefulText(run.result);
-  if (result) lines.push(...result.split("\n").map((line) => theme.fg("text", line)));
+  const result = run.result?.trim();
+  if (result) {
+    const markdown = new Markdown(result, 0, 0, getMarkdownTheme(), {
+      color: (text) => theme.fg("text", text),
+    });
+    lines.push(...markdown.render(width));
+  }
 
   const error = usefulText(run.error);
   if (error) lines.push(...error.split("\n").map((line) => theme.fg("error", line)));

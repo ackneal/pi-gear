@@ -48,7 +48,7 @@ export function renderSubagentResult(
   const format = (run: SubagentRun | undefined, currentOptions: ToolRenderResultOptions, icon?: string, width = 10000) =>
     currentOptions.expanded
       ? collapsed(run, profile, theme, icon, Date.now(), undefined, run?.status === "unknown") +
-        (task ? `\n${task.split("\n").map((line) => theme.fg("muted", line)).join("\n")}` : "") + expandedActivity(run, theme, width) + expandedDetails(run, theme)
+        (task ? `\n${task.split("\n").map((line) => theme.fg("muted", line)).join("\n")}` : "") + expandedActivity(run, theme, width) + expandedDetails(run, theme, width)
       : collapsed(run, profile, theme, icon, Date.now(), task);
   const component =
     context.lastComponent instanceof SubagentResultComponent
