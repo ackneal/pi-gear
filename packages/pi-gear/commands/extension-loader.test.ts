@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { DefaultResourceLoader } from "@earendil-works/pi-coding-agent";
+import { setupGear } from "../index.ts";
 import { childArgs } from "../subagents/runtime/process.ts";
 import { researcherProfile } from "../subagents/agents/researcher/profile.ts";
 import { reviewerProfile } from "../subagents/agents/reviewer/profile.ts";
@@ -45,6 +47,28 @@ for (const { profile, extension, expectedServers } of [
     }
   });
 }
+
+test("in-process child explicitly loads safety policies without host UI or recursive agents", async () => {
+  const previous = process.env.PI_GEAR_CHILD;
+  const loader = new DefaultResourceLoader({
+    cwd: fileURLToPath(new URL("../../../", import.meta.url)),
+    agentDir: fileURLToPath(new URL("../../../.pi", import.meta.url)),
+    noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true,
+    extensionFactories: [(pi) => setupGear(pi, { child: true })],
+  });
+  await loader.reload();
+  const result = loader.getExtensions();
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.extensions.length, 1);
+  const child = result.extensions[0]!;
+  assert.ok(child.handlers.has("tool_call"));
+  assert.ok(child.handlers.has("user_bash"));
+  assert.equal(child.commands.size, 0);
+  for (const tool of ["researcher", "worker", "reviewer", "request_command"]) {
+    assert.equal(child.tools.has(tool), false, tool);
+  }
+  assert.equal(process.env.PI_GEAR_CHILD, previous);
+});
 
 test("Pi's extension loader loads gear with its package aliases", async () => {
   const previous = process.env.PI_GEAR_CHILD;

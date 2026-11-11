@@ -5,6 +5,7 @@ import { setupLifecycle } from "./index.ts";
 import type { FffSidecar } from "./fff.ts";
 import type { FffClient } from "./fff-client.ts";
 import { FFF_SOCKET_ENV } from "./fff-protocol.ts";
+import { clearSubagentRegistry, getSubagentEntry, recordSubagentLiveStart } from "../ui/subagent/registry.ts";
 
 function lifecycleHarness() {
   const handlers = new Map<string, ((event: unknown, ctx: ExtensionContext) => unknown)[]>();
@@ -97,6 +98,29 @@ for (const child of [undefined, false]) {
     assert.equal(lifecycle.fff.failure(), undefined);
   });
 }
+
+test("only the owning lifecycle clears subagent views", async (t) => {
+  for (const { child, retained } of [
+    { child: true, retained: true },
+    { child: false, retained: false },
+  ]) {
+    await t.test(`child=${child}`, async (t) => {
+      clearSubagentRegistry();
+      t.after(clearSubagentRegistry);
+      const { pi, emit } = lifecycleHarness();
+      setupLifecycle(pi, {
+        child,
+        startFff: async () => ({ dispose: async () => {} }) as FffSidecar,
+      });
+
+      for (const event of ["session_start", "session_shutdown"]) {
+        recordSubagentLiveStart("parent-run", "Task");
+        await emit(event);
+        assert.equal(Boolean(getSubagentEntry("parent-run")), retained, event);
+      }
+    });
+  }
+});
 
 test("lifecycle preserves FFF startup failures without failing session startup", async () => {
   const handlers = new Map<string, ((event: unknown, ctx: ExtensionContext) => unknown)[]>();

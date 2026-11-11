@@ -26,6 +26,7 @@ import {
   workerProfile,
 } from "./agents/worker/index.ts";
 import type { SubagentRun } from "./runtime/types.ts";
+import { setupGear } from "../index.ts";
 import type { WorkspaceServices } from "../workspace/setup.ts";
 import { setupSubagentSettings, type SubagentSettings } from "./settings.ts";
 
@@ -95,6 +96,7 @@ export function setupSubagents(
 
       const resolved = runtime.resolveProfile("gear:researcher");
       const record = runtime.tasks.spawn({
+        extensionFactories: [(childPi) => setupGear(childPi, { child: true })],
         profile: resolved,
         task,
         cwd: ctx.cwd,
@@ -141,6 +143,7 @@ export function setupSubagents(
 
       const resolved = runtime.resolveProfile("gear:worker");
       const record = runtime.tasks.spawn({
+        extensionFactories: [(childPi) => setupGear(childPi, { child: true })],
         profile: resolved,
         task,
         targetFiles: targetFiles?.map((f) => resolve(ctx.cwd, f)),
@@ -188,6 +191,7 @@ export function setupSubagents(
 
       const resolved = runtime.resolveProfile("gear:reviewer");
       const record = runtime.tasks.spawn({
+        extensionFactories: [(childPi) => setupGear(childPi, { child: true })],
         profile: resolved,
         task,
         cwd: ctx.cwd,

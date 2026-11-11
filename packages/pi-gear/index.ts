@@ -13,7 +13,11 @@ import { setupThinkingDisplay } from "./ui/thinking/index.ts";
 import { setupWorkspace } from "./workspace/setup.ts";
 
 export default async function gear(pi: ExtensionAPI): Promise<void> {
-  const child = process.env.PI_GEAR_CHILD === "1";
+  return setupGear(pi, { child: process.env.PI_GEAR_CHILD === "1" });
+}
+
+export async function setupGear(pi: ExtensionAPI, options: { child: boolean }): Promise<void> {
+  const { child } = options;
   const config = await loadExtensionConfig();
   const execution = setupExecution(pi, config, { child });
   const lifecycle = setupLifecycle(pi, { child });
@@ -31,7 +35,7 @@ export default async function gear(pi: ExtensionAPI): Promise<void> {
     }
   }
 
-  setupTaskState(pi);
+  if (!child) setupTaskState(pi);
   setupPromptComposer(pi);
 
   setupThinkingDisplay(pi);

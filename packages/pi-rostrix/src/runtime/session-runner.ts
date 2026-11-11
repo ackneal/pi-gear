@@ -1,13 +1,17 @@
 import {
   createAgentSession,
+  createCodemodeExtension,
   createMcpExtension,
+  createToolSearchExtension,
   DefaultResourceLoader,
   getAgentDir,
   SessionManager,
   type AgentSession,
   type AgentSessionEvent,
   type ExtensionAPI,
+  type ExtensionFactory,
   type ModelRuntime,
+  type SessionShutdownEvent,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { isToolAllowed, type ResolvedAgent } from "../core/resolver.ts";
@@ -30,9 +34,11 @@ export interface SubagentSessionOptions {
   readonly parentSession?: AgentSession | undefined;
   readonly modelRuntime?: ModelRuntime | undefined;
   readonly customTools?: ToolDefinition[] | undefined;
+  readonly extensionFactories?: readonly ExtensionFactory[] | undefined;
   readonly signal?: AbortSignal | undefined;
   readonly onEvent?: ((event: AgentSessionEvent) => void) | undefined;
   readonly onTextDelta?: ((delta: string) => void) | undefined;
+  readonly onUsage?: ((usage: SubagentUsage) => void) | undefined;
 }
 
 export interface SubagentTaskResult {
@@ -44,27 +50,63 @@ export interface SubagentTaskResult {
   readonly durationMs: number;
 }
 
+type SubagentSession = Pick<AgentSession, "bindExtensions" | "subscribe" | "prompt" | "abort" | "dispose"> & {
+  extensionRunner: { emit(event: SessionShutdownEvent): Promise<unknown> };
+};
+
+type SessionFactory = (
+  options: NonNullable<Parameters<typeof createAgentSession>[0]>,
+) => Promise<{ session: SubagentSession }>;
+
+async function disposeSession(session: SubagentSession): Promise<void> {
+  try {
+    // SDK dispose invalidates extension contexts without running their shutdown handlers.
+    await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+  } finally {
+    session.dispose();
+  }
+}
+
 export class InProcessSubagentRunner {
   private readonly _agent: ResolvedAgent;
   private readonly _options: SubagentSessionOptions;
+  private readonly createSession: SessionFactory;
 
-  constructor(options: SubagentSessionOptions) {
+  constructor(
+    options: SubagentSessionOptions,
+    createSession: SessionFactory = createAgentSession,
+  ) {
     const resolved = options.agent ?? options.profile;
     if (!resolved) {
       throw new Error("InProcessSubagentRunner requires an agent or profile option");
     }
     this._agent = resolved;
     this._options = options;
+    this.createSession = createSession;
   }
 
   async run(taskPrompt: string): Promise<SubagentTaskResult> {
     const startedAt = Date.now();
+    if (this._options.signal?.aborted) {
+      return {
+        status: "aborted",
+        error: String(this._options.signal.reason ?? "Aborted"),
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0 },
+        turns: 0,
+        durationMs: Date.now() - startedAt,
+      };
+    }
+
     let turns = 0;
     let inputTokens = 0;
     let outputTokens = 0;
     let cacheReadTokens = 0;
     let cacheWriteTokens = 0;
     let totalCost = 0;
+    let totalTokens = 0;
+    const collectUsage = (): SubagentUsage => ({
+      inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, totalTokens, cost: totalCost,
+    });
     let latestAssistantText = "";
 
     const cwd = this._options.cwd ?? (this._options.parentSession ? (this._options.parentSession as any)._cwd : process.cwd());
@@ -93,9 +135,13 @@ export class InProcessSubagentRunner {
       const mcpServerEntries = Object.entries(this._agent.mcpServers);
       const hasMcpServers = mcpServerEntries.length > 0;
 
-      const extensionFactories: any[] = [];
+      const extensionFactories: ExtensionFactory[] = [...(this._options.extensionFactories ?? [])];
       if (hasMcpServers) {
-        extensionFactories.push(createMcpExtension());
+        extensionFactories.push(createCodemodeExtension(), createToolSearchExtension());
+        extensionFactories.push(createMcpExtension({
+          // Only this agent's registered servers belong to the child.
+          loadConfig: () => ({ servers: [], errors: [] }),
+        }));
       }
 
       extensionFactories.push((childPi: ExtensionAPI) => {
@@ -104,6 +150,12 @@ export class InProcessSubagentRunner {
             childPi.registerMcpServer(name, config as any);
           }
         }
+
+        childPi.on("tool_call", async (event) => {
+          if (!isToolAllowed(event.toolName, this._agent.allowedTools, this._agent.deniedTools)) {
+            return { block: true, reason: `Tool ${event.toolName} is not allowed for agent ${this._agent.id}` };
+          }
+        });
 
         childPi.on("before_agent_start", async () => {
           const allTools = childPi.getAllTools().map((t) => t.name);
@@ -118,11 +170,20 @@ export class InProcessSubagentRunner {
         cwd,
         agentDir,
         extensionFactories,
+        // Child lifecycles must never load the host's UI extensions or ambient resources.
+        noExtensions: true,
+        noSkills: true,
+        noPromptTemplates: true,
+        noThemes: true,
+        noContextFiles: true,
+        systemPromptOverride: () => undefined,
+        appendSystemPrompt: [],
       });
       await resourceLoader.reload();
 
-      sessionResult = await createAgentSession({
+      sessionResult = await this.createSession({
         cwd,
+        agentDir,
         sessionManager: inMemorySessionManager,
         resourceLoader,
         ...(modelRuntime ? { modelRuntime } : {}),
@@ -133,6 +194,7 @@ export class InProcessSubagentRunner {
 
       await sessionResult.session.bindExtensions({ mode: "json" });
     } catch (createErr) {
+      if (sessionResult) await disposeSession(sessionResult.session);
       if (this._options.signal?.aborted) {
         return {
           status: "aborted",
@@ -174,29 +236,31 @@ export class InProcessSubagentRunner {
     const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
       this._options.onEvent?.(event);
 
-      if (event.type === "message_update" && (event as any).assistantMessageEvent) {
-        const streamEvent = (event as any).assistantMessageEvent;
+      if (event.type === "message_update") {
+        const streamEvent = event.assistantMessageEvent;
         if (streamEvent.type === "text_delta" && typeof streamEvent.delta === "string") {
           latestAssistantText += streamEvent.delta;
           this._options.onTextDelta?.(streamEvent.delta);
         }
       }
 
-      if (event.type === "message_end" && (event as any).message) {
-        const msg = (event as any).message;
+      if (event.type === "message_end") {
+        const msg = event.message;
         if (msg.role === "assistant") {
           turns++;
           if (msg.usage) {
-            inputTokens += msg.usage.inputTokens ?? 0;
-            outputTokens += msg.usage.outputTokens ?? 0;
-            cacheReadTokens += msg.usage.cacheReadTokens ?? 0;
-            cacheWriteTokens += msg.usage.cacheWriteTokens ?? 0;
-            totalCost += msg.usage.cost?.total ?? 0;
+            inputTokens += msg.usage.input;
+            outputTokens += msg.usage.output;
+            cacheReadTokens += msg.usage.cacheRead;
+            cacheWriteTokens += msg.usage.cacheWrite;
+            totalTokens += msg.usage.totalTokens;
+            totalCost += msg.usage.cost.total;
+            this._options.onUsage?.(collectUsage());
           }
           if (Array.isArray(msg.content)) {
             const texts = msg.content
-              .filter((c: any) => c.type === "text" && typeof c.text === "string")
-              .map((c: any) => c.text);
+              .filter((c) => c.type === "text")
+              .map((c) => c.text);
             if (texts.length > 0) {
               latestAssistantText = texts.join("\n");
             }
@@ -226,14 +290,7 @@ export class InProcessSubagentRunner {
 
       await session.prompt(promptToSend);
 
-      const usage: SubagentUsage = {
-        inputTokens,
-        outputTokens,
-        cacheReadTokens,
-        cacheWriteTokens,
-        totalTokens: inputTokens + outputTokens,
-        cost: totalCost,
-      };
+      const usage = collectUsage();
 
       if (this._options.signal?.aborted) {
         return {
@@ -253,14 +310,7 @@ export class InProcessSubagentRunner {
         durationMs: Date.now() - startedAt,
       };
     } catch (error) {
-      const usage: SubagentUsage = {
-        inputTokens,
-        outputTokens,
-        cacheReadTokens,
-        cacheWriteTokens,
-        totalTokens: inputTokens + outputTokens,
-        cost: totalCost,
-      };
+      const usage = collectUsage();
 
       if (this._options.signal?.aborted) {
         return {
@@ -286,7 +336,7 @@ export class InProcessSubagentRunner {
         this._options.signal.removeEventListener("abort", onCallerAbort);
       }
       unsubscribe();
-      session.dispose();
+      await disposeSession(session);
     }
   }
 }

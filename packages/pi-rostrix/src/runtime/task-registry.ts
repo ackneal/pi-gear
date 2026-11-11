@@ -1,6 +1,6 @@
 import type { TaskFilter, TaskRecord, TaskStatus, TaskUsage } from "./task-types.ts";
 import type { ResolvedAgent } from "../core/resolver.ts";
-import { InProcessSubagentRunner } from "./session-runner.ts";
+import { InProcessSubagentRunner, type SubagentSessionOptions } from "./session-runner.ts";
 
 export interface TaskRegistryOptions {
   readonly maxGlobalConcurrent?: number | undefined;
@@ -18,6 +18,7 @@ export interface SpawnTaskOptions {
   readonly model?: string | undefined;
   readonly thinkingLevel?: import("../core/schema.ts").ThinkingLevel | undefined;
   readonly signal?: AbortSignal | undefined;
+  readonly extensionFactories?: SubagentSessionOptions["extensionFactories"];
 }
 
 type TaskListener = (task: TaskRecord) => void;
@@ -162,6 +163,7 @@ export class TaskRegistry {
       cwd: options.cwd,
       model: options.model,
       thinkingLevel: options.thinkingLevel,
+      extensionFactories: options.extensionFactories,
       signal: controller.signal,
       onEvent: () => {
         this._updateTask(taskId, {});

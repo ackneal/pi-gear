@@ -29,7 +29,7 @@ export function setupLifecycle(pi: ExtensionAPI, options: LifecycleOptions = {})
   };
 
   pi.on("session_start", async (_event, ctx) => {
-    clearSubagentRegistry();
+    if (!options.child) clearSubagentRegistry();
     await stopFff();
     startupFailure = undefined;
     if (options.child) return;
@@ -43,7 +43,7 @@ export function setupLifecycle(pi: ExtensionAPI, options: LifecycleOptions = {})
   });
 
   pi.on("session_shutdown", async () => {
-    clearSubagentRegistry();
+    if (!options.child) clearSubagentRegistry();
     startupFailure = undefined;
     await stopFff();
   });

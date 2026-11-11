@@ -1,74 +1,179 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { InProcessSubagentRunner, type ResolvedProfile } from "../src/index.ts";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { AgentSession, AgentSessionEvent, SessionShutdownEvent, ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import { InProcessSubagentRunner, type SubagentUsage } from "../src/runtime/session-runner.ts";
+import { agent, assistant } from "./runtime-fixtures.ts";
 
-function createMockProfile(overrides?: Partial<ResolvedProfile>): ResolvedProfile {
-  return {
-    id: "test:worker",
-    label: "Worker",
-    description: "Test worker",
-    promptGuidelines: Object.freeze(["Be concise."]),
-    appendPrompt: "Check outputs.",
-    deniedTools: Object.freeze([]),
-    deniedSkills: Object.freeze([]),
-    mcpServers: Object.freeze({}),
-    subagents: Object.freeze({ maxDepth: 1, maxConcurrent: 1 }),
-    supervision: Object.freeze({ wakeOn: Object.freeze(new Set<"completed" | "failed" | "needs_input" | "stalled">()) }),
-    ...overrides,
-  };
-}
-
-test("InProcessSubagentRunner immediately aborts if signal is pre-aborted", async () => {
-  const profile = createMockProfile();
-  const controller = new AbortController();
-  controller.abort();
-
-  const runner = new InProcessSubagentRunner({
-    profile,
-    signal: controller.signal,
-  });
-
-  const result = await runner.run("Do work");
-  assert.equal(result.status, "aborted");
-});
-
-test("InProcessSubagentRunner reports error if session creation throws", async () => {
-  const profile = createMockProfile({
-    // Provide an invalid tool name in allowed tools to trigger error or verify handling
-    allowedTools: Object.freeze(["non_existent_tool_xyz"]),
-  });
-
-  const runner = new InProcessSubagentRunner({
-    profile,
-    cwd: "/definitely/not/a/real/directory/path/12345",
-  });
-
-  const result = await runner.run("Fail immediately");
-  assert.equal(result.status === "failed" || result.status === "completed", true);
-});
-
-test("InProcessSubagentRunner handles profile with mcpServers configuration", async () => {
-  const profile = createMockProfile({
-    id: "gear:researcher",
-    allowedTools: Object.freeze(["read", "find", "grep", "mcp__exa__*"]),
-    mcpServers: Object.freeze({
-      exa: {
-        url: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa",
-        exposure: "hidden" as const,
-        toolExposure: {
-          web_search_exa: "direct" as const,
+test("runner collects SDK usage for every terminal path", async (t) => {
+  for (const status of ["completed", "failed", "aborted"] as const) {
+    await t.test(status, async () => {
+      const controller = new AbortController();
+      const updates: SubagentUsage[] = [];
+      const deltas: string[] = [];
+      let listener: (event: AgentSessionEvent) => void = () => {};
+      let disposed = false;
+      let unsubscribed = false;
+      const session = {
+        bindExtensions: async () => {},
+        subscribe: (callback) => { listener = callback; return () => { unsubscribed = true; }; },
+        prompt: async () => {
+          const message = assistant();
+          listener({ type: "message_update", message, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Done", partial: message } });
+          listener({ type: "message_end", message });
+          assert.equal(updates.length, 1, "usage is published before prompt settles");
+          listener({ type: "message_end", message: assistant({ timestamp: 2 }) });
+          if (status === "aborted") controller.abort(new Error("Stopped"));
+          if (status !== "completed") throw new Error("Prompt failed");
         },
-      },
-    }),
-  });
+        abort: async () => {},
+        extensionRunner: { emit: async () => {} },
+        dispose: () => { disposed = true; },
+      } satisfies Pick<AgentSession, "bindExtensions" | "subscribe" | "prompt" | "abort" | "dispose"> & {
+        extensionRunner: { emit(event: SessionShutdownEvent): Promise<unknown> };
+      };
+      // Only the SDK boundary is stubbed; event/message fixtures use the installed SDK types.
+      const createSession: NonNullable<ConstructorParameters<typeof InProcessSubagentRunner>[1]> = async (options) => ({
+        session,
+        extensionsResult: options!.resourceLoader!.getExtensions(),
+      });
+      const runner = new InProcessSubagentRunner({
+        agent: agent(), signal: controller.signal,
+        onUsage: (usage) => updates.push(usage), onTextDelta: (delta) => deltas.push(delta),
+      }, createSession);
+
+      const result = await runner.run("Work");
+
+      const expected = { inputTokens: 22, outputTokens: 14, cacheReadTokens: 10, cacheWriteTokens: 6, totalTokens: 52, cost: 0.74 };
+      assert.equal(result.status, status);
+      assert.deepEqual(result.usage, expected);
+      assert.deepEqual(updates.at(-1), expected);
+      assert.equal(result.turns, 2);
+      assert.equal(result.result, "Done");
+      assert.deepEqual(deltas, ["Done"]);
+      assert.ok(disposed && unsubscribed);
+    });
+  }
+});
+
+test("runner awaits shutdown before disposal on every terminal path", async (t) => {
+  for (const scenario of [
+    { name: "completed", status: "completed" },
+    { name: "prompt failed", status: "failed" },
+    { name: "aborted", status: "aborted" },
+    { name: "bindExtensions failed", status: "failed" },
+    { name: "shutdown rejected", status: "completed" },
+  ] as const) {
+    await t.test(scenario.name, async () => {
+      const controller = new AbortController();
+      const order: string[] = [];
+      const shutdownError = new Error("Shutdown failed");
+      let disposed = false;
+      const session = {
+        bindExtensions: async () => {
+          order.push("bind");
+          if (scenario.name === "bindExtensions failed") throw new Error("Binding failed");
+        },
+        subscribe: () => () => {},
+        prompt: async () => {
+          order.push("prompt");
+          if (scenario.name === "aborted") controller.abort(new Error("Stopped"));
+          if (scenario.name === "prompt failed") throw new Error("Prompt failed");
+        },
+        abort: async () => { order.push("abort"); },
+        extensionRunner: {
+          emit: async (event) => {
+            assert.deepEqual(event, { type: "session_shutdown", reason: "quit" });
+            order.push("shutdown started");
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            order.push("shutdown settled");
+            if (scenario.name === "shutdown rejected") throw shutdownError;
+          },
+        },
+        dispose: () => { disposed = true; order.push("dispose"); },
+      } satisfies Pick<AgentSession, "bindExtensions" | "subscribe" | "prompt" | "abort" | "dispose"> & {
+        extensionRunner: { emit(event: SessionShutdownEvent): Promise<unknown> };
+      };
+      const runner = new InProcessSubagentRunner({ agent: agent(), signal: controller.signal }, async () => ({ session }));
+
+      if (scenario.name === "shutdown rejected") {
+        await assert.rejects(runner.run("Work"), (error) => error === shutdownError);
+      } else {
+        const result = await runner.run("Work");
+        assert.equal(result.status, scenario.status);
+        if (scenario.name === "prompt failed") assert.equal(result.error, "Prompt failed");
+        if (scenario.name === "bindExtensions failed") assert.match(result.error!, /Binding failed/);
+      }
+
+      assert.equal(disposed, true);
+      assert.deepEqual(order, [
+        "bind",
+        ...(scenario.name === "bindExtensions failed" ? [] : ["prompt"]),
+        ...(scenario.name === "aborted" ? ["abort"] : []),
+        "shutdown started", "shutdown settled", "dispose",
+      ]);
+    });
+  }
+});
+
+test("runner isolates discovered resources but retains explicit factories", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "rostrix-runner-"));
+  try {
+    await mkdir(join(cwd, ".pi", "extensions"), { recursive: true });
+    await writeFile(join(cwd, ".pi", "extensions", "host.ts"), 'throw new Error("Host extension must not load");');
+    await writeFile(join(cwd, "AGENTS.md"), "Host context must not load");
+    const createSession: NonNullable<ConstructorParameters<typeof InProcessSubagentRunner>[1]> = async (options) => {
+      const loader = options!.resourceLoader!;
+      const extensions = loader.getExtensions();
+      assert.deepEqual(extensions.errors, []);
+      assert.equal(extensions.extensions.length, 5, "Only explicitly supplied factories load");
+      const hostPolicy = extensions.extensions[0]!.handlers.get("tool_call")![0]!;
+      const denied: ToolCallEvent = { type: "tool_call", toolCallId: "outside", toolName: "read", input: { path: "/denied" } };
+      assert.deepEqual(await hostPolicy(denied), { block: true, reason: "Filesystem policy" });
+      const toolNames = extensions.extensions.flatMap((extension) => [...extension.tools.keys()]);
+      assert.ok(toolNames.includes("codemode"));
+      assert.ok(toolNames.includes("tool_search"));
+      assert.deepEqual(extensions.runtime.mcpServers.get("test")?.config, { url: "https://invalid.example/mcp" });
+      const policy = extensions.extensions.at(-1)!.handlers.get("tool_call")![0]!;
+      for (const [toolName, blocked] of [["read", false], ["mcp__test__search", false], ["mcp__test__write", true], ["bash", true], ["mcp__other__search", true]] as const) {
+        const event: ToolCallEvent = { type: "tool_call", toolCallId: "parent/1", parentToolCallId: "parent", toolName, input: {} };
+        const response = await policy(event);
+        if (blocked) assert.deepEqual(response, { block: true, reason: `Tool ${toolName} is not allowed for agent test:worker` });
+        else assert.equal(response, undefined);
+      }
+      assert.deepEqual(loader.getSkills().skills, []);
+      assert.deepEqual(loader.getPrompts().prompts, []);
+      assert.deepEqual(loader.getThemes().themes, []);
+      assert.deepEqual(loader.getAgentsFiles().agentsFiles, []);
+      assert.equal(loader.getSystemPrompt(), undefined);
+      assert.deepEqual(loader.getAppendSystemPrompt(), []);
+      throw new Error("Verified isolated loader");
+    };
+    const runner = new InProcessSubagentRunner({
+      cwd,
+      extensionFactories: [(pi) => {
+        pi.on("tool_call", (event) => {
+          if ("path" in event.input && event.input.path === "/denied") return { block: true, reason: "Filesystem policy" };
+        });
+      }],
+      agent: agent({ allowedTools: ["read", "mcp__test__*"], deniedTools: ["mcp__test__write"], mcpServers: { test: { url: "https://invalid.example/mcp" } } }),
+    }, createSession);
+
+    const result = await runner.run("Work");
+    assert.equal(result.status, "failed");
+    assert.match(result.error!, /Verified isolated loader/);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("pre-aborted runner does not create a session", async () => {
   const controller = new AbortController();
   controller.abort();
-
-  const runner = new InProcessSubagentRunner({
-    profile,
-    signal: controller.signal,
+  const runner = new InProcessSubagentRunner({ agent: agent(), signal: controller.signal }, async () => {
+    assert.fail("No session should be created");
   });
-
-  const result = await runner.run("Research question");
-  assert.equal(result.status, "aborted");
+  assert.equal((await runner.run("Work")).status, "aborted");
 });
