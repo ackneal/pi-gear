@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "pi-gear",
+      "name": "pi-gear-monorepo",
       "devDependencies": {
         "@earendil-works/pi-coding-agent": "1.0.2",
         "@earendil-works/pi-tui": "1.0.2",
@@ -18,7 +18,7 @@
       "dependencies": {
         "@anthropic-ai/sandbox-runtime": "0.0.71",
         "@ff-labs/fff-bun": "0.10.5",
-        "pi-rostrix": "workspace:*",
+        "pi-rostrix": "0.1.0",
       },
       "devDependencies": {
         "@earendil-works/pi-coding-agent": "1.0.2",
@@ -36,6 +36,9 @@
     "packages/pi-rostrix": {
       "name": "pi-rostrix",
       "version": "0.1.0",
+      "dependencies": {
+        "yaml": "2.9.0",
+      },
       "devDependencies": {
         "@earendil-works/pi-coding-agent": "1.0.2",
         "@earendil-works/pi-tui": "1.0.2",
