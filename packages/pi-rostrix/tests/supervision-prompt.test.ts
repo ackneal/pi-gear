@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { BeforeAgentStartEvent, ExtensionAPI, NormalizedBuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
-import { initRuntime } from "../src/index.ts";
+import { init } from "../src/index.ts";
 import { applyTaskCoordinationPrompt } from "../src/tools/coordination-prompt.ts";
 import { agent } from "./runtime-fixtures.ts";
 
@@ -63,16 +63,16 @@ test("runtime owns supervision prompts independently of profiles and custom tool
         setActiveTools: (names: string[]) => { activeTools = [...names]; },
         getAllTools: () => activeTools.map((name) => ({ name })),
       } as unknown as ExtensionAPI;
-      const runtime = initRuntime(pi, { autoRegisterTaskTools: row.builtin, autoRegisterAgentControls: false, autoLoadDefinitions: false });
+      const runtime = init(pi, { autoRegisterTaskTools: row.builtin, autoRegisterAgentControls: false, autoLoadDefinitions: false });
       try {
         if (row.custom) {
           // A second adapter can attach even when another extension initialized the runtime first.
-          const shared = initRuntime(pi, { autoRegisterTaskTools: false });
+          const shared = init(pi, { autoRegisterTaskTools: false });
           assert.strictEqual(shared, runtime);
           shared.addDelegationToolNames(["custom_spawn"]);
         }
         if (row.lateBuiltin) {
-          initRuntime(pi, { autoRegisterTaskTools: true, autoRegisterAgentControls: false, autoLoadDefinitions: false });
+          init(pi, { autoRegisterTaskTools: true, autoRegisterAgentControls: false, autoLoadDefinitions: false });
           assert.equal(handlers.get("before_agent_start")?.size, 1);
         }
         if (row.history) {

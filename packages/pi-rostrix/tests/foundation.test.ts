@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { initRuntime, RUNTIME_SYMBOL, AgentValidationError } from "../src/index.ts";
+import { init, RUNTIME_SYMBOL, AgentValidationError } from "../src/index.ts";
 
 function createMockPi(): { pi: ExtensionAPI; shutdown: () => Promise<void> } {
   const listeners = new Map<string, Array<() => void | Promise<void>>>();
@@ -33,7 +33,7 @@ function createMockPi(): { pi: ExtensionAPI; shutdown: () => Promise<void> } {
 
 test("session shutdown awaits task cleanup before disposing runtime state", async () => {
   const { pi, shutdown } = createMockPi();
-  const runtime = initRuntime(pi, { autoLoadDefinitions: false, autoRegisterAgentControls: false });
+  const runtime = init(pi, { autoLoadDefinitions: false, autoRegisterAgentControls: false });
   let release!: () => void;
   const cleanup = new Promise<void>((resolve) => { release = resolve; });
   const originalShutdown = runtime.tasks.shutdown.bind(runtime.tasks);
@@ -56,15 +56,15 @@ test("session shutdown awaits task cleanup before disposing runtime state", asyn
   }
 });
 
-test("initRuntime creates a singleton runtime and attaches to globalThis", async () => {
+test("init creates a singleton runtime and attaches to globalThis", async () => {
   const { pi, shutdown } = createMockPi();
   try {
-    const runtime1 = initRuntime(pi);
+    const runtime1 = init(pi);
     assert.equal(runtime1.isInitialized, true);
     assert.equal(runtime1.version, "0.1.0");
 
     // Second call returns the exact same singleton instance
-    const runtime2 = initRuntime(pi);
+    const runtime2 = init(pi);
     assert.strictEqual(runtime1, runtime2);
     assert.strictEqual((globalThis as any)[RUNTIME_SYMBOL], runtime1);
 

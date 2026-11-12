@@ -4,7 +4,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   AgentActivationError,
   AgentActivator,
-  initRuntime,
+  init,
   type ResolvedAgentDefinition,
   type SupervisionWakeTrigger,
   type ThinkingLevel,
@@ -403,7 +403,7 @@ test("successful profile switches keep one prompt hook using only the current pr
 
 test("Runtime activates registered profiles end-to-end", async () => {
   const { pi, state } = createMockPi();
-  const runtime = initRuntime(pi);
+  const runtime = init(pi);
 
   try {
     runtime.registerAgent({

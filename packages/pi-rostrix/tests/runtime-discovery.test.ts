@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { initRuntime, type DiscoverAgentsOptions, type RuntimeOptions } from "../src/index.ts";
+import { init, type DiscoverAgentsOptions, type RuntimeOptions } from "../src/index.ts";
 
 const disabled: RuntimeOptions = {
   autoRegisterTaskTools: false,
@@ -26,7 +26,7 @@ test("initialization starts discovery only when automatic loading is enabled", a
       const directory = await mkdtemp(join(tmpdir(), "rostrix-discovery-"));
       t.after(() => rm(directory, { recursive: true, force: true }));
       const pi = createPi();
-      const runtime = initRuntime(pi, disabled);
+      const runtime = init(pi, disabled);
       t.after(() => runtime.dispose());
       const originalLoad = runtime.loadAgentDefinitions.bind(runtime);
       let pending: ReturnType<typeof originalLoad> | undefined;
@@ -36,15 +36,15 @@ test("initialization starts discovery only when automatic loading is enabled", a
       });
       const options = { autoRegisterTaskTools: false, autoRegisterAgentControls: false, ...row.options };
 
-      assert.strictEqual(initRuntime(pi, options), runtime);
-      initRuntime(pi, options);
+      assert.strictEqual(init(pi, options), runtime);
+      init(pi, options);
       assert.equal(load.mock.callCount(), row.enabled ? 1 : 0);
       if (pending) await pending;
-      initRuntime(pi, options);
+      init(pi, options);
       assert.equal(load.mock.callCount(), row.enabled ? 1 : 0);
 
       if (!row.enabled) {
-        initRuntime(pi, { ...options, autoLoadDefinitions: true });
+        init(pi, { ...options, autoLoadDefinitions: true });
         assert.equal(load.mock.callCount(), 1);
         await pending;
       }
@@ -67,15 +67,15 @@ test("explicit discovery satisfies later automatic initialization", async (t) =>
         }));
       }
       const pi = createPi();
-      const runtime = initRuntime(pi, disabled);
+      const runtime = init(pi, disabled);
       t.after(() => runtime.dispose());
       const load = t.mock.method(runtime, "loadAgentDefinitions");
       const pending = runtime.loadAgentDefinitions({ userDir: directory, projectDir: directory });
       if (row.complete) await pending;
 
-      initRuntime(pi, { autoRegisterTaskTools: false, autoRegisterAgentControls: false });
+      init(pi, { autoRegisterTaskTools: false, autoRegisterAgentControls: false });
       await pending;
-      initRuntime(pi, { autoRegisterTaskTools: false, autoRegisterAgentControls: false });
+      init(pi, { autoRegisterTaskTools: false, autoRegisterAgentControls: false });
 
       assert.equal(load.mock.callCount(), 1);
       assert.equal(runtime.discoveredAgents.length, row.populated ? 1 : 0);
@@ -89,7 +89,7 @@ test("discovery preserves registered definitions and permits intentional later s
     await t.test(loadAlias, async (t) => {
       const directory = await mkdtemp(join(tmpdir(), "rostrix-discovery-"));
       t.after(() => rm(directory, { recursive: true, force: true }));
-      const runtime = initRuntime(createPi(), disabled);
+      const runtime = init(createPi(), disabled);
       t.after(() => runtime.dispose());
       runtime.registerAgent({ id: "existing", label: "Keep me", description: "Registered before discovery" });
       const existing = runtime.getAgent("existing");
@@ -124,7 +124,7 @@ test("a failed initial discovery is not retried by initialization", async (t) =>
   t.after(() => rm(directory, { recursive: true, force: true }));
   await writeFile(join(directory, "invalid.json"), "invalid JSON");
   const pi = createPi();
-  const runtime = initRuntime(pi, disabled);
+  const runtime = init(pi, disabled);
   t.after(() => runtime.dispose());
   const load = t.mock.method(runtime, "loadAgentDefinitions");
   const failure = new Error("Warning callback failed");
@@ -134,7 +134,7 @@ test("a failed initial discovery is not retried by initialization", async (t) =>
   });
 
   await assert.rejects(pending, (error) => error === failure);
-  initRuntime(pi, { autoRegisterTaskTools: false, autoRegisterAgentControls: false });
+  init(pi, { autoRegisterTaskTools: false, autoRegisterAgentControls: false });
 
   assert.equal(load.mock.callCount(), 1);
   assert.equal(runtime.discoveredAgents.length, 0);
@@ -155,7 +155,7 @@ test("discovery cannot repopulate a disposing or disposed runtime", async (t) =>
       await writeFile(join(directory, "agent.json"), JSON.stringify({
         id: "discovered", label: "Discovered", description: "Must not survive disposal",
       }));
-      const runtime = initRuntime(createPi(), disabled);
+      const runtime = init(createPi(), disabled);
       t.after(() => runtime.dispose());
       const options = { userDir: directory, projectDir: directory };
       const pending = row.startBeforeDisposal ? runtime.loadAgentDefinitions(options) : undefined;

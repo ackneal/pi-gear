@@ -46,13 +46,13 @@ pi-gear loads policy from:
 ~/.pi/agent/pi-gear/config.json
 ```
 
-More precisely, it uses `<PI_CODING_AGENT_DIR>/pi-gear/config.json`. If that file does not exist, the repository's [`config.json`](config.json) is used as the default and copyable example. An invalid user config fails closed; pi-gear does not silently fall back to defaults.
+More precisely, it uses `<PI_CODING_AGENT_DIR>/pi-gear/config.json`. If that file does not exist, the repository's [`config.json`](packages/pi-gear/config.json) is used as the default and copyable example. An invalid user config fails closed; pi-gear does not silently fall back to defaults.
 
 Start a user config from `config.json` and retain its schema reference for editor validation, autocomplete, and tooltips:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/ackneal/pi-gear/main/config.schema.json",
+  "$schema": "https://raw.githubusercontent.com/ackneal/pi-gear/main/packages/pi-gear/config.schema.json",
   "version": 1,
   "sandbox": {
     "enabled": true,
@@ -62,7 +62,7 @@ Start a user config from `config.json` and retain its schema reference for edito
 }
 ```
 
-`$schema` is optional metadata and does not affect runtime behavior. Unknown fields and invalid values are rejected. The complete contract is in [`config.schema.json`](config.schema.json).
+`$schema` is optional metadata and does not affect runtime behavior. Unknown fields and invalid values are rejected. The complete contract is in [`config.schema.json`](packages/pi-gear/config.schema.json).
 
 ## Sandbox configuration
 
@@ -176,18 +176,14 @@ Background completion notifications follow each task's `wakeOn` settings. Notifi
 ### Developer API
 
 ```ts
-import { initRuntime, type Runtime } from "pi-rostrix";
+import { init } from "pi-rostrix";
 
-const runtime: Runtime = initRuntime(pi, {
-  autoLoadDefinitions: false,
-  autoRegisterTaskTools: false,
-  autoRegisterAgentControls: false,
-});
+const runtime = init(pi);
 ```
 
-`Runtime` owns shared services and shutdown. `AgentRegistry` stores definitions, `AgentResolver` resolves them, and `AgentActivator` applies a definition to the existing session. `TaskController` owns admission, execution, cancellation, and retention; `InProcessSubagentRunner` owns each child session lifecycle. `TaskMonitor`, `NotificationQueue`, and `ParentNotifier` monitor tasks, retain pending notifications, and deliver them to the parent.
+`init(pi, options?)` returns the shared `Runtime`. Options `autoLoadDefinitions`, `autoRegisterTaskTools`, and `autoRegisterAgentControls` default to enabled. Later calls can enable disabled features without duplicate registration or replacement of runtime state.
 
-The TypeScript API uses responsibility-based names and canonical Agent APIs. Package names, command and agent IDs, the singleton key, notification types, discovery directories, and stored result formats retain their namespaced identities. Tool parameters and saved results still use `runId`; it identifies the same task as the core task ID, not a separate execution attempt.
+Shutdown cancels active tasks and disposes the runtime; reload creates a new runtime. Gear's `runId` identifies the corresponding core task.
 
 ## Security behavior and limitations
 
@@ -228,6 +224,6 @@ bun run test
 
 Sandbox integration tests require macOS, `/usr/bin/sandbox-exec`, and permission to create Runtime sockets under `/tmp/claude`; restricted environments may report `EPERM`.
 
-Main areas: `config/` parses policy, `execution/` implements sandbox and filesystem enforcement, `context/` manages prompt/task state, `subagents/` runs delegated agents, `lsp/` provides code intelligence, and `ui/` renders Pi components.
+`packages/pi-gear/` contains the coding-agent extension. `packages/pi-rostrix/` provides agent definitions, activation, and task execution.
 
 Released under the [MIT License](LICENSE).

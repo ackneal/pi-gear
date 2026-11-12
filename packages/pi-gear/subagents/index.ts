@@ -1,5 +1,5 @@
 import { SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { initRuntime, type Runtime, type TaskRecord, type TaskStatus } from "pi-rostrix";
+import { init, type Runtime, type TaskRecord, type TaskStatus } from "pi-rostrix";
 import { resolve } from "node:path";
 import { Type } from "typebox";
 import {
@@ -97,7 +97,7 @@ export function setupSubagents(
   _workspace?: WorkspaceServices,
   providedRuntime?: Runtime,
 ): SubagentServices {
-  const runtime = providedRuntime ?? initRuntime(pi, { autoRegisterTaskTools: false });
+  const runtime = providedRuntime ?? init(pi, { autoRegisterTaskTools: false });
   runtime.addDelegationToolNames(SUBAGENTS);
   const settings = setupSubagentSettings(pi);
   let sessionContext: ExtensionContext | undefined;

@@ -1,7 +1,7 @@
 import test, { describe } from "node:test";
 import assert from "node:assert/strict";
 import { registerAgentControls } from "../src/interactive/index.ts";
-import { initRuntime } from "../src/index.ts";
+import { init } from "../src/index.ts";
 
 function createMockExtensionApi() {
   const registeredShortcuts = new Map<string, any>();
@@ -79,7 +79,7 @@ function createMockExtensionApi() {
 describe("Interactive Profile Cycling & Commands", () => {
   test("registers rostrix:agents command by default, supports custom commandName, and registers shortcut only when configured", async () => {
     const { pi, registeredShortcuts, registeredCommands } = createMockExtensionApi();
-    const runtime = initRuntime(pi, {
+    const runtime = init(pi, {
       autoRegisterTaskTools: false,
       autoLoadDefinitions: false,
       autoRegisterAgentControls: false,
@@ -110,7 +110,7 @@ describe("Interactive Profile Cycling & Commands", () => {
 
   test("rostrix:agents command with no arguments opens interactive picker and updates rostrix:agent status", async () => {
     const { pi, mockCtx, registeredCommands, statuses, notifications, setSelectChoice } = createMockExtensionApi();
-    const runtime = initRuntime(pi, {
+    const runtime = init(pi, {
       autoRegisterTaskTools: false,
       autoLoadDefinitions: false,
       autoRegisterAgentControls: false,
@@ -190,7 +190,7 @@ describe("Interactive Profile Cycling & Commands", () => {
 
   test("rostrix:agents notifies when no directory agents are found", async () => {
     const { pi, mockCtx, registeredCommands, notifications } = createMockExtensionApi();
-    const runtime = initRuntime(pi, {
+    const runtime = init(pi, {
       autoRegisterTaskTools: false,
       autoLoadDefinitions: false,
       autoRegisterAgentControls: false,
@@ -210,7 +210,7 @@ describe("Interactive Profile Cycling & Commands", () => {
 
   test("rostrix:agents command allows direct switching by ID and resetting via default", async () => {
     const { pi, mockCtx, registeredCommands, statuses } = createMockExtensionApi();
-    const runtime = initRuntime(pi, {
+    const runtime = init(pi, {
       autoRegisterTaskTools: false,
       autoLoadDefinitions: false,
       autoRegisterAgentControls: false,

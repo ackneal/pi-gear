@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { initRuntime } from "pi-rostrix";
+import { init } from "pi-rostrix";
 import { setupCommands } from "./commands/index.ts";
 import { loadExtensionConfig } from "./config/index.ts";
 import { setupPromptComposer } from "./context/prompt/index.ts";
@@ -23,7 +23,7 @@ export async function setupExtension(pi: ExtensionAPI, options: { child: boolean
   const lifecycle = setupLifecycle(pi, { child });
   const workspace = setupWorkspace(pi, execution.filesystem, lifecycle.fff);
 
-  const runtime = initRuntime(pi, {
+  const runtime = init(pi, {
     autoRegisterTaskTools: false,
     autoRegisterAgentControls: false,
     autoLoadDefinitions: !child,

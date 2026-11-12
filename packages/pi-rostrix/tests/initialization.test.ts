@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Type } from "typebox";
 import type { BeforeAgentStartEvent, ExtensionAPI, NormalizedBuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
-import { initRuntime, RUNTIME_SYMBOL, TaskController, type RuntimeOptions } from "../src/index.ts";
+import { init, RUNTIME_SYMBOL, TaskController, type RuntimeOptions } from "../src/index.ts";
 import { agent } from "./runtime-fixtures.ts";
 
 type Command = Parameters<ExtensionAPI["registerCommand"]>;
@@ -67,12 +67,12 @@ test("initialization order registers each bundle once through the enabling calle
       const first = h.api("first");
       const later = h.api("later");
       assert.notStrictEqual(first.pi, later.pi);
-      const runtime = initRuntime(first.pi, row.first);
+      const runtime = init(first.pi, row.first);
       t.after(() => runtime.dispose());
 
-      assert.strictEqual(initRuntime(first.pi, row.first), runtime);
-      assert.strictEqual(initRuntime(later.pi, row.later), runtime);
-      assert.strictEqual(initRuntime(later.pi, row.later), runtime);
+      assert.strictEqual(init(first.pi, row.first), runtime);
+      assert.strictEqual(init(later.pi, row.later), runtime);
+      assert.strictEqual(init(later.pi, row.later), runtime);
 
       assert.deepEqual(h.tools.map(({ tool }) => tool.name), toolNames);
       assert.deepEqual(h.tools.map(({ caller }) => caller), Array(4).fill(row.laterTools ? "later" : "first"));
@@ -92,13 +92,13 @@ test("interactive initialization retains first enabled configuration and gates t
       const h = host();
       const owner = h.api("owner");
       const later = h.api("later");
-      const runtime = initRuntime(owner.pi, { ...row.first, autoRegisterTaskTools: false });
+      const runtime = init(owner.pi, { ...row.first, autoRegisterTaskTools: false });
       t.after(() => runtime.dispose());
       assert.equal(h.commands.length, row.initialCommands);
       assert.equal(h.shortcuts.length, row.initialShortcuts);
 
-      initRuntime(later.pi, { ...noLoad, autoRegisterTaskTools: false, commandName: "later", statusKey: "later-status", shortcut: "alt+l" });
-      initRuntime(owner.pi, { ...noLoad, autoRegisterTaskTools: false, commandName: "ignored", statusKey: "ignored", shortcut: "alt+i" });
+      init(later.pi, { ...noLoad, autoRegisterTaskTools: false, commandName: "later", statusKey: "later-status", shortcut: "alt+l" });
+      init(owner.pi, { ...noLoad, autoRegisterTaskTools: false, commandName: "ignored", statusKey: "ignored", shortcut: "alt+i" });
       assert.deepEqual(h.commands.map(({ args }) => args[0]), [row.command]);
       assert.deepEqual(h.shortcuts.map(({ args }) => args[0]), [row.initialShortcuts ? "alt+f" : "alt+l"]);
 
@@ -129,7 +129,7 @@ test("later initialization preserves services, state, custom prompts, and lifecy
       const h = host();
       const owner = h.api("owner");
       const child = h.api("child");
-      const runtime = initRuntime(owner.pi, disabled);
+      const runtime = init(owner.pi, disabled);
       t.after(() => runtime.dispose());
       runtime.registerAgent({ id: "preserved", label: "Preserved", description: "Persistent role", prompt: { appendPrompt: "Preserved prompt" } });
       await runtime.activateAgent("preserved");
@@ -141,7 +141,7 @@ test("later initialization preserves services, state, custom prompts, and lifecy
       const record = runtime.tasks.spawn({ agent: agent(), task: "Preserved task", signal: controller.signal });
       await runtime.tasks.wait(record.id);
 
-      assert.strictEqual(initRuntime(child.pi, row.options), runtime);
+      assert.strictEqual(init(child.pi, row.options), runtime);
       assert.deepEqual([runtime.agents, runtime.resolver, runtime.activator, runtime.tasks, runtime.monitor, runtime.monitor.notificationQueue, runtime.monitor.notifier].map((value, i) => value === services[i]), Array(7).fill(true));
       assert.strictEqual(runtime.getActiveAgent(), active);
       assert.strictEqual(runtime.tasks.getTask(record.id), record);
@@ -172,7 +172,7 @@ test("disposal awaits shutdown, shares its promise, releases subscriptions once,
     const index = releases.push(0) - 1;
     return () => { releases[index] = (releases[index] ?? 0) + 1; unsubscribe(); };
   });
-  const runtime = initRuntime(owner.pi, disabled);
+  const runtime = init(owner.pi, disabled);
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const shutdown = runtime.tasks.shutdown.bind(runtime.tasks);
@@ -186,7 +186,7 @@ test("disposal awaits shutdown, shares its promise, releases subscriptions once,
   await Promise.resolve();
   assert.equal(runtime.isInitialized, true);
   assert.ok(runtime.getAgent("retained"));
-  assert.throws(() => initRuntime(child.pi, disabled), /dispos/i);
+  assert.throws(() => init(child.pi, disabled), /dispos/i);
   assert.equal(shutdownMock.mock.callCount(), 1);
   assert.deepEqual(releases, [1]);
   assert.equal(owner.subscriptions.filter(({ event }) => event === "session_shutdown").length, 2);

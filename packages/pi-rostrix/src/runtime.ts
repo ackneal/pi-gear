@@ -236,7 +236,7 @@ class RuntimeImpl implements Runtime {
 }
 
 /** Add enabled features to the shared runtime without replacing existing registrations. */
-export function initRuntime(pi: ExtensionAPI, options: RuntimeOptions = {}): Runtime {
+export function init(pi: ExtensionAPI, options: RuntimeOptions = {}): Runtime {
   const globalObj = globalThis as any;
   let runtime = globalObj[RUNTIME_SYMBOL] as RuntimeImpl | undefined;
   if (!runtime) {
