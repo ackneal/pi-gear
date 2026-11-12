@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { resolve } from "node:path";
 import { BackgroundRunRegistry } from "./background.ts";
-import type { SubagentProfile, SubagentRun } from "./types.ts";
+import type { SubagentProfile, TaskSnapshot } from "./types.ts";
 
 const profile: SubagentProfile = { id: "test", label: "Test", description: "Test", systemPrompt: "Test", capabilities: [] };
 
@@ -13,7 +13,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function run(status: SubagentRun["status"] = "running", result?: string): SubagentRun {
+function run(status: TaskSnapshot["status"] = "running", result?: string): TaskSnapshot {
   return { status, startedAt: 0, activities: [], ...(result === undefined ? {} : { result }) };
 }
 
@@ -41,7 +41,7 @@ function registry(options: ConstructorParameters<typeof BackgroundRunRegistry>[0
 }
 
 test("start returns a stable runId before completion", async () => {
-  const done = deferred<SubagentRun>();
+  const done = deferred<TaskSnapshot>();
   const subject = registry();
   const initial = subject.start({ profile, task: "slow", run: () => done.promise });
   assert.equal(initial.runId, "run-1");
@@ -53,8 +53,8 @@ test("start returns a stable runId before completion", async () => {
 
 test("wait reports immediate changes, later changes, timeout, and terminal completion", async () => {
   const timers = new Timers();
-  const done = deferred<SubagentRun>();
-  let update!: (value: SubagentRun) => void;
+  const done = deferred<TaskSnapshot>();
+  let update!: (value: TaskSnapshot) => void;
   const subject = registry({ setTimer: timers.set, clearTimer: timers.clear, settleMs: 0 });
   const initial = subject.start({ profile, task: "wait", run: (_signal, onUpdate) => { update = onUpdate; return done.promise; } });
 
@@ -76,8 +76,8 @@ test("wait reports immediate changes, later changes, timeout, and terminal compl
 });
 
 test("a burst of progress wakes the waiter once after the settle window", async () => {
-  const done = deferred<SubagentRun>();
-  let update!: (value: SubagentRun) => void;
+  const done = deferred<TaskSnapshot>();
+  let update!: (value: TaskSnapshot) => void;
   const subject = registry({ settleMs: 40, settleCheckMs: 10 });
   const initial = subject.start({ profile, task: "burst", run: (_signal, onUpdate) => { update = onUpdate; return done.promise; } });
 
@@ -92,8 +92,8 @@ test("a burst of progress wakes the waiter once after the settle window", async 
 });
 
 test("terminal completion wakes a settled waiter immediately without waiting out the quiet window", async () => {
-  const done = deferred<SubagentRun>();
-  let update!: (value: SubagentRun) => void;
+  const done = deferred<TaskSnapshot>();
+  let update!: (value: TaskSnapshot) => void;
   const subject = registry({ settleMs: 40, settleCheckMs: 10 });
   const initial = subject.start({ profile, task: "finish", run: (_signal, onUpdate) => { update = onUpdate; return done.promise; } });
 
@@ -108,7 +108,7 @@ test("terminal completion wakes a settled waiter immediately without waiting out
 
 test("a wait with no pending change ignores the settle window and reports timeout", async () => {
   const timers = new Timers();
-  const done = deferred<SubagentRun>();
+  const done = deferred<TaskSnapshot>();
   const subject = registry({ settleMs: 40, settleCheckMs: 10, setTimer: timers.set, clearTimer: timers.clear });
   const initial = subject.start({ profile, task: "quiet", run: () => done.promise });
 
@@ -118,8 +118,8 @@ test("a wait with no pending change ignores the settle window and reports timeou
 });
 
 test("streaming result updates create one meaningful checkpoint rather than token revisions", async () => {
-  const done = deferred<SubagentRun>();
-  let update!: (value: SubagentRun) => boolean;
+  const done = deferred<TaskSnapshot>();
+  let update!: (value: TaskSnapshot) => boolean;
   const subject = registry();
   const started = subject.start({ profile, task: "stream", run: (_signal, onUpdate) => { update = onUpdate; return done.promise; } });
 
@@ -133,8 +133,8 @@ test("streaming result updates create one meaningful checkpoint rather than toke
 });
 
 test("wait does not lose an update between its initial check and waiter registration", async () => {
-  const done = deferred<SubagentRun>();
-  let update!: (value: SubagentRun) => void;
+  const done = deferred<TaskSnapshot>();
+  let update!: (value: TaskSnapshot) => void;
   let timerCalls = 0;
   const subject = registry({
     settleMs: 0,
@@ -152,10 +152,10 @@ test("wait does not lose an update between its initial check and waiter registra
 });
 
 test("cancelling one run is independent and preserves its latest partial state", async () => {
-  const first = deferred<SubagentRun>();
-  const second = deferred<SubagentRun>();
+  const first = deferred<TaskSnapshot>();
+  const second = deferred<TaskSnapshot>();
   let firstSignal!: AbortSignal;
-  let firstUpdate!: (value: SubagentRun) => void;
+  let firstUpdate!: (value: TaskSnapshot) => void;
   const subject = registry();
   const a = subject.start({ profile, task: "a", run: (signal, update) => { firstSignal = signal; firstUpdate = update; return first.promise; } });
   const b = subject.start({ profile, task: "b", run: () => second.promise });
@@ -182,8 +182,8 @@ test("cancelling one run is independent and preserves its latest partial state",
 
 test("parent cancellation forwards only to its dedicated child controller", async () => {
   const parent = new AbortController();
-  const first = deferred<SubagentRun>();
-  const second = deferred<SubagentRun>();
+  const first = deferred<TaskSnapshot>();
+  const second = deferred<TaskSnapshot>();
   let firstSignal!: AbortSignal;
   let secondSignal!: AbortSignal;
   const subject = registry();
@@ -222,7 +222,7 @@ test("get, wait, and cancel reject an unknown runId", async () => {
 });
 
 test("active limit rejects excess work and permits work after completion", async () => {
-  const pending = deferred<SubagentRun>();
+  const pending = deferred<TaskSnapshot>();
   const subject = registry({ maxActive: 1 });
   const first = subject.start({ profile, task: "one", run: () => pending.promise });
   assert.throws(() => subject.start({ profile, task: "two", run: async () => run("success") }), /limit reached \(1\)/);
@@ -232,7 +232,7 @@ test("active limit rejects excess work and permits work after completion", async
 });
 
 test("writer scopes reject equal, ancestor, and descendant collisions but allow siblings", async () => {
-  const pending = deferred<SubagentRun>();
+  const pending = deferred<TaskSnapshot>();
   const subject = registry();
   subject.start({ profile, task: "writer", writerScopes: ["work/src"], run: () => pending.promise });
   for (const scope of ["work/src", "work", "work/src/nested"]) {
@@ -259,7 +259,7 @@ test("retention evicts the oldest terminal runs", async () => {
 
 test("runtime expiry requests cancellation", async () => {
   const timers = new Timers();
-  const done = deferred<SubagentRun>();
+  const done = deferred<TaskSnapshot>();
   let signal!: AbortSignal;
   const subject = registry({ maxRuntimeMs: 123, setTimer: timers.set, clearTimer: timers.clear });
   const started = subject.start({ profile, task: "expire", run: (value) => { signal = value; return done.promise; } });
@@ -272,7 +272,7 @@ test("runtime expiry requests cancellation", async () => {
 });
 
 test("unresolved terminal run stays listed until observed and survives retention eviction", async () => {
-  const done = deferred<SubagentRun>();
+  const done = deferred<TaskSnapshot>();
   const subject = registry({ maxRetained: 1 });
   const quick = subject.start({ profile, task: "quick", run: () => done.promise });
   done.resolve(run("success", "done"));
@@ -335,8 +335,8 @@ test("resolving terminal runs frees the retained-state bound for new runs", asyn
 });
 
 test("cancel returns a resolved terminal snapshot but other runs stay unresolved", async () => {
-  const used = deferred<SubagentRun>();
-  const other = deferred<SubagentRun>();
+  const used = deferred<TaskSnapshot>();
+  const other = deferred<TaskSnapshot>();
   const subject = registry();
   const toCancel = subject.start({ profile, task: "cancel", run: () => used.promise });
   const kept = subject.start({ profile, task: "keep", run: () => other.promise });
@@ -350,8 +350,8 @@ test("cancel returns a resolved terminal snapshot but other runs stay unresolved
 });
 
 test("shutdown cancels and awaits every active runner", async () => {
-  const a = deferred<SubagentRun>();
-  const b = deferred<SubagentRun>();
+  const a = deferred<TaskSnapshot>();
+  const b = deferred<TaskSnapshot>();
   const signals: AbortSignal[] = [];
   const subject = registry();
   subject.start({ profile, task: "a", run: (signal) => { signals.push(signal); return a.promise; } });

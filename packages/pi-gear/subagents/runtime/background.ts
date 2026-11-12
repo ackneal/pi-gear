@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import type { SubagentDispatch, SubagentProfile, SubagentRun } from "./types.ts";
+import type { ModelSelection, SubagentProfile, TaskSnapshot } from "./types.ts";
 
 export const MAX_ACTIVE_BACKGROUND_RUNS = 4;
 export const MAX_BACKGROUND_RUNTIME_MS = 30 * 60_000;
@@ -10,7 +10,7 @@ export const WAKE_SETTLE_MS = 2_000;
 const SETTLE_CHECK_MS = 250;
 export const MAX_RETAINED_BACKGROUND_RUNS = 20;
 
-export type BackgroundStatus = SubagentRun["status"] | "cancelling";
+export type BackgroundStatus = TaskSnapshot["status"] | "cancelling";
 export type WaitReason = "changed" | "terminal" | "timeout";
 
 export interface UnresolvedBackgroundRun {
@@ -26,7 +26,7 @@ export interface BackgroundSnapshot {
   revision: number;
   profile: string;
   task: string;
-  dispatch?: SubagentDispatch;
+  dispatch?: ModelSelection;
   writerScopes?: string[];
   startedAt: number;
   updatedAt: number;
@@ -39,8 +39,8 @@ export interface BackgroundSnapshot {
   consecutiveToolErrors: number;
   latestUpdate?: string;
   partialResult?: string;
-  usage?: SubagentRun["usage"];
-  run: SubagentRun;
+  usage?: TaskSnapshot["usage"];
+  run: TaskSnapshot;
 }
 
 interface Entry {
@@ -48,11 +48,11 @@ interface Entry {
   sessionId: string;
   profile: SubagentProfile;
   task: string;
-  dispatch?: SubagentDispatch;
+  dispatch?: ModelSelection;
   writerScopes?: string[];
   controller: AbortController;
-  runner: Promise<SubagentRun>;
-  run: SubagentRun;
+  runner: Promise<TaskSnapshot>;
+  run: TaskSnapshot;
   status: BackgroundStatus;
   resolved: boolean;
   revision: number;
@@ -67,10 +67,10 @@ interface Entry {
 export interface StartBackgroundOptions {
   profile: SubagentProfile;
   task: string;
-  dispatch?: SubagentDispatch;
+  dispatch?: ModelSelection;
   writerScopes?: string[];
   parentSignal?: AbortSignal;
-  run: (signal: AbortSignal, onUpdate: (run: SubagentRun) => boolean) => Promise<SubagentRun>;
+  run: (signal: AbortSignal, onUpdate: (run: TaskSnapshot) => boolean) => Promise<TaskSnapshot>;
 }
 
 export interface BackgroundRegistryOptions {
@@ -87,9 +87,9 @@ export interface BackgroundRegistryOptions {
 }
 
 const terminal = (status: BackgroundStatus): boolean => status === "success" || status === "error" || status === "aborted";
-const cloneRun = (run: SubagentRun): SubagentRun => ({ ...run, activities: run.activities.map((activity) => ({ ...activity })), ...(run.dispatch ? { dispatch: { ...run.dispatch } } : {}) });
+const cloneRun = (run: TaskSnapshot): TaskSnapshot => ({ ...run, activities: run.activities.map((activity) => ({ ...activity })), ...(run.dispatch ? { dispatch: { ...run.dispatch } } : {}) });
 
-function progressKey(run: SubagentRun): string {
+function progressKey(run: TaskSnapshot): string {
   const tools = run.activities.filter((activity) => activity.kind === "tool").map((activity) => `${activity.id ?? activity.name}:${activity.status}`).join("|");
   return `${run.status}:${tools}:${run.result === undefined ? "" : "result"}:${run.error ?? ""}`;
 }
@@ -152,7 +152,7 @@ export class BackgroundRunRegistry {
     const now = this.now();
     const controller = new AbortController();
     const runId = this.createRunId();
-    const initial: SubagentRun = { status: "running", startedAt: now, lastActivityAt: now, activities: [], ...(options.dispatch ? { dispatch: { ...options.dispatch } } : {}) };
+    const initial: TaskSnapshot = { status: "running", startedAt: now, lastActivityAt: now, activities: [], ...(options.dispatch ? { dispatch: { ...options.dispatch } } : {}) };
     const entry: Entry = {
       runId, sessionId: this.sessionId, profile: options.profile, task: options.task,
       ...(options.dispatch ? { dispatch: { ...options.dispatch } } : {}),
@@ -265,7 +265,7 @@ export class BackgroundRunRegistry {
     this.evict();
   }
 
-  private update(entry: Entry, run: SubagentRun): boolean {
+  private update(entry: Entry, run: TaskSnapshot): boolean {
     if (terminal(entry.status)) return false;
     const changed = progressKey(entry.run) !== progressKey(run);
     entry.run = cloneRun(run);
@@ -278,7 +278,7 @@ export class BackgroundRunRegistry {
     return changed;
   }
 
-  private finish(entry: Entry, run: SubagentRun): SubagentRun {
+  private finish(entry: Entry, run: TaskSnapshot): TaskSnapshot {
     if (terminal(entry.status)) return entry.run;
     const now = this.now();
     const status = entry.controller.signal.aborted

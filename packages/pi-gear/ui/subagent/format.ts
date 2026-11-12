@@ -1,7 +1,7 @@
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { Markdown } from "@earendil-works/pi-tui";
 import type { SubagentActivity, SubagentPresentation } from "../../subagents/runtime/types.ts";
-import type { SubagentViewRun as SubagentRun } from "./types.ts";
+import type { TaskViewSnapshot } from "./types.ts";
 import { readableProvider, usefulText } from "./text-policy.ts";
 
 export type Theme = {
@@ -50,7 +50,7 @@ function compact(text: string): string {
   return oneLine.length > 100 ? `${oneLine.slice(0, 99).trimEnd()}…` : oneLine;
 }
 
-function failure(run: SubagentRun, profile: SubagentRendererProfile): string {
+function failure(run: TaskViewSnapshot, profile: SubagentRendererProfile): string {
   const error = usefulText(run.error);
   if (error) return compact(error);
 
@@ -58,7 +58,7 @@ function failure(run: SubagentRun, profile: SubagentRendererProfile): string {
   return run.status === "aborted" ? activityPhrase(profile, "aborted", `${label} aborted`) : activityPhrase(profile, "failed", `${label} failed`);
 }
 
-function activity(run: SubagentRun | undefined, profile: SubagentRendererProfile): string {
+function activity(run: TaskViewSnapshot | undefined, profile: SubagentRendererProfile): string {
   const label = profileLabel(profile);
   if (!run) return activityPhrase(profile, "starting", `Starting ${label.toLowerCase()}`);
   if (run.status === "unknown") return "Status unavailable";
@@ -73,12 +73,12 @@ function activity(run: SubagentRun | undefined, profile: SubagentRendererProfile
   return run.result ? activityPhrase(profile, "drafting", `Drafting ${label.toLowerCase()}`) : activityPhrase(profile, "starting", `Starting ${label.toLowerCase()}`);
 }
 
-export function idleDuration(run: SubagentRun | undefined, now = Date.now()): number {
+export function idleDuration(run: TaskViewSnapshot | undefined, now = Date.now()): number {
   if (run?.status !== "running") return 0;
   return Math.max(0, now - (run.lastActivityAt ?? run.startedAt));
 }
 
-function runDuration(run: SubagentRun | undefined, now = Date.now()): number {
+function runDuration(run: TaskViewSnapshot | undefined, now = Date.now()): number {
   return Math.max(0, (run?.finishedAt ?? now) - (run?.startedAt ?? now));
 }
 
@@ -95,7 +95,7 @@ export function formatCost(cost: number): string {
   return `$${cost.toFixed(2)}`;
 }
 
-export function formatUsage(usage: SubagentRun["usage"]): string | undefined {
+export function formatUsage(usage: TaskViewSnapshot["usage"]): string | undefined {
   if (!usage) return undefined;
   const inTokens = (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
   const outTokens = usage.output ?? 0;
@@ -111,7 +111,7 @@ export function formatDuration(durationMs: number): string {
   return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 }
 
-function metadata(run: SubagentRun | undefined, profile: SubagentRendererProfile, now = Date.now()): string {
+function metadata(run: TaskViewSnapshot | undefined, profile: SubagentRendererProfile, now = Date.now()): string {
   const tools = run?.activities.filter((item): item is Extract<SubagentActivity, { kind: "tool" }> => item.kind === "tool") ?? [];
   let toolStr: string;
   if (!tools.length) {
@@ -127,7 +127,7 @@ function metadata(run: SubagentRun | undefined, profile: SubagentRendererProfile
   return [toolStr, ...(usageStr ? [usageStr] : []), durStr].join(" · ");
 }
 
-export function collapsed(run: SubagentRun | undefined, profile: SubagentRendererProfile, theme: Theme, icon: string = STATUS_ICON[run?.status ?? "running"], now = Date.now(), task?: string, showActivity = true): string {
+export function collapsed(run: TaskViewSnapshot | undefined, profile: SubagentRendererProfile, theme: Theme, icon: string = STATUS_ICON[run?.status ?? "running"], now = Date.now(), task?: string, showActivity = true): string {
   const status = run?.status ?? "running";
   const title = theme.bold(theme.fg("toolTitle", `Agent(${profile.id || profileLabel(profile)}${task ? `: ${compact(task)}` : ""})`));
   const iconColor = status === "error" || status === "aborted" ? "error" : status === "success" ? "success" : "muted";
@@ -136,7 +136,7 @@ export function collapsed(run: SubagentRun | undefined, profile: SubagentRendere
   return `${theme.fg(iconColor, icon)} ${title}${showActivity ? theme.fg("muted", ` · ${compact(activity(run, profile))}`) : ""}\n  ${theme.fg("dim", "└")} ${theme.fg("muted", `${metadata(run, profile, now)}${idleSuffix}`)}`;
 }
 
-export function expandedDetails(run: SubagentRun | undefined, theme: Theme, width: number): string {
+export function expandedDetails(run: TaskViewSnapshot | undefined, theme: Theme, width: number): string {
   if (!run) return "";
 
   const lines: string[] = [];

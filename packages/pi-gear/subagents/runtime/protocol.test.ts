@@ -3,12 +3,12 @@ import { spawn } from "node:child_process";
 import { test } from "node:test";
 import { MAX_RETAINED_ACTIVITIES } from "./limits.ts";
 import { runChildSubagent } from "./runner.ts";
-import type { SubagentRun } from "./types.ts";
+import type { TaskSnapshot } from "./types.ts";
 
 for (const count of [MAX_RETAINED_ACTIVITIES, MAX_RETAINED_ACTIVITIES + 1]) {
   for (const exitCode of [0, 1]) {
     test(`runner snapshots preserve truncation with ${count} activities and exit ${exitCode}`, async () => {
-      const updates: SubagentRun[] = [];
+      const updates: TaskSnapshot[] = [];
       const events = Array.from({ length: count }, (_, i) => i % 2 === 0
         ? { type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: String(i) }] } }
         : { type: "tool_execution_start", toolCallId: String(i), toolName: "tool" });

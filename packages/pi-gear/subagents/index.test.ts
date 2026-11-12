@@ -4,7 +4,7 @@ import { SessionManager, type ExtensionAPI, type ExtensionToolContext, type Tool
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RostrixRuntime, TaskRecord, TaskStatus } from "pi-rostrix";
+import type { Runtime, TaskRecord, TaskStatus } from "pi-rostrix";
 import { setupSubagents } from "./index.ts";
 import { composePrompt } from "../context/prompt/index.ts";
 import { clearSubagentRegistry, getSubagentEntry } from "../ui/subagent/registry.ts";
@@ -69,14 +69,14 @@ function harness(sessionManager?: SessionManager) {
   };
   const delegationTools: string[] = [];
   const acknowledgments: string[] = [];
-  const supervisor = {
+  const monitor = {
     acknowledgeTask: (taskId: string) => { acknowledgments.push(taskId); },
-  } satisfies Pick<RostrixRuntime["supervisor"], "acknowledgeTask">;
+  } satisfies Pick<Runtime["monitor"], "acknowledgeTask">;
   const runtime = {
-    supervisor,
-    tasks, resolveProfile: () => ({ id: "gear:worker" }),
-    registerDelegationTools: (names: readonly string[]) => { delegationTools.push(...names); },
-  } as unknown as RostrixRuntime;
+    monitor,
+    tasks, resolveAgent: () => ({ id: "gear:worker" }),
+    addDelegationToolNames: (names: readonly string[]) => { delegationTools.push(...names); },
+  } as unknown as Runtime;
   const fakeModelRegistry = { getAvailable: () => [] };
   const ctx = {
     cwd: "/tmp",

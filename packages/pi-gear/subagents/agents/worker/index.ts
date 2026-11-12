@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { withoutWorkspaceSearch } from "../../runtime/process.ts";
 import { runChildSubagent, type RunChildSubagentOptions } from "../../runtime/runner.ts";
-import type { SubagentRun } from "../../runtime/types.ts";
+import type { TaskSnapshot } from "../../runtime/types.ts";
 import { workerProfile } from "./profile.ts";
 
 export const WORKER_TOOL_NAME = workerProfile.id;
@@ -40,7 +40,7 @@ export function formatWorkerInput(input: WorkerSubagentInput): string {
 export function runWorker(
   task: string,
   options: Omit<RunChildSubagentOptions, "task" | "profile" | "childExtension"> & { workspaceSearch?: boolean },
-): Promise<SubagentRun> {
+): Promise<TaskSnapshot> {
   const { workspaceSearch = true, ...runOptions } = options;
   return runChildSubagent({
     ...runOptions,

@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { ROSTRIX_RUNTIME_SYMBOL, type RostrixRuntime } from "pi-rostrix";
+import { RUNTIME_SYMBOL, type Runtime } from "pi-rostrix";
 
 const sdk = import.meta.resolve("@earendil-works/pi-coding-agent");
 const { loadExtensions } = await import(new URL("./core/extensions/loader.js", sdk).href);
 const { normalizeBuildSystemPromptOptions, buildSystemPrompt } = await import(new URL("./core/system-prompt.js", sdk).href);
 
 test("Gear and Rostrix compose their own prompt contracts through Pi's extension loader", async () => {
-  const shared = globalThis as typeof globalThis & { [ROSTRIX_RUNTIME_SYMBOL]?: RostrixRuntime };
+  const shared = globalThis as typeof globalThis & { [RUNTIME_SYMBOL]?: Runtime };
   const root = fileURLToPath(new URL("../", import.meta.url));
   const entry = fileURLToPath(new URL("../index.ts", import.meta.url));
   const previousChild = process.env.PI_GEAR_CHILD;
@@ -17,9 +17,9 @@ test("Gear and Rostrix compose their own prompt contracts through Pi's extension
     const loaded = await loadExtensions([entry], root);
     assert.deepEqual(loaded.errors, []);
     assert.equal(loaded.extensions.length, 1);
-    const runtime = shared[ROSTRIX_RUNTIME_SYMBOL];
+    const runtime = shared[RUNTIME_SYMBOL];
     assert.ok(runtime);
-    assert.equal(runtime.getActiveProfile(), undefined);
+    assert.equal(runtime.getActiveAgent(), undefined);
 
     for (const selectedTools of [["worker", "subagent_observe"], ["researcher"], ["reviewer"], ["read"]]) {
       const options = normalizeBuildSystemPromptOptions({ cwd: root, customPrompt: "Original role", selectedTools });
@@ -42,7 +42,7 @@ test("Gear and Rostrix compose their own prompt contracts through Pi's extension
       }
     }
   } finally {
-    await shared[ROSTRIX_RUNTIME_SYMBOL]?.dispose();
+    await shared[RUNTIME_SYMBOL]?.dispose();
     if (previousChild === undefined) delete process.env.PI_GEAR_CHILD;
     else process.env.PI_GEAR_CHILD = previousChild;
   }

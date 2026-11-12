@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { TaskRegistry, type TaskRecord } from "pi-rostrix";
+import { TaskController, type TaskRecord } from "pi-rostrix";
 import { researcherProfile } from "../../subagents/agents/researcher/index.ts";
 import { renderSubagentResult } from "./renderer.ts";
 import { SubagentResultComponent } from "./component.ts";
@@ -24,7 +24,7 @@ for (const source of ["snapshot", "subscription"] as const) {
         ],
         usage: { input: 1000, output: 200, cacheRead: 500, cost: { total: 0.02 } },
       };
-      const tasks = new TaskRegistry();
+      const tasks = new TaskController();
       let listener: ((task: TaskRecord) => void) | undefined;
       t.mock.method(tasks, "getTask", () => source === "snapshot" ? record : {
         ...record, status: "running", activities: [], usage: undefined, finishedAt: undefined,

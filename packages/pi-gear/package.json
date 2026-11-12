@@ -25,7 +25,7 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --experimental-strip-types --test --test-timeout=30000 capabilities/*/*.test.ts commands/*.test.ts config/*.test.ts context/*/*.test.ts execution/*.test.ts execution/*/*.test.ts execution/*/*/*.test.ts lifecycle/*.test.ts lsp/*.test.ts workspace/*.test.ts subagents/*.test.ts subagents/*/*.test.ts subagents/*/*/*.test.ts ui/*/*.test.ts",
+    "test": "node --experimental-strip-types --test --test-timeout=30000 agents/*.test.ts capabilities/*/*.test.ts commands/*.test.ts config/*.test.ts context/*/*.test.ts execution/*.test.ts execution/*/*.test.ts execution/*/*/*.test.ts lifecycle/*.test.ts lsp/*.test.ts workspace/*.test.ts subagents/*.test.ts subagents/*/*.test.ts subagents/*/*/*.test.ts ui/*/*.test.ts",
     "test:sandbox:macos": "node --experimental-strip-types --test --test-timeout=30000 execution/sandbox/integration.test.ts && node --experimental-strip-types --test --test-timeout=30000 --test-name-pattern='sandbox spawn abort and timeout' execution/sandbox/spawn.test.ts"
   },
   "dependencies": {

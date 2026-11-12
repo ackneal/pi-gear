@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { normalizeRunActivities } from "../../subagents/activities.ts";
 import { researcherProfile } from "../../subagents/agents/researcher/index.ts";
-import type { SubagentRun } from "../../subagents/runtime/types.ts";
+import type { TaskSnapshot } from "../../subagents/runtime/types.ts";
 import { renderSubagentResult } from "./renderer.ts";
 import { SubagentResultComponent } from "./component.ts";
 
@@ -45,7 +45,7 @@ for (const legacy of [false, true]) {
     const details = { ...metadata, ...(legacy ? { items: history, itemsTruncated: true } : { activities: history, activitiesTruncated: true }) };
     const original = structuredClone(details);
     const component = renderSubagentResult(researcherProfile,
-      { content: [], details: details as SubagentRun },
+      { content: [], details: details as TaskSnapshot },
       { expanded: true, isPartial: false },
       { fg: (_color, text) => text, bold: (text) => text },
       { invalidate() {} });

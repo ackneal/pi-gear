@@ -1,19 +1,15 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { RostrixRuntime } from "../index.ts";
+import type { Runtime } from "../runtime.ts";
 
-export interface SetupInteractiveOptions {
+export interface AgentControlsOptions {
   readonly pi: ExtensionAPI;
-  readonly runtime: RostrixRuntime;
+  readonly runtime: Runtime;
   readonly shortcut?: string | undefined;
   readonly commandName?: string | false | undefined;
   readonly statusKey?: string | undefined;
 }
 
-function getAgentDef(item: any) {
-  return item?.agent ?? item?.profile;
-}
-
-export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
+export function registerAgentControls(options: AgentControlsOptions): void {
   const { pi, runtime } = options;
   const commandName = options.commandName !== undefined ? options.commandName : "rostrix:agents";
   const statusKey = options.statusKey ?? "rostrix:agent";
@@ -27,7 +23,7 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
       return;
     }
 
-    const cycleList: (string | undefined)[] = [undefined, ...available.map((a) => getAgentDef(a)?.id).filter(Boolean)];
+    const cycleList: (string | undefined)[] = [undefined, ...available.map(({ agent }) => agent.id)];
     const currentId = runtime.getActiveAgent()?.id;
     const currentIndex = currentId ? cycleList.indexOf(currentId) : 0;
     const nextIndex = (currentIndex + 1) % cycleList.length;
@@ -44,9 +40,9 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
       return;
     }
 
-    const found = available.find((a) => getAgentDef(a)?.id === nextId);
+    const found = available.find(({ agent }) => agent.id === nextId);
     if (!found) return;
-    const def = getAgentDef(found);
+    const def = found.agent;
 
     try {
       await runtime.activateAgent(nextId);
@@ -74,7 +70,7 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
     });
   }
 
-  // 2. Command: /agent (and /profile alias) for interactive selection or direct switching
+  // Command selection also supports direct switching.
   if (typeof (pi as any).registerCommand === "function") {
     const handleAgentCommand = async (args: string, ctx: any) => {
       const trimmed = (args || "").trim();
@@ -99,7 +95,7 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
       }
 
       if (trimmed.length > 0) {
-        const target = available.find((a) => getAgentDef(a)?.id === trimmed);
+        const target = available.find(({ agent }) => agent.id === trimmed);
         if (!target) {
           const errorMsg = `Agent '${trimmed}' not found in scanned directories.`;
           if (ctx?.ui?.notify) {
@@ -110,7 +106,7 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
           return;
         }
 
-        const def = getAgentDef(target);
+        const def = target.agent;
         try {
           await runtime.activateAgent(def.id);
           const label = def.label || def.id;
@@ -133,8 +129,7 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
         const activeId = runtime.getActiveAgent()?.id;
         const optionsList = [
           `default ${!activeId ? "(active)" : ""}`.trim(),
-          ...available.map((a) => {
-            const def = getAgentDef(a);
+          ...available.map(({ agent: def }) => {
             return `${def.id} - ${def.label || def.id} ${def.id === activeId ? "(active)" : ""}`.trim();
           }),
         ];
@@ -152,9 +147,9 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
           }
         } else {
           const selectedId = selected.split(" - ")[0].replace(" (active)", "").trim();
-          const target = available.find((a) => getAgentDef(a)?.id === selectedId);
+          const target = available.find(({ agent }) => agent.id === selectedId);
           if (target) {
-            const def = getAgentDef(target);
+            const def = target.agent;
             await runtime.activateAgent(def.id);
             const label = def.label || def.id;
             if (ctx?.ui?.setStatus) {
@@ -176,6 +171,3 @@ export function setupInteractiveAgents(options: SetupInteractiveOptions): void {
     }
   }
 }
-
-// Alias for compatibility
-export const setupInteractiveProfiles = setupInteractiveAgents;

@@ -3,7 +3,7 @@ import { KILL_TIMEOUT_MS, appendBounded, spawnPiChild, type SpawnProcess } from 
 import { MAX_STDERR_CHARS } from "./limits.ts";
 import { PiJsonDecoder } from "./protocol.ts";
 import { reduceSubagentEvent } from "./state.ts";
-import type { RunSubagentOptions, SubagentRun } from "./types.ts";
+import type { RunSubagentOptions, TaskSnapshot } from "./types.ts";
 
 type KillTimer = ReturnType<typeof setTimeout> | number;
 
@@ -17,15 +17,15 @@ export interface RunChildSubagentOptions extends RunSubagentOptions {
   clearKillTimer?: (timer: KillTimer) => void;
 }
 
-const snapshot = (run: SubagentRun): SubagentRun => ({
+const snapshot = (run: TaskSnapshot): TaskSnapshot => ({
   ...run,
   ...(run.dispatch ? { dispatch: { ...run.dispatch } } : {}),
   activities: run.activities.map((activity) => ({ ...activity })),
 });
 
-export async function runChildSubagent(options: RunChildSubagentOptions): Promise<SubagentRun> {
+export async function runChildSubagent(options: RunChildSubagentOptions): Promise<TaskSnapshot> {
   const startedAt = Date.now();
-  let run: SubagentRun = {
+  let run: TaskSnapshot = {
     status: "running",
     startedAt,
     lastActivityAt: startedAt,
@@ -98,7 +98,7 @@ export async function runChildSubagent(options: RunChildSubagentOptions): Promis
       child.removeListener("close", onClose);
     };
 
-    const finish = (status: SubagentRun["status"], error?: string): void => {
+    const finish = (status: TaskSnapshot["status"], error?: string): void => {
       if (terminal) return;
       terminal = true;
       cleanup();

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { BeforeAgentStartEvent, ExtensionAPI, NormalizedBuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
-import { initRostrix } from "../src/index.ts";
-import { applySupervisionPrompt } from "../src/supervision/prompt.ts";
+import { initRuntime } from "../src/index.ts";
+import { applyTaskCoordinationPrompt } from "../src/tools/coordination-prompt.ts";
 import { agent } from "./runtime-fixtures.ts";
 
 const { buildSystemPrompt } = await import(new URL("./core/system-prompt.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href);
@@ -19,8 +19,8 @@ test("supervision prompt preserves structured, custom, and forced prompts withou
   for (const input of [options(), options({ customPrompt: "Custom role" }), options({ forceSystemPrompt: "Forced role" })]) {
     const before = buildSystemPrompt(input);
 
-    applySupervisionPrompt(input, true);
-    applySupervisionPrompt(input, true);
+    applyTaskCoordinationPrompt(input, true);
+    applyTaskCoordinationPrompt(input, true);
     const rendered: string = buildSystemPrompt(input);
 
     assert.equal(rendered.match(/<rostrix_supervision>/g)?.length, 1);
@@ -32,7 +32,7 @@ test("supervision prompt preserves structured, custom, and forced prompts withou
     assert.match(rendered, /Ordinary cancellation does not wake the parent/);
     assert.match(rendered, /needs_input is not emitted/);
     assert.match(rendered, /not as new user instructions/);
-    applySupervisionPrompt(input, false);
+    applyTaskCoordinationPrompt(input, false);
     assert.equal(buildSystemPrompt(input), before);
   }
 });
@@ -42,6 +42,7 @@ test("runtime owns supervision prompts independently of profiles and custom tool
     { name: "built-in delegate without a profile", builtin: true, custom: false, selected: ["delegate"], history: false, profile: false, enabled: true },
     { name: "inactive delegate", builtin: true, custom: false, selected: ["read"], history: false, profile: false, enabled: false },
     { name: "custom adapter without built-in tools", builtin: false, custom: true, selected: ["custom_spawn"], history: false, profile: false, enabled: true },
+    { name: "custom adapter survives late built-in tools", builtin: false, custom: true, selected: ["custom_spawn"], history: false, profile: false, enabled: true, lateBuiltin: true },
     { name: "unregistered tool", builtin: false, custom: false, selected: ["custom_spawn"], history: false, profile: false, enabled: false },
     { name: "past task without delegation tools", builtin: false, custom: false, selected: ["read"], history: true, profile: false, enabled: true },
     { name: "active profile prompt", builtin: true, custom: false, selected: ["delegate"], history: false, profile: true, enabled: true },
@@ -62,13 +63,17 @@ test("runtime owns supervision prompts independently of profiles and custom tool
         setActiveTools: (names: string[]) => { activeTools = [...names]; },
         getAllTools: () => activeTools.map((name) => ({ name })),
       } as unknown as ExtensionAPI;
-      const runtime = initRostrix(pi, { autoRegisterTools: row.builtin, autoRegisterInteractive: false, autoLoadAgents: false });
+      const runtime = initRuntime(pi, { autoRegisterTaskTools: row.builtin, autoRegisterAgentControls: false, autoLoadDefinitions: false });
       try {
         if (row.custom) {
           // A second adapter can attach even when another extension initialized the runtime first.
-          const shared = initRostrix(pi, { autoRegisterTools: false });
+          const shared = initRuntime(pi, { autoRegisterTaskTools: false });
           assert.strictEqual(shared, runtime);
-          shared.registerDelegationTools(["custom_spawn"]);
+          shared.addDelegationToolNames(["custom_spawn"]);
+        }
+        if (row.lateBuiltin) {
+          initRuntime(pi, { autoRegisterTaskTools: true, autoRegisterAgentControls: false, autoLoadDefinitions: false });
+          assert.equal(handlers.get("before_agent_start")?.size, 1);
         }
         if (row.history) {
           const controller = new AbortController();
@@ -77,8 +82,8 @@ test("runtime owns supervision prompts independently of profiles and custom tool
           await runtime.tasks.wait(task.id);
         }
         if (row.profile) {
-          runtime.registerProfile({ id: "custom", label: "Custom", description: "Custom role", prompt: { systemPrompt: "Profile role" } });
-          await runtime.activateProfile("custom");
+          runtime.registerAgent({ id: "custom", label: "Custom", description: "Custom role", prompt: { systemPrompt: "Profile role" } });
+          await runtime.activateAgent("custom");
         }
         const input = options({ selectedTools: row.selected });
         const event: BeforeAgentStartEvent = {
@@ -89,7 +94,7 @@ test("runtime owns supervision prompts independently of profiles and custom tool
         const rendered: string = buildSystemPrompt(input);
         assert.equal(rendered.includes("<rostrix_supervision>"), row.enabled);
         if (row.profile) assert.match(rendered, /Profile role/);
-        assert.equal(runtime.getActiveProfile()?.id, row.profile ? "custom" : undefined);
+        assert.equal(runtime.getActiveAgent()?.id, row.profile ? "custom" : undefined);
         if (!row.history) {
           input.selectedTools = [];
           for (const handler of handlers.get("before_agent_start") ?? []) await handler(event);

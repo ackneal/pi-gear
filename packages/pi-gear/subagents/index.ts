@@ -1,5 +1,5 @@
 import { SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { initRostrix, type RostrixRuntime, type TaskRecord, type TaskStatus } from "pi-rostrix";
+import { initRuntime, type Runtime, type TaskRecord, type TaskStatus } from "pi-rostrix";
 import { resolve } from "node:path";
 import { Type } from "typebox";
 import {
@@ -25,18 +25,18 @@ import {
   workerParameters,
   workerProfile,
 } from "./agents/worker/index.ts";
-import type { SubagentDispatch, SubagentRun } from "./runtime/types.ts";
+import type { ModelSelection, TaskSnapshot } from "./runtime/types.ts";
 import type { WorkspaceServices } from "../workspace/setup.ts";
 import { setupSubagentSettings, SUBAGENTS, type SubagentSettings } from "./settings.ts";
-import { taskRun } from "./task-run.ts";
+import { toTaskSnapshot } from "./task-snapshot.ts";
 import { normalizeRunActivities } from "./activities.ts";
-import { setupGear } from "../index.ts";
+import { setupExtension } from "../index.ts";
 
 export interface SubagentServices {
   settings: SubagentSettings;
 }
 
-function mapStatus(status: TaskStatus): SubagentRun["status"] {
+function mapStatus(status: TaskStatus): TaskSnapshot["status"] {
   switch (status) {
     case "completed":
       return "success";
@@ -52,8 +52,8 @@ function mapStatus(status: TaskStatus): SubagentRun["status"] {
   }
 }
 
-function recordStart(toolCallId: string | undefined, runId: string, task: string, dispatch?: SubagentDispatch): void {
-  const initialRun: SubagentRun = {
+function recordStart(toolCallId: string | undefined, runId: string, task: string, dispatch?: ModelSelection): void {
+  const initialRun: TaskSnapshot = {
     status: "running",
     startedAt: Date.now(),
     activities: [],
@@ -63,14 +63,14 @@ function recordStart(toolCallId: string | undefined, runId: string, task: string
   recordSubagentLiveStart(runId, task, initialRun);
 }
 
-function recordProgress(toolCallId: string | undefined, runId: string, task: TaskRecord, dispatch?: SubagentDispatch): void {
-  const run = taskRun(task, dispatch);
+function recordProgress(toolCallId: string | undefined, runId: string, task: TaskRecord, dispatch?: ModelSelection): void {
+  const run = toTaskSnapshot(task, dispatch);
   if (toolCallId) recordSubagentLiveUpdate(toolCallId, run);
   recordSubagentLiveUpdate(runId, run);
 }
 
 const COMPLETION_ENTRY = "gear:subagent-completion";
-type RunDetails = SubagentRun & { runId: string; revision: number };
+type RunDetails = TaskSnapshot & { runId: string; revision: number };
 
 function observation(details: RunDetails) {
   const tools = details.activities.filter((activity) => activity.kind === "tool");
@@ -95,10 +95,10 @@ function observation(details: RunDetails) {
 export function setupSubagents(
   pi: ExtensionAPI,
   _workspace?: WorkspaceServices,
-  rostrix?: RostrixRuntime,
+  providedRuntime?: Runtime,
 ): SubagentServices {
-  const runtime = rostrix ?? initRostrix(pi, { autoRegisterTools: false });
-  runtime.registerDelegationTools(SUBAGENTS);
+  const runtime = providedRuntime ?? initRuntime(pi, { autoRegisterTaskTools: false });
+  runtime.addDelegationToolNames(SUBAGENTS);
   const settings = setupSubagentSettings(pi);
   let sessionContext: ExtensionContext | undefined;
   pi.on("session_start", (_event, ctx) => { sessionContext = ctx; });
@@ -111,7 +111,7 @@ export function setupSubagents(
     return entry?.type === "custom" ? normalizeRunActivities(entry.data as RunDetails) : undefined;
   }
 
-  function track(toolCallId: string, record: TaskRecord, dispatch: SubagentDispatch, ctx: ExtensionContext): void {
+  function track(toolCallId: string, record: TaskRecord, dispatch: ModelSelection, ctx: ExtensionContext): void {
     recordStart(toolCallId, record.id, record.task, dispatch);
     sessionContext = ctx;
     const sessionId = ctx.sessionManager.getSessionId();
@@ -122,7 +122,7 @@ export function setupSubagents(
 
       unsubscribe();
       const completion: RunDetails = {
-        ...taskRun(updated, dispatch), runId: updated.id, revision: updated.revision,
+        ...toTaskSnapshot(updated, dispatch), runId: updated.id, revision: updated.revision,
       };
       if (sessionContext?.sessionManager.getSessionId() === sessionId) {
         pi.appendEntry<RunDetails>(COMPLETION_ENTRY, completion);
@@ -146,9 +146,9 @@ export function setupSubagents(
       const task = formatResearcherInput({ question, scope });
       const dispatch = settings.resolve("researcher", ctx);
 
-      const resolved = runtime.resolveProfile("gear:researcher");
+      const resolved = runtime.resolveAgent("gear:researcher");
       const record = runtime.tasks.spawn({
-        extensionFactories: [(childPi) => setupGear(childPi, { child: true })],
+        extensionFactories: [(childPi) => setupExtension(childPi, { child: true })],
         profile: resolved,
         task,
         cwd: ctx.cwd,
@@ -162,7 +162,7 @@ export function setupSubagents(
 
       return {
         content: [{ type: "text", text: JSON.stringify({ runId: record.id, status: record.status, revision: record.revision, wakeOn: record.wakeOn }) }],
-        details: { ...taskRun(record, dispatch), runId: record.id, revision: record.revision, wakeOn: record.wakeOn },
+        details: { ...toTaskSnapshot(record, dispatch), runId: record.id, revision: record.revision, wakeOn: record.wakeOn },
       };
     },
     renderCall: renderSubagentCall,
@@ -182,9 +182,9 @@ export function setupSubagents(
       const task = formatWorkerInput({ task: requestedTask, targetFiles, findings, verification });
       const dispatch = settings.resolve("worker", ctx);
 
-      const resolved = runtime.resolveProfile("gear:worker");
+      const resolved = runtime.resolveAgent("gear:worker");
       const record = runtime.tasks.spawn({
-        extensionFactories: [(childPi) => setupGear(childPi, { child: true })],
+        extensionFactories: [(childPi) => setupExtension(childPi, { child: true })],
         profile: resolved,
         task,
         targetFiles: targetFiles?.map((f) => resolve(ctx.cwd, f)),
@@ -199,7 +199,7 @@ export function setupSubagents(
 
       return {
         content: [{ type: "text", text: JSON.stringify({ runId: record.id, status: record.status, revision: record.revision, wakeOn: record.wakeOn }) }],
-        details: { ...taskRun(record, dispatch), runId: record.id, revision: record.revision, wakeOn: record.wakeOn },
+        details: { ...toTaskSnapshot(record, dispatch), runId: record.id, revision: record.revision, wakeOn: record.wakeOn },
       };
     },
     renderCall: renderSubagentCall,
@@ -219,9 +219,9 @@ export function setupSubagents(
       const task = formatReviewerInput({ scope, context, skills });
       const dispatch = settings.resolve("reviewer", ctx);
 
-      const resolved = runtime.resolveProfile("gear:reviewer");
+      const resolved = runtime.resolveAgent("gear:reviewer");
       const record = runtime.tasks.spawn({
-        extensionFactories: [(childPi) => setupGear(childPi, { child: true })],
+        extensionFactories: [(childPi) => setupExtension(childPi, { child: true })],
         profile: resolved,
         task,
         cwd: ctx.cwd,
@@ -235,7 +235,7 @@ export function setupSubagents(
 
       return {
         content: [{ type: "text", text: JSON.stringify({ runId: record.id, status: record.status, revision: record.revision, wakeOn: record.wakeOn }) }],
-        details: { ...taskRun(record, dispatch), runId: record.id, revision: record.revision, wakeOn: record.wakeOn },
+        details: { ...toTaskSnapshot(record, dispatch), runId: record.id, revision: record.revision, wakeOn: record.wakeOn },
       };
     },
     renderCall: renderSubagentCall,
@@ -244,7 +244,7 @@ export function setupSubagents(
     renderShell: "self",
   });
 
-  // 4. subagent_observe -> queries rostrix.tasks.wait
+  // 4. subagent_observe -> queries runtime.tasks.wait
   pi.registerTool({
     name: "subagent_observe",
     label: "Observe subagent",
@@ -259,7 +259,7 @@ export function setupSubagents(
         if (!runtime.tasks.getTask(runId)) {
           const saved = savedRun(runId, ctx);
           if (saved) {
-            runtime.supervisor.acknowledgeTask(runId);
+            runtime.monitor.acknowledgeTask(runId);
             return observation(saved);
           }
         }
@@ -273,10 +273,10 @@ export function setupSubagents(
         recordProgress(undefined, task.id, task);
 
         if (task.status === "completed" || task.status === "failed" || task.status === "aborted") {
-          runtime.supervisor.acknowledgeTask(task.id);
+          runtime.monitor.acknowledgeTask(task.id);
         }
 
-        return observation({ ...taskRun(task), runId: task.id, status, revision: task.revision });
+        return observation({ ...toTaskSnapshot(task), runId: task.id, status, revision: task.revision });
       } catch (err) {
         return {
           isError: true,
@@ -290,11 +290,11 @@ export function setupSubagents(
     renderShell: "self",
   });
 
-  // 5. subagent_cancel -> cancels via rostrix.tasks.cancel
+  // 5. subagent_cancel -> cancels via runtime.tasks.cancel
   pi.registerTool({
     name: "subagent_cancel",
     label: "Cancel subagent",
-    description: "Cancel one subagent and wait for its process to terminate. Other runs and the main agent continue; repeated cancellation returns the same terminal state.",
+    description: "Cancel one subagent and wait for its child session to shut down. Other tasks and the main agent continue; repeated cancellation returns the same terminal state.",
     parameters: Type.Object({ runId: Type.String({ description: "Run identifier returned by researcher, worker, or reviewer." }) }),
     async execute(_toolCallId, { runId }, _signal, _onUpdate, ctx): Promise<any> {
       await runtime.tasks.cancel(runId);

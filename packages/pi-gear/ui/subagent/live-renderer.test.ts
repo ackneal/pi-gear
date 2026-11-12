@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { researcherProfile } from "../../subagents/agents/researcher/index.ts";
-import type { SubagentRun } from "../../subagents/runtime/types.ts";
+import type { TaskSnapshot } from "../../subagents/runtime/types.ts";
 import { clearSubagentRegistry, getSubagentEntry, recordSubagentLiveStart, recordSubagentLiveUpdate } from "./registry.ts";
 import { SubagentResultComponent } from "./component.ts";
 import { renderSubagentResult } from "./renderer.ts";
@@ -16,13 +16,13 @@ function rendered(component: { render(width: number): string[] }): string {
 
 test("asynchronous transcript component follows live registry updates through completion", () => {
   clearSubagentRegistry();
-  const initial: SubagentRun = { status: "running", startedAt: Date.now(), activities: [] };
+  const initial: TaskSnapshot = { status: "running", startedAt: Date.now(), activities: [] };
   recordSubagentLiveStart("async-call", "Inspect", initial);
   let invalidations = 0;
 
   const component = renderSubagentResult(
     researcherProfile,
-    { content: [{ type: "text", text: "started" }], details: { ...initial, runId: "run-1" } } as AgentToolResult<SubagentRun>,
+    { content: [{ type: "text", text: "started" }], details: { ...initial, runId: "run-1" } } as AgentToolResult<TaskSnapshot>,
     { isPartial: false, expanded: false } as never,
     theme,
     { toolCallId: "async-call", args: { question: "Inspect" }, invalidate: () => { invalidations++; } },
@@ -51,14 +51,14 @@ test("asynchronous transcript component follows live registry updates through co
 
 test("asynchronous transcript component tracks live run by runId even when toolCallId is absent in context", () => {
   clearSubagentRegistry();
-  const initial: SubagentRun = { status: "running", startedAt: Date.now(), activities: [] };
+  const initial: TaskSnapshot = { status: "running", startedAt: Date.now(), activities: [] };
   const runId = "task-uuid-12345";
   recordSubagentLiveStart(runId, "Perform audit", initial);
   let invalidations = 0;
 
   const component = renderSubagentResult(
     researcherProfile,
-    { content: [{ type: "text", text: "started" }], details: { ...initial, runId } } as AgentToolResult<SubagentRun>,
+    { content: [{ type: "text", text: "started" }], details: { ...initial, runId } } as AgentToolResult<TaskSnapshot>,
     { isPartial: false, expanded: false } as never,
     theme,
     { invalidate: () => { invalidations++; } },
@@ -95,13 +95,13 @@ for (const { name, fields } of historyCases) {
   test(`history rendering preserves details and safely formats ${name}`, (t) => {
     clearSubagentRegistry();
     t.after(() => clearSubagentRegistry());
-    const details = { status: "success", startedAt: 1, result: "Done", ...fields } as unknown as SubagentRun;
+    const details = { status: "success", startedAt: 1, result: "Done", ...fields } as unknown as TaskSnapshot;
     const originalDetails = structuredClone(details);
     t.after(() => assert.deepEqual(details, originalDetails, "original details must not be mutated"));
     const toolCallId = `history-${name}`;
     const component = renderSubagentResult(
       researcherProfile,
-      { content: [{ type: "text", text: "Done" }], details } as AgentToolResult<SubagentRun>,
+      { content: [{ type: "text", text: "Done" }], details } as AgentToolResult<TaskSnapshot>,
       { isPartial: false, expanded: false } as never,
       theme,
       { toolCallId, args: { question: "Inspect" }, invalidate: () => {} },
@@ -116,10 +116,10 @@ for (const { name, fields } of historyCases) {
 }
 
 test("partial transcript rendering remains driven by normal partial results", () => {
-  const running: SubagentRun = { status: "running", startedAt: Date.now(), activities: [{ kind: "thinking", text: "Checking" }] };
+  const running: TaskSnapshot = { status: "running", startedAt: Date.now(), activities: [{ kind: "thinking", text: "Checking" }] };
   const component = renderSubagentResult(
     researcherProfile,
-    { content: [{ type: "text", text: "Checking" }], details: running } as AgentToolResult<SubagentRun>,
+    { content: [{ type: "text", text: "Checking" }], details: running } as AgentToolResult<TaskSnapshot>,
     { isPartial: true, expanded: false } as never,
     theme,
     { toolCallId: "foreground-call", args: { question: "Inspect" }, invalidate: () => {} },
@@ -136,7 +136,7 @@ test("task headers and expanded results follow render options", (t) => {
     { expanded: true, status: "success", error: undefined },
     { expanded: true, status: "error", error: "Run failed" },
   ] as const) {
-    const run: SubagentRun = {
+    const run: TaskSnapshot = {
       status, ...(error ? { error } : {}), startedAt: 0, finishedAt: 1000,
       activities: [{ kind: "tool", name: "read", status: "success", result: "Tool detail" }],
       result: "Final detail",
@@ -179,7 +179,7 @@ test("expanded arguments and answer wrap completely with inner indentation", (t)
   for (const key of ["question", "task", "scope"]) {
     for (const width of [24, 60]) {
       const task = `${"original scope ".repeat(80)}\nTAIL_${key}`;
-      const run: SubagentRun = { status: "success", startedAt: 1, activities: [{ kind: "thinking", text: "PRIVATE_ACTIVITY" }], result: `${"returned answer ".repeat(30)}\nANSWER_TAIL` };
+      const run: TaskSnapshot = { status: "success", startedAt: 1, activities: [{ kind: "thinking", text: "PRIVATE_ACTIVITY" }], result: `${"returned answer ".repeat(30)}\nANSWER_TAIL` };
       const component = renderSubagentResult(researcherProfile, { content: [], details: run },
         { isPartial: false, expanded: true }, theme, { args: { [key]: task }, invalidate() {} });
       t.after(() => (component as SubagentResultComponent).dispose());
@@ -202,8 +202,8 @@ test("cleared running history reports unavailable status without inventing an ab
   const details = {
     runId: "old-run", status: "running", startedAt: 1,
     activities: [{ kind: "tool", name: "read", status: "running" }],
-  } as SubagentRun & { runId: string };
-  const result = { content: [], details } as AgentToolResult<SubagentRun>;
+  } as TaskSnapshot & { runId: string };
+  const result = { content: [], details } as AgentToolResult<TaskSnapshot>;
   const original = structuredClone(result);
   recordSubagentLiveStart("history", "Inspect", details);
   clearSubagentRegistry();
@@ -226,7 +226,7 @@ test("cleared running history reports unavailable status without inventing an ab
   assert.deepEqual(result, original);
 });
 
-test("renderSubagentResult queries TaskRegistry directly from runtime when available", (t) => {
+test("renderSubagentResult queries TaskController directly from runtime when available", (t) => {
   clearSubagentRegistry();
   t.after(clearSubagentRegistry);
 
@@ -241,7 +241,7 @@ test("renderSubagentResult queries TaskRegistry directly from runtime when avail
             startedAt: 1000,
             finishedAt: 2000,
             lastActivityAt: 2000,
-            result: "Authoritative result from runtime TaskRegistry",
+            result: "Authoritative result from runtime TaskController",
             activities: [],
           };
         }
@@ -253,7 +253,7 @@ test("renderSubagentResult queries TaskRegistry directly from runtime when avail
   const result = {
     content: [{ type: "text", text: "started" }],
     details: { status: "running", startedAt: 1000, activities: [], runId: "task-runtime-1" },
-  } as AgentToolResult<SubagentRun>;
+  } as AgentToolResult<TaskSnapshot>;
 
   const component = renderSubagentResult(
     researcherProfile,
@@ -267,7 +267,7 @@ test("renderSubagentResult queries TaskRegistry directly from runtime when avail
 
   const output = rendered(component);
   assert.match(output, /● Agent\(researcher\)/);
-  assert.match(output, /Authoritative result from runtime TaskRegistry/);
+  assert.match(output, /Authoritative result from runtime TaskController/);
   assert.doesNotMatch(output, /aborted/i);
 
   // Test collapsed mode
@@ -285,7 +285,7 @@ test("renderSubagentResult queries TaskRegistry directly from runtime when avail
   assert.match(collapsedOutput, /● Agent\(researcher/);
 });
 
-test("renderSubagentResult updates live from TaskRegistry even when UI registry was cleared", (t) => {
+test("renderSubagentResult updates live from TaskController even when UI registry was cleared", (t) => {
   clearSubagentRegistry();
   t.after(clearSubagentRegistry);
 
@@ -316,7 +316,7 @@ test("renderSubagentResult updates live from TaskRegistry even when UI registry 
   const result = {
     content: [{ type: "text", text: "started" }],
     details: { status: "running", startedAt: 1000, activities: [], runId: "task-live-cleared" },
-  } as AgentToolResult<SubagentRun>;
+  } as AgentToolResult<TaskSnapshot>;
 
   const component = renderSubagentResult(
     researcherProfile,

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { initRostrix, ROSTRIX_RUNTIME_SYMBOL, ProfileValidationError } from "../src/index.ts";
+import { initRuntime, RUNTIME_SYMBOL, AgentValidationError } from "../src/index.ts";
 
 function createMockPi(): { pi: ExtensionAPI; shutdown: () => Promise<void> } {
   const listeners = new Map<string, Array<() => void | Promise<void>>>();
@@ -33,7 +33,7 @@ function createMockPi(): { pi: ExtensionAPI; shutdown: () => Promise<void> } {
 
 test("session shutdown awaits task cleanup before disposing runtime state", async () => {
   const { pi, shutdown } = createMockPi();
-  const runtime = initRostrix(pi, { autoLoadAgents: false, autoRegisterInteractive: false });
+  const runtime = initRuntime(pi, { autoLoadDefinitions: false, autoRegisterAgentControls: false });
   let release!: () => void;
   const cleanup = new Promise<void>((resolve) => { release = resolve; });
   const originalShutdown = runtime.tasks.shutdown.bind(runtime.tasks);
@@ -49,41 +49,41 @@ test("session shutdown awaits task cleanup before disposing runtime state", asyn
     release();
     await pending;
     assert.equal(runtime.isInitialized, false);
-    assert.equal((globalThis as any)[ROSTRIX_RUNTIME_SYMBOL], undefined);
+    assert.equal((globalThis as any)[RUNTIME_SYMBOL], undefined);
   } finally {
     release();
     await runtime.dispose();
   }
 });
 
-test("initRostrix creates a singleton runtime and attaches to globalThis", async () => {
+test("initRuntime creates a singleton runtime and attaches to globalThis", async () => {
   const { pi, shutdown } = createMockPi();
   try {
-    const runtime1 = initRostrix(pi);
+    const runtime1 = initRuntime(pi);
     assert.equal(runtime1.isInitialized, true);
     assert.equal(runtime1.version, "0.1.0");
 
     // Second call returns the exact same singleton instance
-    const runtime2 = initRostrix(pi);
+    const runtime2 = initRuntime(pi);
     assert.strictEqual(runtime1, runtime2);
-    assert.strictEqual((globalThis as any)[ROSTRIX_RUNTIME_SYMBOL], runtime1);
+    assert.strictEqual((globalThis as any)[RUNTIME_SYMBOL], runtime1);
 
     // Profile registration and retrieval
-    runtime1.registerProfile({ id: "test:agent", label: "Test Agent", description: "Test Description" });
-    assert.deepEqual(runtime1.getProfile("test:agent"), { id: "test:agent", label: "Test Agent", description: "Test Description" });
-    assert.equal(runtime1.getAllProfiles().length, 1);
+    runtime1.registerAgent({ id: "test:agent", label: "Test Agent", description: "Test Description" });
+    assert.deepEqual(runtime1.getAgent("test:agent"), { id: "test:agent", label: "Test Agent", description: "Test Description" });
+    assert.equal(runtime1.getAllAgents().length, 1);
 
     // Duplicate registration throws
     assert.throws(() => {
-      runtime1.registerProfile({ id: "test:agent", label: "Test Agent", description: "Test Description" });
+      runtime1.registerAgent({ id: "test:agent", label: "Test Agent", description: "Test Description" });
     }, /already registered/);
 
-    // Invalid profile throws ProfileValidationError
+    // Invalid profile throws AgentValidationError
     assert.throws(() => {
-      runtime1.registerProfile({} as any);
-    }, ProfileValidationError);
+      runtime1.registerAgent({} as any);
+    }, AgentValidationError);
   } finally {
     await shutdown();
-    assert.equal((globalThis as any)[ROSTRIX_RUNTIME_SYMBOL], undefined);
+    assert.equal((globalThis as any)[RUNTIME_SYMBOL], undefined);
   }
 });

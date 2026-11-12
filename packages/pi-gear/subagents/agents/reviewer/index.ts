@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { withoutWorkspaceSearch } from "../../runtime/process.ts";
 import { runChildSubagent, type RunChildSubagentOptions } from "../../runtime/runner.ts";
-import type { SubagentRun } from "../../runtime/types.ts";
+import type { TaskSnapshot } from "../../runtime/types.ts";
 import { reviewerProfile } from "./profile.ts";
 
 export const REVIEWER_TOOL_NAME = reviewerProfile.id;
@@ -35,7 +35,7 @@ export function formatReviewerInput(input: ReviewerSubagentInput): string {
 export function runReviewer(
   task: string,
   options: Omit<RunChildSubagentOptions, "task" | "profile" | "childExtension"> & { workspaceSearch?: boolean },
-): Promise<SubagentRun> {
+): Promise<TaskSnapshot> {
   const { workspaceSearch = true, ...runOptions } = options;
   return runChildSubagent({
     ...runOptions,

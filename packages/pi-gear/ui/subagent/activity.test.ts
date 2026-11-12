@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import type { SubagentRun } from "../../subagents/runtime/types.ts";
+import type { TaskSnapshot } from "../../subagents/runtime/types.ts";
 import { expandedActivity } from "./activity.ts";
 import type { Theme } from "./format.ts";
 
@@ -9,7 +9,7 @@ const theme: Theme = { fg: (_color, text) => text, bold: (text) => text };
 
 for (const status of ["running", "success", "error", "aborted"] as const) {
   test(`activity retains all starts and projects safe rows for ${status}`, () => {
-    const run: SubagentRun & { activitiesTruncated: boolean } = {
+    const run: TaskSnapshot & { activitiesTruncated: boolean } = {
       status, startedAt: 0, activitiesTruncated: true,
       activities: [
         { kind: "thinking", text: "PRIVATE_THOUGHT" },

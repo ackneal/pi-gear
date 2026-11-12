@@ -1,6 +1,6 @@
-import type { SubagentDispatch } from "./types.ts";
+import type { ModelSelection } from "./types.ts";
 
-export function formatSubagentDispatch(dispatch: SubagentDispatch | undefined): string | undefined {
+export function formatModelSelection(dispatch: ModelSelection | undefined): string | undefined {
   const model = dispatch?.model;
   if (!model) return undefined;
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { formatDoctor } from "./doctor.ts";
-import { GEAR_COMMANDS, setupCommands, type GearCommandServices } from "./index.ts";
+import { COMMANDS, setupCommands, type CommandServices } from "./index.ts";
 
 const sandboxStatus = {
   configured: true,
@@ -102,7 +102,7 @@ test("gear commands are centrally registered and delegate to their services", as
     },
     getActiveTools: () => ["researcher", "worker"],
     sendMessage: (message: { customType: string; content: string; display: boolean }, options: unknown) => {
-      assert.equal(message.customType, GEAR_COMMANDS.doctor);
+      assert.equal(message.customType, COMMANDS.doctor);
       assert.equal(message.display, true);
       assert.equal(options, undefined);
       calls.push(`doctor:${message.content.split("\n")[0]}`);
@@ -116,23 +116,23 @@ test("gear commands are centrally registered and delegate to their services", as
         configure: async (args: string) => { calls.push(`model:${args}`); },
         resolve: () => ({}),
         summaries: () => [],
-        runtimeError: () => undefined,
+        settingsError: () => undefined,
       },
     },
-  } as unknown as GearCommandServices;
+  } as unknown as CommandServices;
   const ctx = { cwd: "/workspace", ui: { notify: () => { assert.fail("doctor should render a custom message, not a notification"); } } };
 
   setupCommands(pi, services);
 
-  assert.deepEqual([...commands.keys()].sort(), Object.values(GEAR_COMMANDS).sort());
+  assert.deepEqual([...commands.keys()].sort(), Object.values(COMMANDS).sort());
   assert.equal(commands.has("gear:subagent-inspect"), false);
-  assert.equal(commands.has(GEAR_COMMANDS.agents), true);
-  await commands.get(GEAR_COMMANDS.subagentModel)?.handler("worker", ctx);
-  await commands.get(GEAR_COMMANDS.doctor)?.handler("", ctx);
+  assert.equal(commands.has(COMMANDS.agents), true);
+  await commands.get(COMMANDS.subagentModel)?.handler("worker", ctx);
+  await commands.get(COMMANDS.doctor)?.handler("", ctx);
   assert.deepEqual(calls, ["model:worker", "lsp:/workspace", "doctor:Sandbox: enabled"]);
 });
 
-test("gear:agents command delegates to rostrix when services.rostrix is provided", async () => {
+test("gear:agents command delegates to runtime when services.runtime is provided", async () => {
   const commands = new Map<string, { handler: (args: string, ctx: any) => Promise<void> }>();
   const pi = {
     registerCommand: (name: string, definition: { handler: (args: string, ctx: any) => Promise<void> }) => {
@@ -141,7 +141,7 @@ test("gear:agents command delegates to rostrix when services.rostrix is provided
   } as unknown as ExtensionAPI;
 
   let deactivated = false;
-  const mockRostrix = {
+  const mockRuntime = {
     discoveredAgents: [
       { agent: { id: "test-agent", label: "Test Agent" } },
     ],
@@ -153,14 +153,14 @@ test("gear:agents command delegates to rostrix when services.rostrix is provided
   const services = {
     execution: { sandbox: { status: () => sandboxStatus } },
     lsp: { statuses: async () => [] },
-    subagents: { settings: { configure: async () => {}, resolve: () => ({}), summaries: () => [], runtimeError: () => undefined } },
-    rostrix: mockRostrix,
-  } as unknown as GearCommandServices;
+    subagents: { settings: { configure: async () => {}, resolve: () => ({}), summaries: () => [], settingsError: () => undefined } },
+    runtime: mockRuntime,
+  } as unknown as CommandServices;
 
   setupCommands(pi, services);
 
-  assert.equal(commands.has(GEAR_COMMANDS.agents), true);
-  const cmd = commands.get(GEAR_COMMANDS.agents);
+  assert.equal(commands.has(COMMANDS.agents), true);
+  const cmd = commands.get(COMMANDS.agents);
   assert.ok(cmd);
 
   await cmd.handler("default", { ui: { notify: () => {}, setStatus: () => {} } });

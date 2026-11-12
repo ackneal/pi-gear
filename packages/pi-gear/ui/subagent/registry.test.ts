@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test, { afterEach, beforeEach } from "node:test";
-import type { SubagentRun } from "../../subagents/runtime/types.ts";
+import type { TaskSnapshot } from "../../subagents/runtime/types.ts";
 import {
   clearSubagentRegistry, getSubagentEntry,
   recordSubagentLiveStart, recordSubagentLiveUpdate, subscribeSubagent,
 } from "./registry.ts";
 
-const run = (result = ""): SubagentRun => ({
+const run = (result = ""): TaskSnapshot => ({
   status: "running", startedAt: 1, result,
   activities: [{ kind: "tool", id: "read", name: "read", status: "success" }],
 });
@@ -18,7 +18,7 @@ for (const operation of ["start", "update"] as const) {
   test(`${operation} notifies every streamed report change with unchanged tool statuses`, () => {
     const initial = run("First");
     const next = run("First, then more");
-    const received: SubagentRun[] = [];
+    const received: TaskSnapshot[] = [];
     if (operation === "update") recordSubagentLiveStart("live", "Task", initial);
     subscribeSubagent("live", (value) => received.push(value));
 
@@ -38,7 +38,7 @@ for (const operation of ["start", "update"] as const) {
 }
 
 test("updates to nonexistent runs neither invent history nor notify", () => {
-  const received: SubagentRun[] = [];
+  const received: TaskSnapshot[] = [];
   subscribeSubagent("missing", (value) => received.push(value));
 
   recordSubagentLiveUpdate("missing", run("Late report"));
@@ -48,8 +48,8 @@ test("updates to nonexistent runs neither invent history nor notify", () => {
 });
 
 test("unsubscribe removes only its listener and is idempotent", () => {
-  const removed: SubagentRun[] = [];
-  const retained: SubagentRun[] = [];
+  const removed: TaskSnapshot[] = [];
+  const retained: TaskSnapshot[] = [];
   const unsubscribe = subscribeSubagent("live", (value) => removed.push(value));
   subscribeSubagent("live", (value) => retained.push(value));
   const initial = run();
@@ -65,7 +65,7 @@ test("unsubscribe removes only its listener and is idempotent", () => {
 });
 
 test("clear removes entries and subscriptions and ignores late updates", () => {
-  const received: SubagentRun[] = [];
+  const received: TaskSnapshot[] = [];
   recordSubagentLiveStart("live", "Task", run());
   subscribeSubagent("live", (value) => received.push(value));
 
@@ -83,7 +83,7 @@ test("live start bounds retention at 50 and evicts the oldest entry and subscrib
     for (let index = 0; index < 50; index++) {
       recordSubagentLiveStart(`run-${index}`, `Task ${index}`, run());
     }
-    const received: SubagentRun[] = [];
+    const received: TaskSnapshot[] = [];
     subscribeSubagent("run-0", (value) => received.push(value));
     recordSubagentLiveUpdate("run-0", run("Updated"));
     recordSubagentLiveStart("run-1", "Restarted", run());

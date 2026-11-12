@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 import { childArgs, withoutWorkspaceSearch } from "../../runtime/process.ts";
-import type { SubagentRun } from "../../runtime/types.ts";
+import type { TaskSnapshot } from "../../runtime/types.ts";
 import {
   formatReviewerInput,
   REVIEWER_TOOL_NAME,
@@ -87,7 +87,7 @@ test("runReviewer executes via child runner with reviewer profile and emits upda
     kill: () => true,
   });
 
-  const updates: SubagentRun[] = [];
+  const updates: TaskSnapshot[] = [];
   const brief = formatReviewerInput({
     scope: "uncommitted changes",
     context: "add reviewer",
@@ -96,7 +96,7 @@ test("runReviewer executes via child runner with reviewer profile and emits upda
   const promise = runReviewer(brief, {
     cwd: "/workspace",
     spawnChild: () => child as never,
-    onUpdate: (update: SubagentRun) => {
+    onUpdate: (update: TaskSnapshot) => {
       updates.push(update);
     },
   });

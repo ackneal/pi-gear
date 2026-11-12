@@ -1,6 +1,6 @@
 import { stripVTControlCharacters } from "node:util";
 import { truncateToWidth } from "@earendil-works/pi-tui";
-import type { SubagentViewRun as SubagentRun } from "./types.ts";
+import type { TaskViewSnapshot } from "./types.ts";
 import { readableProvider } from "./text-policy.ts";
 import type { Theme } from "./format.ts";
 
@@ -9,7 +9,7 @@ function oneLine(text: string): string {
 }
 
 /** Activities are retained in tool-start order by the runtime; completion updates them in place. */
-export function expandedActivity(run: SubagentRun | undefined, theme: Theme, width: number): string {
+export function expandedActivity(run: TaskViewSnapshot | undefined, theme: Theme, width: number): string {
   if (!run) return "";
   const tools = run.activities.filter((item) => item.kind === "tool");
   const omitted = run.activitiesTruncated;

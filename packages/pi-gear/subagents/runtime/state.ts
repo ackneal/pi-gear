@@ -1,8 +1,8 @@
 import type { SubagentEvent } from "./events.ts";
-import type { SubagentRun } from "./types.ts";
+import type { TaskSnapshot } from "./types.ts";
 import { MAX_RETAINED_ACTIVITIES, truncateRetainedText } from "./limits.ts";
 
-type Usage = NonNullable<SubagentRun["usage"]>;
+type Usage = NonNullable<TaskSnapshot["usage"]>;
 
 function sumOptional(left: number | undefined, right: number | undefined): number | undefined {
   return left === undefined && right === undefined ? undefined : (left ?? 0) + (right ?? 0);
@@ -27,7 +27,7 @@ function addUsage(left: Usage | undefined, right: Usage): Usage {
 }
 
 function applyToolEnd(
-  activities: SubagentRun["activities"],
+  activities: TaskSnapshot["activities"],
   event: Extract<SubagentEvent, { type: "tool_end" }>,
 ): void {
   const activity = activities.find((candidate) => candidate.kind === "tool" && candidate.id === event.id);
@@ -38,10 +38,10 @@ function applyToolEnd(
 }
 
 export function reduceSubagentEvent(
-  run: SubagentRun,
+  run: TaskSnapshot,
   event: SubagentEvent,
   now = Date.now(),
-): SubagentRun {
+): TaskSnapshot {
   if (event.type === "diagnostic") {
     return run;
   }

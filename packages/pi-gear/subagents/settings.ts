@@ -1,35 +1,33 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { selectSubagentModel } from "./model-selector.ts";
 import {
-  RuntimeConfigStore,
-  type RuntimeSubagentId,
-  type RuntimeSubagentSetting,
-} from "./runtime-config.ts";
-import type { SubagentDispatch } from "./runtime/types.ts";
+  FileModelSettingsStore,
+  type SubagentId,
+  type SubagentModelSetting,
+} from "./model-settings.ts";
+import type { ModelSelection } from "./runtime/types.ts";
 
 export const SUBAGENTS = ["researcher", "worker", "reviewer"] as const;
-
-export type SubagentId = RuntimeSubagentId;
 
 export interface SubagentSummary {
   id: SubagentId;
   mode: "inherit" | "override";
   source: "main" | "runtime";
-  dispatch: SubagentDispatch;
+  dispatch: ModelSelection;
   available: boolean;
 }
 
-export interface RuntimeSettingsStore {
+export interface ModelSettingsStore {
   load(): Promise<void>;
   error(): string | undefined;
-  get(id: SubagentId): RuntimeSubagentSetting | undefined;
-  set(id: SubagentId, setting: RuntimeSubagentSetting): Promise<void>;
+  get(id: SubagentId): SubagentModelSetting | undefined;
+  set(id: SubagentId, setting: SubagentModelSetting): Promise<void>;
 }
 
 export interface SubagentSettings {
-  resolve(id: SubagentId, ctx: ExtensionContext): SubagentDispatch;
+  resolve(id: SubagentId, ctx: ExtensionContext): ModelSelection;
   summaries(ctx: ExtensionContext): SubagentSummary[];
-  runtimeError(): string | undefined;
+  settingsError(): string | undefined;
   configure(args: string, ctx: ExtensionCommandContext): Promise<void>;
 }
 
@@ -55,14 +53,14 @@ async function selectSubagent(args: string, ctx: ExtensionCommandContext): Promi
   return SUBAGENTS.includes(selected as SubagentId) ? selected as SubagentId : undefined;
 }
 
-function mainDispatch(ctx: ExtensionContext): SubagentDispatch {
+function mainDispatch(ctx: ExtensionContext): ModelSelection {
   return {
     ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
     ...(ctx.thinkingLevel ? { thinkingLevel: ctx.thinkingLevel } : {}),
   };
 }
 
-function dispatchFor(setting: RuntimeSubagentSetting | undefined, ctx: ExtensionContext): SubagentDispatch {
+function dispatchFor(setting: SubagentModelSetting | undefined, ctx: ExtensionContext): ModelSelection {
   return setting?.mode === "override"
     ? { model: `${setting.provider}/${setting.model}`, thinkingLevel: setting.thinkingLevel }
     : mainDispatch(ctx);
@@ -70,12 +68,12 @@ function dispatchFor(setting: RuntimeSubagentSetting | undefined, ctx: Extension
 
 export function setupSubagentSettings(
   pi: ExtensionAPI,
-  runtime: RuntimeSettingsStore = new RuntimeConfigStore(),
+  settingsStore: ModelSettingsStore = new FileModelSettingsStore(),
 ): SubagentSettings {
-  pi.on("session_start", async () => runtime.load());
+  pi.on("session_start", async () => settingsStore.load());
 
-  const resolve = (id: SubagentId, ctx: ExtensionContext): SubagentDispatch =>
-    dispatchFor(runtime.get(id), ctx);
+  const resolve = (id: SubagentId, ctx: ExtensionContext): ModelSelection =>
+    dispatchFor(settingsStore.get(id), ctx);
 
   return {
     resolve,
@@ -83,7 +81,7 @@ export function setupSubagentSettings(
       const availableModels = ctx.modelRegistry.getAvailable();
 
       return SUBAGENTS.map((id) => {
-        const setting = runtime.get(id);
+        const setting = settingsStore.get(id);
 
         return {
           id,
@@ -96,7 +94,7 @@ export function setupSubagentSettings(
         };
       });
     },
-    runtimeError: () => runtime.error(),
+    settingsError: () => settingsStore.error(),
     async configure(args, ctx) {
       const id = await selectSubagent(args, ctx);
       if (!id) return;
@@ -105,7 +103,7 @@ export function setupSubagentSettings(
       if (!action) return;
 
       try {
-        let setting: RuntimeSubagentSetting = { mode: "inherit" };
+        let setting: SubagentModelSetting = { mode: "inherit" };
         if (action === "Choose model") {
           const selected = await selectSubagentModel(
             ctx,
@@ -122,7 +120,7 @@ export function setupSubagentSettings(
           };
         }
 
-        await runtime.set(id, setting);
+        await settingsStore.set(id, setting);
         ctx.ui.notify(`${id} ${setting.mode} saved as the default`, "info");
       } catch (error) {
         ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");

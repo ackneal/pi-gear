@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { AgentSession, AgentSessionEvent, SessionShutdownEvent, ToolCallEvent } from "@earendil-works/pi-coding-agent";
-import { InProcessSubagentRunner, type SubagentUsage } from "../src/runtime/session-runner.ts";
+import { InProcessSubagentRunner, type SubagentUsage } from "../src/tasks/session-runner.ts";
 import { agent, assistant } from "./runtime-fixtures.ts";
 
 test("runner collects SDK usage for every terminal path", async (t) => {

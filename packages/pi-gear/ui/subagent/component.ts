@@ -1,6 +1,6 @@
 import type { ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
 import { Text, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import type { SubagentViewRun as SubagentRun } from "./types.ts";
+import type { TaskViewSnapshot } from "./types.ts";
 import { Spinner } from "./spinner.ts";
 
 export class SubagentResultComponent extends Text {
@@ -8,22 +8,22 @@ export class SubagentResultComponent extends Text {
     this.updateText();
     this.redraw();
   });
-  private run: SubagentRun | undefined;
+  private run: TaskViewSnapshot | undefined;
   private options: ToolRenderResultOptions | undefined;
   private readonly redraw: () => void;
-  private format: (run: SubagentRun | undefined, options: ToolRenderResultOptions, icon?: string, width?: number) => string;
+  private format: (run: TaskViewSnapshot | undefined, options: ToolRenderResultOptions, icon?: string, width?: number) => string;
   private formattedText = "";
   private live = false;
   private liveToolCallId: string | undefined;
   private unsubscribe: (() => void) | undefined;
 
-  constructor(redraw: () => void, format: (run: SubagentRun | undefined, options: ToolRenderResultOptions, icon?: string, width?: number) => string) {
+  constructor(redraw: () => void, format: (run: TaskViewSnapshot | undefined, options: ToolRenderResultOptions, icon?: string, width?: number) => string) {
     super("", 0, 0);
     this.redraw = redraw;
     this.format = format;
   }
 
-  update(run: SubagentRun | undefined, options: ToolRenderResultOptions, format: (run: SubagentRun | undefined, options: ToolRenderResultOptions, icon?: string, width?: number) => string): void {
+  update(run: TaskViewSnapshot | undefined, options: ToolRenderResultOptions, format: (run: TaskViewSnapshot | undefined, options: ToolRenderResultOptions, icon?: string, width?: number) => string): void {
     this.run = run;
     this.options = options;
     this.format = format;
@@ -31,7 +31,7 @@ export class SubagentResultComponent extends Text {
     this.updateText();
   }
 
-  bindLive(toolCallId: string, subscribe: (listener: (run: SubagentRun) => void) => () => void): void {
+  bindLive(toolCallId: string, subscribe: (listener: (run: TaskViewSnapshot) => void) => () => void): void {
     if (this.liveToolCallId === toolCallId) return;
     this.unsubscribe?.();
     this.live = true;

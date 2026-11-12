@@ -1,4 +1,4 @@
-import type { SubagentRun } from "./types.ts";
+import type { TaskSnapshot } from "./types.ts";
 
 export type SubagentEvent =
   | { type: "thinking"; text: string; contentIndex?: number; messageId?: number }
@@ -6,6 +6,6 @@ export type SubagentEvent =
   | { type: "tool_end"; id: string; isError: boolean; result: string }
   | { type: "result"; text: string }
   | { type: "model_error"; message: string }
-  | { type: "usage"; usage: NonNullable<SubagentRun["usage"]> }
+  | { type: "usage"; usage: NonNullable<TaskSnapshot["usage"]> }
   | { type: "diagnostic"; message: string };
 

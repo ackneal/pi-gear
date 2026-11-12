@@ -4,7 +4,7 @@ import { stripVTControlCharacters } from "node:util";
 import { initTheme, type AgentToolResult, type ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { researcherProfile } from "../../subagents/agents/researcher/index.ts";
-import type { SubagentRun } from "../../subagents/runtime/types.ts";
+import type { TaskSnapshot } from "../../subagents/runtime/types.ts";
 import { SubagentResultComponent } from "./component.ts";
 import type { Theme } from "./format.ts";
 import { renderSubagentResult } from "./renderer.ts";
@@ -15,7 +15,7 @@ const theme: Theme = { fg: (_color, text) => text, bold: (text) => text };
 
 const cases: {
   name: string;
-  run: Partial<SubagentRun>;
+  run: Partial<TaskSnapshot>;
   expanded: boolean;
   width: number;
   task?: string;
@@ -116,8 +116,8 @@ const cases: {
 
 for (const entry of cases) {
   test(entry.name, () => {
-    const run: SubagentRun = { status: "success", startedAt: 0, finishedAt: 1000, activities: [], ...entry.run };
-    const result: AgentToolResult<SubagentRun> = { content: [], details: run };
+    const run: TaskSnapshot = { status: "success", startedAt: 0, finishedAt: 1000, activities: [], ...entry.run };
+    const result: AgentToolResult<TaskSnapshot> = { content: [], details: run };
     const options: ToolRenderResultOptions = { expanded: entry.expanded, isPartial: false };
     const component = renderSubagentResult(researcherProfile, result, options, theme, {
       args: { task: entry.task },

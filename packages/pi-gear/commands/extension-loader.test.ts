@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { DefaultResourceLoader } from "@earendil-works/pi-coding-agent";
-import { setupGear } from "../index.ts";
+import { setupExtension } from "../index.ts";
 import { childArgs } from "../subagents/runtime/process.ts";
 import { researcherProfile } from "../subagents/agents/researcher/profile.ts";
 import { reviewerProfile } from "../subagents/agents/reviewer/profile.ts";
@@ -54,7 +54,7 @@ test("in-process child explicitly loads safety policies without host UI or recur
     cwd: fileURLToPath(new URL("../../../", import.meta.url)),
     agentDir: fileURLToPath(new URL("../../../.pi", import.meta.url)),
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true,
-    extensionFactories: [(pi) => setupGear(pi, { child: true })],
+    extensionFactories: [(pi) => setupExtension(pi, { child: true })],
   });
   await loader.reload();
   const result = loader.getExtensions();

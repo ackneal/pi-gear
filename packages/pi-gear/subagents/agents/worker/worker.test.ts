@@ -3,7 +3,7 @@ import test from "node:test";
 import { EventEmitter } from "node:events";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { childArgs, withoutWorkspaceSearch } from "../../runtime/process.ts";
-import type { SubagentRun } from "../../runtime/types.ts";
+import type { TaskSnapshot } from "../../runtime/types.ts";
 import { WORKER_CAPABILITIES, workerProfile } from "./profile.ts";
 import { WORKER_SYSTEM_PROMPT } from "./prompt.ts";
 import { formatWorkerInput, WORKER_TOOL_NAME, runWorker } from "./index.ts";
@@ -107,7 +107,8 @@ test("setupSubagents registers asynchronous subagent and control tools", async (
   assert.match(workerTool.description, /Set targetFiles when files may be modified/);
   assert.match(tools.get("subagent_observe")?.description ?? "", /finishes, goes quiet for a few seconds, or the timeout elapses/);
   assert.match(tools.get("subagent_observe")?.description ?? "", /subagent keeps running/);
-  assert.match(tools.get("subagent_cancel")?.description ?? "", /Other runs and the main agent continue/);
+  assert.match(tools.get("subagent_cancel")?.description ?? "", /wait for its child session to shut down/);
+  assert.match(tools.get("subagent_cancel")?.description ?? "", /Other tasks and the main agent continue/);
   assert.match(tools.get("subagent_cancel")?.description ?? "", /repeated cancellation returns the same terminal state/);
 
   for (const name of ["subagent_observe", "subagent_cancel"]) {
@@ -146,7 +147,7 @@ test("runWorker executes via child runner with worker profile and emits updates"
     kill: () => true,
   });
 
-  const updates: SubagentRun[] = [];
+  const updates: TaskSnapshot[] = [];
   const brief = formatWorkerInput({
     task: "build feature",
     targetFiles: ["src/a.ts"],
@@ -156,7 +157,7 @@ test("runWorker executes via child runner with worker profile and emits updates"
   const promise = runWorker(brief, {
     cwd: "/workspace",
     spawnChild: () => child as never,
-    onUpdate: (update: SubagentRun) => {
+    onUpdate: (update: TaskSnapshot) => {
       updates.push(update);
     },
   });

@@ -1,16 +1,16 @@
-import type { SubagentRun } from "../../subagents/runtime/types.ts";
+import type { TaskSnapshot } from "../../subagents/runtime/types.ts";
 
 export interface SubagentViewEntry {
   task: string;
-  run: SubagentRun;
+  run: TaskSnapshot;
 }
 
 const MAX_REGISTRY_ENTRIES = 50;
 const registry = new Map<string, SubagentViewEntry>();
-const subscribers = new Map<string, Set<(run: SubagentRun) => void>>();
+const subscribers = new Map<string, Set<(run: TaskSnapshot) => void>>();
 
-function notify(toolCallId: string, run: SubagentRun): void {
-  for (const listener of subscribers.get(toolCallId) ?? []) {
+function notify(entryKey: string, run: TaskSnapshot): void {
+  for (const listener of subscribers.get(entryKey) ?? []) {
     try { listener(run); } catch { /* A view must not break the run. */ }
   }
 }
@@ -25,35 +25,35 @@ function evictIfNeeded(): void {
 }
 
 /** Starts a new live run. This is the only operation which affects retention order. */
-export function recordSubagentLiveStart(toolCallId: string, task: string, initialRun?: SubagentRun): void {
-  if (!toolCallId) return;
+export function recordSubagentLiveStart(entryKey: string, task: string, initialRun?: TaskSnapshot): void {
+  if (!entryKey) return;
   const now = Date.now();
-  if (!registry.has(toolCallId)) evictIfNeeded();
-  const existing = registry.get(toolCallId);
+  if (!registry.has(entryKey)) evictIfNeeded();
+  const existing = registry.get(entryKey);
   const run = initialRun ?? existing?.run ?? { status: "running", startedAt: now, activities: [] };
-  registry.set(toolCallId, { task, run });
-  notify(toolCallId, run);
+  registry.set(entryKey, { task, run });
+  notify(entryKey, run);
 }
 
 /** Updates a run that was explicitly started live; it never invents history. */
-export function recordSubagentLiveUpdate(toolCallId: string, run: SubagentRun): void {
-  const entry = registry.get(toolCallId);
+export function recordSubagentLiveUpdate(entryKey: string, run: TaskSnapshot): void {
+  const entry = registry.get(entryKey);
   if (!entry) return;
   entry.run = run;
-  notify(toolCallId, run);
+  notify(entryKey, run);
 }
 
-export const getSubagentEntry = (toolCallId: string): SubagentViewEntry | undefined => toolCallId ? registry.get(toolCallId) : undefined;
+export const getSubagentEntry = (entryKey: string): SubagentViewEntry | undefined => entryKey ? registry.get(entryKey) : undefined;
 
-export function subscribeSubagent(toolCallId: string, listener: (run: SubagentRun) => void): () => void {
-  if (!toolCallId) return () => {};
-  let listeners = subscribers.get(toolCallId);
-  if (!listeners) subscribers.set(toolCallId, listeners = new Set());
+export function subscribeSubagent(entryKey: string, listener: (run: TaskSnapshot) => void): () => void {
+  if (!entryKey) return () => {};
+  let listeners = subscribers.get(entryKey);
+  if (!listeners) subscribers.set(entryKey, listeners = new Set());
   listeners.add(listener);
   return () => {
-    const set = subscribers.get(toolCallId);
+    const set = subscribers.get(entryKey);
     set?.delete(listener);
-    if (set?.size === 0) subscribers.delete(toolCallId);
+    if (set?.size === 0) subscribers.delete(entryKey);
   };
 }
 

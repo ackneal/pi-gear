@@ -145,19 +145,49 @@ Each extension may belong to only one server. `languageIds` must map every confi
 
 - **`/gear:doctor`** — reports sandbox state (enabled and available, enabled but unavailable, or disabled by configuration), filesystem/network behavior, subagent settings, and LSP availability.
 - **`/gear:plan`** — shows the current task plan without starting a model turn.
-- **`/gear:subagent-model`** — sets persistent model and thinking defaults in `~/.pi/agent/pi-gear/runtime.json`.
+- **`/gear:subagent-model`** — sets persistent model and thinking defaults in `~/.pi/agent/gear/runtime.json`.
 - **`task_state`** — manages a goal, outcome steps, constraints, and decision-relevant findings.
 - **`diagnostics`** — returns LSP diagnostics for changed files or the workspace.
 - **`navigation`** — resolves definitions or references with 1-based positions.
-- **`researcher`** — delegates focused read-only research to an isolated Pi child process.
-- **`worker`** — delegates bounded implementation work to a child process.
-- **`reviewer`** — delegates focused read-only code review to a child process.
+- **`researcher`** — delegates focused read-only research to a child agent session.
+- **`worker`** — delegates bounded implementation work to a child agent session.
+- **`reviewer`** — delegates focused read-only code review to a child agent session.
+
+These tools create in-memory child sessions in the host process. Children receive explicit task inputs rather than a copy of the parent conversation. Their tool and extension setup is scoped to the child session; this is not an OS process isolation boundary.
 
 Expanded Agent results show the task, all retained tool-call summaries, and then the answer. Activity omits raw tool output and thinking. Older activity is marked when the runtime retention limit drops entries.
 
-Rostrix retains up to 100 settled task records in memory by default. It removes older records after runner cleanup, without removing running tasks or pending notification payloads. SDK callers can set `TaskRegistryOptions.maxRetainedTasks` to a positive integer. Gear can still observe saved completion results from the session history; standalone Rostrix status and wait calls report removed records as not found. This limit does not truncate saved session history.
+Rostrix retains up to 100 settled task records in memory by default. It removes older records after runner cleanup, without removing running tasks or pending notification payloads. SDK callers can set `TaskControllerOptions.maxRetainedTasks` to a positive integer. Gear can still observe saved completion results from the session history; standalone Rostrix status and wait calls report removed records as not found. This limit does not truncate saved session history.
 
 Successful Pi `edit` and `write` calls synchronize matching LSP files and report new or changed diagnostics automatically.
+
+## Agent definitions and execution
+
+An agent definition describes a role and its policies. Resolving it applies definition inheritance and supplied parent limits; it does not create a session or start a task.
+
+Activating a definition applies tools, MCP registrations, and prompt settings to the existing session. It preserves conversation history, but changes the context supplied to later model calls. Activation does not select a different model or thinking level.
+
+Delegating a task creates a child session with its own conversation history. The current runner prefixes the task input with the resolved role prompt. It applies tool restrictions and child MCP configuration, and selects an explicitly requested model before the definition's preferred model.
+
+Skills allow/deny, model fallback, and the definition's `reviewIntervalSeconds` and `maxDurationSeconds` fields are parsed but are not execution guarantees. The explicit task timeout is enforced separately. `maxConcurrent` currently limits active tasks for a target agent ID, not the number of children a parent can launch.
+
+Background completion notifications follow each task's `wakeOn` settings. Notifications wait while the parent is busy and are delivered after its current run settles. Ending a parent turn does not cancel the task or close the session.
+
+### Developer API
+
+```ts
+import { initRuntime, type Runtime } from "pi-rostrix";
+
+const runtime: Runtime = initRuntime(pi, {
+  autoLoadDefinitions: false,
+  autoRegisterTaskTools: false,
+  autoRegisterAgentControls: false,
+});
+```
+
+`Runtime` owns shared services and shutdown. `AgentRegistry` stores definitions, `AgentResolver` resolves them, and `AgentActivator` applies a definition to the existing session. `TaskController` owns admission, execution, cancellation, and retention; `InProcessSubagentRunner` owns each child session lifecycle. `TaskMonitor`, `NotificationQueue`, and `ParentNotifier` monitor tasks, retain pending notifications, and deliver them to the parent.
+
+The TypeScript API uses responsibility-based names and canonical Agent APIs. Package names, command and agent IDs, the singleton key, notification types, discovery directories, and stored result formats retain their namespaced identities. Tool parameters and saved results still use `runId`; it identifies the same task as the core task ID, not a separate execution attempt.
 
 ## Security behavior and limitations
 

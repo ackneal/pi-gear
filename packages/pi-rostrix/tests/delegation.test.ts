@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI, ExtensionToolContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { AgentRegistry } from "../src/core/registry.ts";
-import { AgentResolver } from "../src/core/resolver.ts";
-import { TaskRegistry, type SpawnTaskOptions } from "../src/runtime/task-registry.ts";
-import { registerRostrixTools, type RegisterToolsOptions } from "../src/tools/index.ts";
+import { AgentRegistry } from "../src/agents/registry.ts";
+import { AgentResolver } from "../src/agents/resolver.ts";
+import { TaskController, type SpawnTaskOptions } from "../src/tasks/controller.ts";
+import { registerTaskTools, type TaskToolOptions } from "../src/tools/index.ts";
 import { agent } from "./runtime-fixtures.ts";
-import type { SupervisionWakeTrigger } from "../src/core/schema.ts";
+import type { SupervisionWakeTrigger } from "../src/agents/schema.ts";
 
 test("delegate receipts expose each task's actual wake settings", async (t) => {
   const cases: readonly (readonly SupervisionWakeTrigger[])[] = [[], ["completed"], ["failed"], ["stalled"], ["completed", "failed"]];
@@ -19,12 +19,12 @@ test("delegate receipts expose each task's actual wake settings", async (t) => {
         registerTool: (tool: ToolDefinition) => { tools.set(tool.name, tool); },
         getActiveTools: () => ["read", "delegate"],
       } as unknown as ExtensionAPI;
-      const tasks = new TaskRegistry({ createRunner: () => ({ run: async () => ({
+      const tasks = new TaskController({ createRunner: () => ({ run: async () => ({
         status: "completed", result: "Done", turns: 1, durationMs: 0,
         usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0 },
       }) }) });
       t.after(() => tasks.shutdown());
-      registerRostrixTools({ pi, taskRegistry: tasks, agentResolver: new AgentResolver(registry) });
+      registerTaskTools({ pi, taskController: tasks, agentResolver: new AgentResolver(registry) });
 
       const receipt = await tools.get("delegate")!.execute("call", { agent: "child", task: "Work" }, undefined, undefined, { cwd: "/session/project" } as ExtensionToolContext);
 
@@ -58,7 +58,7 @@ test("delegation preserves the parent authorization and execution context", asyn
         registerTool: (tool: ToolDefinition) => { tools.set(tool.name, tool); },
         getActiveTools: () => ["read", "delegate"],
       } as unknown as ExtensionAPI;
-      const tasks = new TaskRegistry();
+      const tasks = new TaskController();
       const spawns: SpawnTaskOptions[] = [];
       tasks.spawn = (options) => {
         spawns.push(options);
@@ -68,11 +68,11 @@ test("delegation preserves the parent authorization and execution context", asyn
           revision: 1, createdAt: 0, lastActivityAt: 0, activities: [],
         };
       };
-      const getParentContext: NonNullable<RegisterToolsOptions["getParentContext"]> = () => ({
+      const getParentState: NonNullable<TaskToolOptions["getParentState"]> = () => ({
         agent: agent({ subagents: { allowedAgents: row.allowed, maxDepth: row.maxDepth, maxConcurrent: 2 } }),
         ...(row.parentDepth === undefined ? {} : { task: { id: "parent-task", depth: row.parentDepth } }),
       });
-      registerRostrixTools({ pi, taskRegistry: tasks, agentResolver: new AgentResolver(registry), getParentContext });
+      registerTaskTools({ pi, taskController: tasks, agentResolver: new AgentResolver(registry), getParentState });
       const delegate = tools.get("delegate")!;
       const invoke = () => delegate.execute("call", { agent: "child", task: "Inspect", targetFiles: ["src/../file.ts"] }, undefined, undefined, { cwd: "/session/project" } as ExtensionToolContext);
 
@@ -107,7 +107,7 @@ test("delegate forwards tool context modelRegistry to tasks.spawn", async () => 
     registerTool: (tool: ToolDefinition) => { tools.set(tool.name, tool); },
     getActiveTools: () => ["read", "delegate"],
   } as unknown as ExtensionAPI;
-  const tasks = new TaskRegistry();
+  const tasks = new TaskController();
   let receivedRegistry: unknown;
   tasks.spawn = (options) => {
     receivedRegistry = options.modelRegistry;
@@ -117,7 +117,7 @@ test("delegate forwards tool context modelRegistry to tasks.spawn", async () => 
       revision: 1, createdAt: 0, lastActivityAt: 0, activities: [],
     };
   };
-  registerRostrixTools({ pi, taskRegistry: tasks, agentResolver: new AgentResolver(registry) });
+  registerTaskTools({ pi, taskController: tasks, agentResolver: new AgentResolver(registry) });
   const fakeModelRegistry = { getAvailable: () => [] };
   await tools.get("delegate")!.execute(
     "call",
@@ -134,7 +134,7 @@ test("task_status acknowledges individual terminal results but not listings", as
     await t.test(status, async (t) => {
       const tools = new Map<string, ToolDefinition>();
       const pi = { registerTool: (tool: ToolDefinition) => { tools.set(tool.name, tool); } } as unknown as ExtensionAPI;
-      const tasks = new TaskRegistry();
+      const tasks = new TaskController();
       t.after(() => tasks.shutdown());
       tasks.getTask = () => status === "missing" ? undefined : {
         id: "observed", agentId: "child", profileId: "child", task: "Work", depth: 0,
@@ -144,9 +144,9 @@ test("task_status acknowledges individual terminal results but not listings", as
       const record = tasks.getTask("observed");
       if (record) t.mock.method(tasks, "listTasks", () => [record]);
       const acknowledgments: string[] = [];
-      registerRostrixTools({
-        pi, taskRegistry: tasks, agentResolver: new AgentResolver(new AgentRegistry()),
-        taskSupervisor: { acknowledgeTask: (id) => { acknowledgments.push(id); } },
+      registerTaskTools({
+        pi, taskController: tasks, agentResolver: new AgentResolver(new AgentRegistry()),
+        taskMonitor: { acknowledgeTask: (id) => { acknowledgments.push(id); } },
       });
 
       const result = await tools.get("task_status")!.execute("call", status === "listing" ? {} : { taskId: "observed" }, undefined, undefined, {} as ExtensionToolContext);
@@ -168,7 +168,7 @@ test("task_wait acknowledges only delivered terminal results", async (t) => {
     await t.test(status, async (t) => {
       const tools = new Map<string, ToolDefinition>();
       const pi = { registerTool: (tool: ToolDefinition) => { tools.set(tool.name, tool); } } as unknown as ExtensionAPI;
-      const tasks = new TaskRegistry();
+      const tasks = new TaskController();
       t.after(() => tasks.shutdown());
       tasks.wait = async () => {
         if (status === "error") throw new Error("Wait failed");
@@ -178,10 +178,10 @@ test("task_wait acknowledges only delivered terminal results", async (t) => {
         };
       };
       const acknowledgments: string[] = [];
-      const taskSupervisor = {
+      const taskMonitor = {
         acknowledgeTask: (taskId: string) => { acknowledgments.push(taskId); },
-      } satisfies NonNullable<RegisterToolsOptions["taskSupervisor"]>;
-      registerRostrixTools({ pi, taskRegistry: tasks, taskSupervisor, agentResolver: new AgentResolver(new AgentRegistry()) });
+      } satisfies NonNullable<TaskToolOptions["taskMonitor"]>;
+      registerTaskTools({ pi, taskController: tasks, taskMonitor, agentResolver: new AgentResolver(new AgentRegistry()) });
 
       const result = await tools.get("task_wait")!.execute("call", { taskId: "observed", timeoutSeconds: 0 }, undefined, undefined, {} as ExtensionToolContext);
 

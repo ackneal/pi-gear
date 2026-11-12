@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mcpToolName, type CapabilitySpec } from "../../capabilities/index.ts";
-import type { SubagentDispatch, SubagentProfile } from "./types.ts";
+import type { ModelSelection, SubagentProfile } from "./types.ts";
 
 export const KILL_TIMEOUT_MS = 1_000;
 export type SpawnProcess = typeof spawn;
@@ -36,7 +36,7 @@ export function withoutWorkspaceSearch(profile: SubagentProfile): SubagentProfil
   };
 }
 
-export function childArgs(profile: SubagentProfile, task: string, childExtension: URL, dispatch?: SubagentDispatch): string[] {
+export function childArgs(profile: SubagentProfile, task: string, childExtension: URL, dispatch?: ModelSelection): string[] {
   return [
     "--mode",
     "json",
@@ -64,7 +64,7 @@ export function spawnPiChild(
   childExtension: URL,
   spawnProcess: SpawnProcess = spawn,
   cwd: string = process.cwd(),
-  dispatch?: SubagentDispatch,
+  dispatch?: ModelSelection,
   env?: NodeJS.ProcessEnv,
 ): ChildProcess {
   const invocation = resolvePiInvocation();

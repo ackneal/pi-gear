@@ -1,5 +1,5 @@
 import type { SubagentEvent } from "./events.ts";
-import type { SubagentRun } from "./types.ts";
+import type { TaskSnapshot } from "./types.ts";
 import { MAX_DECODER_BUFFER_CHARS, truncateRetainedText } from "./limits.ts";
 
 const textContent = (content: unknown): string => truncateRetainedText(
@@ -55,7 +55,7 @@ function assistantEnd(event: Record<string, unknown>, messageId: number): Subage
     output.push({ type: "model_error", message: message.errorMessage });
   }
   if (typeof message.usage === "object" && message.usage !== null) {
-    output.push({ type: "usage", usage: message.usage as NonNullable<SubagentRun["usage"]> });
+    output.push({ type: "usage", usage: message.usage as NonNullable<TaskSnapshot["usage"]> });
   }
   return output;
 }

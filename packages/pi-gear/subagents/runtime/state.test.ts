@@ -3,10 +3,10 @@ import { test } from "node:test";
 import type { SubagentEvent } from "./events.ts";
 import { MAX_RETAINED_ACTIVITIES, MAX_RETAINED_TEXT_CHARS } from "./limits.ts";
 import { reduceSubagentEvent } from "./state.ts";
-import type { SubagentRun } from "./types.ts";
+import type { TaskSnapshot } from "./types.ts";
 
-function mixedRun(count: number): SubagentRun {
-  let run: SubagentRun = { status: "running", startedAt: 0, activities: [] };
+function mixedRun(count: number): TaskSnapshot {
+  let run: TaskSnapshot = { status: "running", startedAt: 0, activities: [] };
   for (let i = 0; i < count; i++) {
     run = reduceSubagentEvent(run, i % 2 === 0
       ? { type: "thinking", text: String(i), contentIndex: i }

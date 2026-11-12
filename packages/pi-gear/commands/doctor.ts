@@ -1,5 +1,5 @@
 import type { SandboxStatus } from "../execution/sandbox/controller.ts";
-import { formatSubagentDispatch } from "../subagents/runtime/dispatch.ts";
+import { formatModelSelection } from "../subagents/runtime/dispatch.ts";
 import type { SubagentSummary } from "../subagents/settings.ts";
 import type { WorkspaceSearchStatus } from "../workspace/service.ts";
 
@@ -17,7 +17,7 @@ export function formatDoctor(
   subagents: SubagentSummary[],
   activeTools: readonly string[],
   platform: NodeJS.Platform = process.platform,
-  runtimeError?: string,
+  settingsError?: string,
   lspServers: readonly LspServerSummary[] = [],
   workspaceSearch?: WorkspaceSearchStatus,
 ): string {
@@ -54,10 +54,10 @@ export function formatDoctor(
   }
 
   lines.push("", "Subagents:");
-  if (runtimeError) lines.push(`Runtime config: invalid · ${runtimeError}`);
+  if (settingsError) lines.push(`Runtime config: invalid · ${settingsError}`);
   for (const summary of subagents) {
     const availability = activeTools.includes(summary.id) ? "enabled" : "disabled";
-    const dispatch = formatSubagentDispatch(summary.dispatch) ?? "unresolved";
+    const dispatch = formatModelSelection(summary.dispatch) ?? "unresolved";
     const modelStatus = summary.available ? "" : " · model unavailable";
     lines.push(`- ${summary.id}: ${availability} · ${summary.source} ${summary.mode} · ${dispatch}${modelStatus}`);
   }

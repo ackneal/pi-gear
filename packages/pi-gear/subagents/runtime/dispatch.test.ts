@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatSubagentDispatch } from "./dispatch.ts";
+import { formatModelSelection } from "./dispatch.ts";
 
 const cases = [
   { dispatch: undefined, expected: undefined },
@@ -12,6 +12,6 @@ const cases = [
 
 test("formats subagent dispatch metadata", () => {
   for (const { dispatch, expected } of cases) {
-    assert.equal(formatSubagentDispatch(dispatch), expected);
+    assert.equal(formatModelSelection(dispatch), expected);
   }
 });

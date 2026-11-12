@@ -1,10 +1,10 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { initRostrix } from "./index.ts";
+import { initRuntime } from "./index.ts";
 
 export default function rostrixExtension(pi: ExtensionAPI): void {
-  initRostrix(pi, {
-    autoRegisterTools: true,
-    autoLoadProfiles: true,
-    autoRegisterInteractive: true,
+  initRuntime(pi, {
+    autoRegisterTaskTools: true,
+    autoLoadDefinitions: true,
+    autoRegisterAgentControls: true,
   });
 }

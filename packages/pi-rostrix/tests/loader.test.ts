@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
-import { parseProfileMarkdown, parseProfileJson, ProfileParseError } from "../src/loader/parser.ts";
-import { discoverAllProfiles, scanDirectory } from "../src/loader/discovery.ts";
+import { parseAgentMarkdown, parseAgentJson, AgentParseError } from "../src/agents/parser.ts";
+import { discoverAllAgents, scanAgentDirectory } from "../src/agents/discovery.ts";
 
 describe("Profile Parser", () => {
-  test("parseProfileMarkdown - table-driven cases", () => {
+  test("parseAgentMarkdown - table-driven cases", () => {
     const cases = [
       {
         name: "standard frontmatter and body",
@@ -71,7 +71,7 @@ Focus only on reviewing.
     ];
 
     for (const c of cases) {
-      const result = parseProfileMarkdown(c.content, c.options);
+      const result = parseAgentMarkdown(c.content, c.options);
       assert.equal(result.id, c.expected.id, `[${c.name}] id mismatch`);
       assert.equal(result.label, c.expected.label, `[${c.name}] label mismatch`);
       assert.equal(result.description, c.expected.description, `[${c.name}] description mismatch`);
@@ -82,24 +82,24 @@ Focus only on reviewing.
     }
   });
 
-  test("parseProfileMarkdown - rejects invalid YAML or schema errors", () => {
+  test("parseAgentMarkdown - rejects invalid YAML or schema errors", () => {
     assert.throws(
-      () => parseProfileMarkdown("--- \n[malformed yaml :::: \n--- \nbody"),
-      (err: unknown) => err instanceof ProfileParseError && err.message.includes("Failed to parse YAML frontmatter"),
+      () => parseAgentMarkdown("--- \n[malformed yaml :::: \n--- \nbody"),
+      (err: unknown) => err instanceof AgentParseError && err.message.includes("Failed to parse YAML frontmatter"),
     );
 
     assert.throws(
-      () => parseProfileMarkdown(`---
+      () => parseAgentMarkdown(`---
 id: invalid-profile
 tools:
   allow: 12345
 ---
 body`),
-      (err: unknown) => err instanceof ProfileParseError && err.message.includes("Validation failed"),
+      (err: unknown) => err instanceof AgentParseError && err.message.includes("Validation failed"),
     );
   });
 
-  test("parseProfileJson - parses valid JSON and rejects invalid", () => {
+  test("parseAgentJson - parses valid JSON and rejects invalid", () => {
     const validJson = JSON.stringify({
       id: "json-agent",
       label: "JSON Agent",
@@ -107,18 +107,18 @@ body`),
       tools: { allow: ["find", "grep"] },
     });
 
-    const parsed = parseProfileJson(validJson);
+    const parsed = parseAgentJson(validJson);
     assert.equal(parsed.id, "json-agent");
     assert.deepEqual(parsed.tools?.allow, ["find", "grep"]);
 
     assert.throws(
-      () => parseProfileJson("{ bad json }"),
-      (err: unknown) => err instanceof ProfileParseError && err.message.includes("Failed to parse JSON"),
+      () => parseAgentJson("{ bad json }"),
+      (err: unknown) => err instanceof AgentParseError && err.message.includes("Failed to parse JSON"),
     );
 
     assert.throws(
-      () => parseProfileJson(JSON.stringify({ id: "agent", tools: { allow: false } })),
-      (err: unknown) => err instanceof ProfileParseError && err.message.includes("Validation failed"),
+      () => parseAgentJson(JSON.stringify({ id: "agent", tools: { allow: false } })),
+      (err: unknown) => err instanceof AgentParseError && err.message.includes("Validation failed"),
     );
   });
 });
@@ -177,7 +177,7 @@ Project prompt override.`,
     await fs.writeFile(path.join(projectDir, "corrupted.md"), "--- \n[invalid yaml \n---");
 
     const warnings: string[] = [];
-    const result = await discoverAllProfiles({
+    const result = await discoverAllAgents({
       userDir,
       projectDir,
       onWarning: (w) => warnings.push(w),

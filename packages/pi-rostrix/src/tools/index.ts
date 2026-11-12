@@ -1,32 +1,27 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import type { TaskRegistry } from "../runtime/task-registry.ts";
-import type { TaskSupervisor } from "../supervision/supervisor.ts";
-import type { AgentRegistry } from "../core/registry.ts";
-import type { AgentResolver, ResolvedAgent } from "../core/resolver.ts";
-import type { TaskRecord } from "../runtime/task-types.ts";
+import type { TaskController } from "../tasks/controller.ts";
+import type { TaskMonitor } from "../tasks/monitor.ts";
+import type { AgentResolver, ResolvedAgentDefinition } from "../agents/resolver.ts";
+import type { TaskRecord } from "../tasks/types.ts";
 import { resolve } from "node:path";
 
-export interface RegisterToolsOptions {
+export interface TaskToolOptions {
   readonly pi: ExtensionAPI;
-  readonly taskRegistry: TaskRegistry;
-  readonly taskSupervisor?: Pick<TaskSupervisor, "acknowledgeTask">;
-  readonly agentRegistry?: AgentRegistry | undefined;
+  readonly taskController: TaskController;
+  readonly taskMonitor?: Pick<TaskMonitor, "acknowledgeTask">;
   readonly agentResolver?: AgentResolver | undefined;
-  // Aliases for compatibility
-  readonly profileRegistry?: AgentRegistry | undefined;
-  readonly profileResolver?: AgentResolver | undefined;
-  readonly getParentContext?: () => {
-    readonly agent?: ResolvedAgent | undefined;
+  readonly getParentState?: () => {
+    readonly agent?: ResolvedAgentDefinition | undefined;
     readonly task?: Pick<TaskRecord, "id" | "depth"> | undefined;
   };
 }
 
-export function registerRostrixTools(options: RegisterToolsOptions): void {
-  const { pi, taskRegistry } = options;
-  const agentResolver = options.agentResolver ?? options.profileResolver;
+export function registerTaskTools(options: TaskToolOptions): void {
+  const { pi, taskController } = options;
+  const agentResolver = options.agentResolver;
   if (!agentResolver) {
-    throw new Error("registerRostrixTools requires an agentResolver or profileResolver");
+    throw new Error("registerTaskTools requires an agentResolver");
   }
 
   // 1. delegate tool
@@ -51,7 +46,7 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
         };
       }
 
-      const parent = options.getParentContext?.();
+      const parent = options.getParentState?.();
       const allowedAgents = parent?.agent?.subagents.allowedAgents ?? parent?.agent?.subagents.allowedProfiles;
       if (allowedAgents && !allowedAgents.includes(targetAgentId)) {
         throw new Error(`Agent '${targetAgentId}' is not allowed by the parent agent`);
@@ -72,7 +67,7 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
         subagents: { ...resolved.subagents, maxDepth: Math.min(maxDepth, resolved.subagents.maxDepth) },
       };
       const taskCwd = ctx.cwd;
-      const taskRecord = taskRegistry.spawn({
+      const taskRecord = taskController.spawn({
         agent,
         task: params.task,
         targetFiles: params.targetFiles?.map((path) => resolve(taskCwd, path)),
@@ -114,7 +109,7 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
     }),
     execute: async (_toolCallId, params): Promise<{ isError?: boolean; content: { type: "text"; text: string }[]; details: Record<string, unknown> }> => {
       if (params.taskId) {
-        const task = taskRegistry.getTask(params.taskId);
+        const task = taskController.getTask(params.taskId);
         if (!task) {
           return {
             isError: true,
@@ -123,7 +118,7 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
           };
         }
         if (task.status === "completed" || task.status === "failed" || task.status === "aborted") {
-          options.taskSupervisor?.acknowledgeTask(task.id);
+          options.taskMonitor?.acknowledgeTask(task.id);
         }
         return {
           content: [
@@ -147,7 +142,7 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
       }
 
       const targetFilter = params.agent ?? params.profile;
-      const tasks = taskRegistry.listTasks(targetFilter ? { agentId: targetFilter } : undefined);
+      const tasks = taskController.listTasks(targetFilter ? { agentId: targetFilter } : undefined);
       return {
         content: [
           {
@@ -184,7 +179,7 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
     }),
     execute: async (_toolCallId, params): Promise<{ isError?: boolean; content: { type: "text"; text: string }[]; details: Record<string, unknown> }> => {
       try {
-        const task = await taskRegistry.wait(
+        const task = await taskController.wait(
           params.taskId,
           params.afterRevision !== undefined || params.timeoutSeconds !== undefined
             ? {
@@ -195,7 +190,7 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
         );
 
         if (task.status === "completed" || task.status === "failed" || task.status === "aborted") {
-          options.taskSupervisor?.acknowledgeTask(task.id);
+          options.taskMonitor?.acknowledgeTask(task.id);
         }
 
         return {
@@ -233,7 +228,7 @@ export function registerRostrixTools(options: RegisterToolsOptions): void {
       reason: Type.Optional(Type.String({ description: "Reason for cancellation" })),
     }),
     execute: async (_toolCallId, params) => {
-      const ok = await taskRegistry.cancel(params.taskId, params.reason);
+      const ok = await taskController.cancel(params.taskId, params.reason);
       return {
         content: [
           {

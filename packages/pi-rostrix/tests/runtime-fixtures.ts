@@ -1,5 +1,5 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import type { ResolvedAgent } from "../src/core/resolver.ts";
+import type { ResolvedAgentDefinition } from "../src/agents/resolver.ts";
 
 export type AssistantMessage = Extract<Extract<AgentSessionEvent, { type: "message_end" }>["message"], { role: "assistant" }>;
 
@@ -20,7 +20,7 @@ export function assistant(overrides: Partial<AssistantMessage> = {}): AssistantM
   };
 }
 
-export function agent(overrides: Partial<ResolvedAgent> = {}): ResolvedAgent {
+export function agent(overrides: Partial<ResolvedAgentDefinition> = {}): ResolvedAgentDefinition {
   return {
     id: "test:worker", label: "Worker", description: "Test worker",
     promptGuidelines: [], deniedTools: [], deniedSkills: [], mcpServers: {},

@@ -7,7 +7,7 @@ import { runChildSubagent } from "./runner.ts";
 import { childArgs, resolvePiInvocation, spawnPiChild } from "./process.ts";
 import { MAX_DECODER_BUFFER_CHARS, MAX_RETAINED_ACTIVITIES, MAX_RETAINED_TEXT_CHARS, TRUNCATION_MARKER } from "./limits.ts";
 import type { SubagentProfile } from "./types.ts";
-import type { SubagentRun } from "./types.ts";
+import type { TaskSnapshot } from "./types.ts";
 import { researcherProfile } from "../agents/researcher/profile.ts";
 import { RESEARCHER_SYSTEM_PROMPT } from "../agents/researcher/prompt.ts";
 
@@ -29,7 +29,7 @@ test("protocol handles fragmented JSON, trailing data, malformed diagnostics, an
   assert.deepEqual(decoder.push('{"type":"tool_execution_start","toolCallId":"x","toolName":"read"}\n{"bad"'), [{ type: "tool_start", id: "x", name: "read" }]);
   assert.equal(decoder.push('', true)[0]?.type, "diagnostic");
 
-  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, activities: [] };
+  let run: TaskSnapshot = { status: "running", startedAt: 0, lastActivityAt: 0, activities: [] };
   run = reduceSubagentEvent(run, { type: "tool_start", id: "x", name: "read" }, 1_000);
   assert.equal(run.lastActivityAt, 1_000);
   run = reduceSubagentEvent(run, { type: "tool_start", id: "x", name: "read" }, 2_000);
@@ -95,7 +95,7 @@ test("decoder and reducer bound retained data and aggregate multipart reports", 
   assert.equal(decoder.push("x".repeat(MAX_DECODER_BUFFER_CHARS + 1))[0]?.type, "diagnostic");
   const events = decodeMessage("one", "two");
   assert.deepEqual(events.filter((event) => event.type === "result"), [{ type: "result", text: "onetwo" }]);
-  let run: SubagentRun = { status: "running", startedAt: 0, activities: [] };
+  let run: TaskSnapshot = { status: "running", startedAt: 0, activities: [] };
   for (let i = 0; i < MAX_RETAINED_ACTIVITIES + 2; i++) run = reduceSubagentEvent(run, { type: "tool_start", id: `t_${i}`, name: "read" });
   assert.equal(run.activities.length, MAX_RETAINED_ACTIVITIES);
   run = reduceSubagentEvent(run, { type: "thinking", text: "x".repeat(MAX_RETAINED_TEXT_CHARS + 1) });
@@ -116,7 +116,7 @@ test("decodes the minimized Pi JSON-mode transcript", async () => {
   assert.ok(events.some((event) => event.type === "tool_end" && event.id === "call_bad" && event.isError));
   assert.equal(events.filter((event) => event.type === "usage").length, 2);
 
-  let run: SubagentRun = { status: "running", startedAt: 0, activities: [] };
+  let run: TaskSnapshot = { status: "running", startedAt: 0, activities: [] };
   for (const event of events) run = reduceSubagentEvent(run, event);
   assert.equal(run.result, "Final report");
   const failedTool = run.activities.find((activity) => activity.kind === "tool" && activity.id === "call_bad");
@@ -265,7 +265,7 @@ test("decoder emits usage only once from message_end", () => {
 });
 
 test("reduceSubagentEvent sums per-message usage and every numeric cost field", () => {
-  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, activities: [] };
+  let run: TaskSnapshot = { status: "running", startedAt: 0, lastActivityAt: 0, activities: [] };
   const usage = {
     input: 1000,
     output: 500,
@@ -291,7 +291,7 @@ test("reduceSubagentEvent sums per-message usage and every numeric cost field", 
 
 test("thinking deltas are incremental and accumulate into one retained activity", () => {
   const decoder = new PiJsonDecoder();
-  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, activities: [] };
+  let run: TaskSnapshot = { status: "running", startedAt: 0, lastActivityAt: 0, activities: [] };
 
   // thinking_delta "Hel" + thinking_delta "lo" must accumulate to "Hello"
   // in a single retained thinking activity.
@@ -316,7 +316,7 @@ test("thinking deltas are incremental and accumulate into one retained activity"
 
 test("thinking content indexes are scoped to an assistant message", () => {
   const decoder = new PiJsonDecoder();
-  let run: SubagentRun = { status: "running", startedAt: 0, activities: [] };
+  let run: TaskSnapshot = { status: "running", startedAt: 0, activities: [] };
   // The live delta only carries a prefix; ThinkingContent carries the full text
   // as { type: "thinking", thinking }, so this fails unless message_end decoding
   // reads the finalized message correctly.
@@ -340,7 +340,7 @@ test("decoder discards an oversized complete line without parsing it", () => {
 });
 
 test("cumulative streaming snapshots do not consume retained history", () => {
-  let run: SubagentRun = { status: "running", startedAt: 0, lastActivityAt: 0, activities: [] };
+  let run: TaskSnapshot = { status: "running", startedAt: 0, lastActivityAt: 0, activities: [] };
   for (let i = 0; i < 5; i++) run = reduceSubagentEvent(run, { type: "tool_start", id: `t_${i}`, name: "read" });
 
   // Stream many cumulative snapshots for a single in-flight block.
