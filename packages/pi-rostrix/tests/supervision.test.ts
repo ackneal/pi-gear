@@ -248,10 +248,11 @@ test("consuming one result preserves other pending tasks and delivery retry", as
 
 test("acknowledging progress does not consume a future terminal notification", async () => {
   let finish!: () => void;
-  const registry = new TaskRegistry({ createRunner: () => ({ run: async () => new Promise<SubagentTaskResult>((resolve) => {
+  const completion = new Promise<SubagentTaskResult>((resolve) => {
     finish = () => resolve({ status: "completed", result: "Done", turns: 1, durationMs: 1,
       usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0 } });
-  }) }) });
+  });
+  const registry = new TaskRegistry({ createRunner: () => ({ run: async () => completion }) });
   const { pi, messages } = sdkFixture();
   const supervisor = new TaskSupervisor(registry, pi, { debounceMs: 10_000 });
   const unsubscribe = registry.subscribe("*", (task) => supervisor.notifyTaskSettled(task));

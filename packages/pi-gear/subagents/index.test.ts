@@ -178,7 +178,7 @@ test("saved completion histories migrate only at the read boundary", async (t) =
       assert.deepEqual(details.activities, format === "mixed" || format === "malformed" ? [] : [activity]);
       assert.equal(details.result, "Saved answer");
       assert.equal(Object.hasOwn(saved, "items"), format !== "current");
-      assert.deepEqual(h.acknowledgments, []);
+      assert.deepEqual(h.acknowledgments, ["saved-task"]);
       const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
       const component = h.tools.get("worker")!.renderResult!({ content: [], details: {
         runId: "saved-task", status: "running", startedAt: 20, items: [],
