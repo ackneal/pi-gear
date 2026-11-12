@@ -69,7 +69,7 @@ test("AgentResolver resolves multi-level inheritance chain with correct merging"
       fallback: "openai/gpt-4o-mini",
     },
     subagents: {
-      allowedProfiles: ["researcher", "reviewer"],
+      allowedAgents: ["researcher", "reviewer"],
       maxDepth: 3,
       maxConcurrent: 4,
     },
@@ -125,10 +125,10 @@ test("AgentResolver resolves multi-level inheritance chain with correct merging"
   assert.equal(resolved.model?.preferred, "anthropic/claude-sonnet-4-5");
   assert.equal(resolved.model?.fallback, "openai/gpt-4o-mini");
 
-  // Subagents: maxDepth min(3, 2) = 2, maxConcurrent = 4, allowedProfiles inherited
+  // Subagents: maxDepth min(3, 2) = 2, maxConcurrent = 4, allowedAgents inherited
   assert.equal(resolved.subagents.maxDepth, 2);
   assert.equal(resolved.subagents.maxConcurrent, 4);
-  assert.deepEqual(resolved.subagents.allowedProfiles, ["researcher", "reviewer"]);
+  assert.deepEqual(resolved.subagents.allowedAgents, ["researcher", "reviewer"]);
 
   // Supervision: wakeOn union, reviewInterval min(600, 300) = 300, maxDuration inherited
   assert.equal(resolved.supervision.wakeOn.has("completed"), true);
@@ -176,7 +176,7 @@ test("AgentResolver enforces ParentDelegationLimits capability containment", () 
       allow: ["read", "write", "bash", "network_call"],
     },
     subagents: {
-      allowedProfiles: ["agentA", "agentB", "agentC"],
+      allowedAgents: ["agentA", "agentB", "agentC"],
       maxDepth: 3,
     },
   });
@@ -186,7 +186,7 @@ test("AgentResolver enforces ParentDelegationLimits capability containment", () 
   // Parent only has read and bash active
   const resolved = resolver.resolve("untrusted_child", {
     activeTools: ["read", "bash"],
-    allowedProfiles: ["agentA"],
+    allowedAgents: ["agentA"],
     currentDepth: 1,
   });
 
@@ -194,7 +194,7 @@ test("AgentResolver enforces ParentDelegationLimits capability containment", () 
   assert.deepEqual(resolved.allowedTools, ["read", "bash"]);
 
   // Subagents allowed profiles constrained to intersection with parent allowed profiles
-  assert.deepEqual(resolved.subagents.allowedProfiles, ["agentA"]);
+  assert.deepEqual(resolved.subagents.allowedAgents, ["agentA"]);
 
   // Max depth decremented by parent's current depth
   assert.equal(resolved.subagents.maxDepth, 2);

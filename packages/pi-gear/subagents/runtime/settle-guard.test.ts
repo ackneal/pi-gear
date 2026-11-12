@@ -37,8 +37,8 @@ function harness(unresolved: UnresolvedBackgroundRun[]) {
   return { messages, onTurnEnd, onSessionStart, setUnresolved: (runs: UnresolvedBackgroundRun[]) => { unresolved = runs; } };
 }
 
-const running: UnresolvedBackgroundRun = { runId: "run-a", status: "running", revision: 3, profile: "worker" };
-const cancelling: UnresolvedBackgroundRun = { runId: "run-b", status: "cancelling", revision: 5, profile: "researcher" };
+const running: UnresolvedBackgroundRun = { taskId: "run-a", status: "running", revision: 3, profile: "worker" };
+const cancelling: UnresolvedBackgroundRun = { taskId: "run-b", status: "cancelling", revision: 5, profile: "researcher" };
 
 test("natural completion with unresolved runs queues one compact non-blocking continuation", () => {
   const subject = harness([running, cancelling]);
@@ -65,7 +65,7 @@ test("guard skips resolved state and ordinary tool-producing turns", () => {
 });
 
 test("unresolved terminal result still triggers the guard until observed", () => {
-  const subject = harness([{ runId: "run-x", profile: "worker", status: "success", revision: 9 }]);
+  const subject = harness([{ taskId: "run-x", profile: "worker", status: "success", revision: 9 }]);
   subject.onTurnEnd(turn(1));
   assert.equal(subject.messages.length, 1);
   assert.match(subject.messages[0]?.message.content ?? "", /run-x worker status=success revision=9/);

@@ -7,7 +7,7 @@ import { renderSubagentResult } from "./renderer.ts";
 import { SubagentResultComponent } from "./component.ts";
 
 const history = [{ kind: "tool" as const, name: "read", status: "success" as const }];
-const metadata = { status: "success" as const, startedAt: 1, finishedAt: 2, runId: "saved", dispatch: { model: "test" }, usage: { input: 1, output: 2 }, result: "Answer" };
+const metadata = { status: "success" as const, startedAt: 1, finishedAt: 2, taskId: "saved-task", modelSelection: { model: "test" }, usage: { input: 1, output: 2 }, result: "Answer" };
 
 for (const { name, fields, activities, truncated } of [
   { name: "legacy", fields: { items: history, itemsTruncated: true }, activities: history, truncated: true },

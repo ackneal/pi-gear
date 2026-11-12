@@ -37,18 +37,18 @@ class Timers {
 
 function registry(options: ConstructorParameters<typeof BackgroundRunRegistry>[0] = {}) {
   let id = 0;
-  return new BackgroundRunRegistry({ createRunId: () => `run-${++id}`, ...options });
+  return new BackgroundRunRegistry({ createTaskId: () => `run-${++id}`, ...options });
 }
 
-test("start returns a stable runId before completion", async () => {
+test("start returns a stable taskId before completion", async () => {
   const done = deferred<TaskSnapshot>();
   const subject = registry();
   const initial = subject.start({ profile, task: "slow", run: () => done.promise });
-  assert.equal(initial.runId, "run-1");
+  assert.equal(initial.taskId, "run-1");
   assert.equal(initial.status, "running");
-  assert.equal(subject.get(initial.runId).runId, initial.runId);
+  assert.equal(subject.get(initial.taskId).taskId, initial.taskId);
   done.resolve(run("success", "done"));
-  assert.equal((await subject.wait(initial.runId, initial.revision)).snapshot.runId, initial.runId);
+  assert.equal((await subject.wait(initial.taskId, initial.revision)).snapshot.taskId, initial.taskId);
 });
 
 test("wait reports immediate changes, later changes, timeout, and terminal completion", async () => {
@@ -58,21 +58,21 @@ test("wait reports immediate changes, later changes, timeout, and terminal compl
   const subject = registry({ setTimer: timers.set, clearTimer: timers.clear, settleMs: 0 });
   const initial = subject.start({ profile, task: "wait", run: (_signal, onUpdate) => { update = onUpdate; return done.promise; } });
 
-  assert.equal((await subject.wait(initial.runId, 0)).reason, "changed");
-  const changed = subject.wait(initial.runId, initial.revision);
+  assert.equal((await subject.wait(initial.taskId, 0)).reason, "changed");
+  const changed = subject.wait(initial.taskId, initial.revision);
   update({ ...run(), result: "partial", activities: [{ kind: "thinking", text: "progress" }] });
   const changedResult = await changed;
   assert.equal(changedResult.reason, "changed");
   assert.equal(changedResult.snapshot.latestUpdate, "progress");
 
-  const timeout = subject.wait(initial.runId, changedResult.snapshot.revision, 7);
+  const timeout = subject.wait(initial.taskId, changedResult.snapshot.revision, 7);
   timers.fire(timers.latest());
   assert.equal((await timeout).reason, "timeout");
 
-  const terminal = subject.wait(initial.runId, changedResult.snapshot.revision);
+  const terminal = subject.wait(initial.taskId, changedResult.snapshot.revision);
   done.resolve(run("success", "complete"));
   assert.equal((await terminal).reason, "terminal");
-  assert.equal((await subject.wait(initial.runId, 999)).reason, "terminal");
+  assert.equal((await subject.wait(initial.taskId, 999)).reason, "terminal");
 });
 
 test("a burst of progress wakes the waiter once after the settle window", async () => {
@@ -81,7 +81,7 @@ test("a burst of progress wakes the waiter once after the settle window", async 
   const subject = registry({ settleMs: 40, settleCheckMs: 10 });
   const initial = subject.start({ profile, task: "burst", run: (_signal, onUpdate) => { update = onUpdate; return done.promise; } });
 
-  const waited = subject.wait(initial.runId, initial.revision, 5);
+  const waited = subject.wait(initial.taskId, initial.revision, 5);
   for (let index = 0; index < 5; index++) update({ ...run(), result: `r${index}` });
   const result = await waited;
 
@@ -97,7 +97,7 @@ test("terminal completion wakes a settled waiter immediately without waiting out
   const subject = registry({ settleMs: 40, settleCheckMs: 10 });
   const initial = subject.start({ profile, task: "finish", run: (_signal, onUpdate) => { update = onUpdate; return done.promise; } });
 
-  const waited = subject.wait(initial.runId, initial.revision, 5);
+  const waited = subject.wait(initial.taskId, initial.revision, 5);
   update({ ...run(), result: "partial" });
   done.resolve(run("success", "complete"));
   const result = await waited;
@@ -112,7 +112,7 @@ test("a wait with no pending change ignores the settle window and reports timeou
   const subject = registry({ settleMs: 40, settleCheckMs: 10, setTimer: timers.set, clearTimer: timers.clear });
   const initial = subject.start({ profile, task: "quiet", run: () => done.promise });
 
-  const waited = subject.wait(initial.runId, initial.revision, 7);
+  const waited = subject.wait(initial.taskId, initial.revision, 7);
   timers.fire(timers.latest());
   assert.equal((await waited).reason, "timeout");
 });
@@ -125,7 +125,7 @@ test("streaming result updates create one meaningful checkpoint rather than toke
 
   const checkpoints = ["p", "pa", "partial"].map((partial) => update({ ...run(), result: partial }));
 
-  const snapshot = subject.get(started.runId);
+  const snapshot = subject.get(started.taskId);
   assert.deepEqual(checkpoints, [true, false, false]);
   assert.equal(snapshot.revision, started.revision + 1);
   assert.equal(snapshot.partialResult, "partial");
@@ -145,7 +145,7 @@ test("wait does not lose an update between its initial check and waiter registra
     }) as typeof setTimeout,
   });
   const initial = subject.start({ profile, task: "race", run: (_signal, onUpdate) => { update = onUpdate; return done.promise; } });
-  const result = await subject.wait(initial.runId, initial.revision);
+  const result = await subject.wait(initial.taskId, initial.revision);
   assert.equal(result.reason, "changed");
   assert.equal(result.snapshot.partialResult, "raced update");
   done.resolve(run("success"));
@@ -159,21 +159,21 @@ test("cancelling one run is independent and preserves its latest partial state",
   const subject = registry();
   const a = subject.start({ profile, task: "a", run: (signal, update) => { firstSignal = signal; firstUpdate = update; return first.promise; } });
   const b = subject.start({ profile, task: "b", run: () => second.promise });
-  assert.deepEqual(subject.listUnresolved().map(({ runId, status }) => ({ runId, status })), [
-    { runId: a.runId, status: "running" },
-    { runId: b.runId, status: "running" },
+  assert.deepEqual(subject.listUnresolved().map(({ taskId, status }) => ({ taskId, status })), [
+    { taskId: a.taskId, status: "running" },
+    { taskId: b.taskId, status: "running" },
   ]);
   firstUpdate({ ...run(), result: "useful partial", activities: [
     { kind: "thinking", text: "kept" },
     { kind: "tool", id: "tool-1", name: "bash", status: "running" },
   ] });
-  const cancelling = subject.cancel(a.runId);
+  const cancelling = subject.cancel(a.taskId);
   assert.equal(firstSignal.aborted, true);
-  assert.equal(subject.get(b.runId).status, "running");
+  assert.equal(subject.get(b.taskId).status, "running");
   first.reject(new Error("stopped"));
   const cancelled = await cancelling;
   assert.equal(cancelled.status, "aborted");
-  assert.deepEqual(subject.listUnresolved().map(({ runId }) => runId), [b.runId]);
+  assert.deepEqual(subject.listUnresolved().map(({ taskId }) => taskId), [b.taskId]);
   assert.equal(cancelled.partialResult, "useful partial");
   assert.equal(cancelled.run.activities[0]?.kind, "thinking");
   assert.deepEqual(cancelled.activeTools, ["bash"]);
@@ -193,32 +193,32 @@ test("parent cancellation forwards only to its dedicated child controller", asyn
   parent.abort();
   assert.equal(firstSignal.aborted, true);
   assert.equal(secondSignal.aborted, false);
-  const cancelled = subject.cancel(a.runId);
+  const cancelled = subject.cancel(a.taskId);
   first.resolve(run("success", "late success"));
   second.resolve(run("success"));
 
   assert.equal((await cancelled).status, "aborted");
-  assert.equal((await subject.wait(b.runId, b.revision)).snapshot.status, "success");
+  assert.equal((await subject.wait(b.taskId, b.revision)).snapshot.status, "success");
 });
 
 test("cancel on a terminal run is idempotent", async () => {
   let calls = 0;
   const subject = registry();
   const initial = subject.start({ profile, task: "done", run: async () => { calls++; return run("success", "ok"); } });
-  const completed = await subject.wait(initial.runId, initial.revision);
-  const once = await subject.cancel(initial.runId);
-  const twice = await subject.cancel(initial.runId);
+  const completed = await subject.wait(initial.taskId, initial.revision);
+  const once = await subject.cancel(initial.taskId);
+  const twice = await subject.cancel(initial.taskId);
   assert.equal(calls, 1);
   assert.equal(once.status, "success");
   assert.equal(twice.revision, once.revision);
   assert.equal(twice.partialResult, "ok");
 });
 
-test("get, wait, and cancel reject an unknown runId", async () => {
+test("get, wait, and cancel reject an unknown taskId", async () => {
   const subject = registry();
-  assert.throws(() => subject.get("missing"), /Unknown background subagent runId: missing/);
-  await assert.rejects(subject.wait("missing"), /Unknown background subagent runId: missing/);
-  await assert.rejects(subject.cancel("missing"), /Unknown background subagent runId: missing/);
+  assert.throws(() => subject.get("missing"), /Unknown background subagent taskId: missing/);
+  await assert.rejects(subject.wait("missing"), /Unknown background subagent taskId: missing/);
+  await assert.rejects(subject.cancel("missing"), /Unknown background subagent taskId: missing/);
 });
 
 test("active limit rejects excess work and permits work after completion", async () => {
@@ -227,8 +227,8 @@ test("active limit rejects excess work and permits work after completion", async
   const first = subject.start({ profile, task: "one", run: () => pending.promise });
   assert.throws(() => subject.start({ profile, task: "two", run: async () => run("success") }), /limit reached \(1\)/);
   pending.resolve(run("success"));
-  await subject.wait(first.runId, first.revision);
-  assert.equal(subject.start({ profile, task: "two", run: async () => run("success") }).runId, "run-2");
+  await subject.wait(first.taskId, first.revision);
+  assert.equal(subject.start({ profile, task: "two", run: async () => run("success") }).taskId, "run-2");
 });
 
 test("writer scopes reject equal, ancestor, and descendant collisions but allow siblings", async () => {
@@ -249,8 +249,8 @@ test("retention evicts the oldest terminal runs", async () => {
   const ids: string[] = [];
   for (let i = 0; i < 3; i++) {
     const started = subject.start({ profile, task: `${i}`, run: async () => run("success") });
-    ids.push(started.runId);
-    await subject.wait(started.runId, started.revision);
+    ids.push(started.taskId);
+    await subject.wait(started.taskId, started.revision);
   }
   assert.throws(() => subject.get(ids[0]!), /Unknown/);
   assert.equal(subject.get(ids[1]!).status, "success");
@@ -265,10 +265,10 @@ test("runtime expiry requests cancellation", async () => {
   const started = subject.start({ profile, task: "expire", run: (value) => { signal = value; return done.promise; } });
   timers.fire(timers.latest());
   assert.equal(signal.aborted, true);
-  const cancelling = subject.get(started.runId);
+  const cancelling = subject.get(started.taskId);
   assert.equal(cancelling.status, "cancelling");
   done.resolve(run("aborted"));
-  assert.equal((await subject.wait(started.runId, cancelling.revision)).snapshot.status, "aborted");
+  assert.equal((await subject.wait(started.taskId, cancelling.revision)).snapshot.status, "aborted");
 });
 
 test("unresolved terminal run stays listed until observed and survives retention eviction", async () => {
@@ -278,9 +278,9 @@ test("unresolved terminal run stays listed until observed and survives retention
   done.resolve(run("success", "done"));
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(subject.listUnresolved(), [{ runId: quick.runId, status: "success", revision: 2, profile: "test" }]);
+  assert.deepEqual(subject.listUnresolved(), [{ taskId: quick.taskId, status: "success", revision: 2, profile: "test" }]);
 
-  const observed = await subject.wait(quick.runId, quick.revision);
+  const observed = await subject.wait(quick.taskId, quick.revision);
   assert.equal(observed.reason, "terminal");
   assert.deepEqual(subject.listUnresolved(), []);
   assert.equal(observed.snapshot.partialResult, "done");
@@ -289,15 +289,15 @@ test("unresolved terminal run stays listed until observed and survives retention
 test("retention eviction skips unresolved terminal runs", async () => {
   const subject = registry({ maxRetained: 1 });
   const a = subject.start({ profile, task: "a", run: async () => run("success") });
-  await subject.wait(a.runId, a.revision);
+  await subject.wait(a.taskId, a.revision);
   const b = subject.start({ profile, task: "b", run: async () => run("success") });
   await new Promise((resolve) => setImmediate(resolve));
   const c = subject.start({ profile, task: "c", run: async () => run("success") });
-  await subject.wait(c.runId, c.revision);
+  await subject.wait(c.taskId, c.revision);
 
-  assert.throws(() => subject.get(a.runId), /Unknown/);
-  assert.equal(subject.get(b.runId).status, "success");
-  assert.deepEqual(subject.listUnresolved().map(({ runId }) => runId), [b.runId]);
+  assert.throws(() => subject.get(a.taskId), /Unknown/);
+  assert.equal(subject.get(b.taskId).status, "success");
+  assert.deepEqual(subject.listUnresolved().map(({ taskId }) => taskId), [b.taskId]);
 });
 
 test("repeated unresolved terminal runs eventually hit the retained-state bound", async () => {
@@ -305,7 +305,7 @@ test("repeated unresolved terminal runs eventually hit the retained-state bound"
   const ids: string[] = [];
   for (let i = 0; i < 4; i++) {
     const started = subject.start({ profile, task: `${i}`, run: async () => run("success") });
-    ids.push(started.runId);
+    ids.push(started.taskId);
     await new Promise((resolve) => setImmediate(resolve));
   }
 
@@ -319,7 +319,7 @@ test("resolving terminal runs frees the retained-state bound for new runs", asyn
   const ids: string[] = [];
   for (let i = 0; i < 4; i++) {
     const started = subject.start({ profile, task: `${i}`, run: async () => run("success") });
-    ids.push(started.runId);
+    ids.push(started.taskId);
     await new Promise((resolve) => setImmediate(resolve));
   }
   assert.throws(() => subject.start({ profile, task: "full", run: async () => run("success") }), /retained-state limit reached/);
@@ -341,11 +341,11 @@ test("cancel returns a resolved terminal snapshot but other runs stay unresolved
   const toCancel = subject.start({ profile, task: "cancel", run: () => used.promise });
   const kept = subject.start({ profile, task: "keep", run: () => other.promise });
 
-  const cancelled = subject.cancel(toCancel.runId);
+  const cancelled = subject.cancel(toCancel.taskId);
   used.resolve(run("aborted"));
   await cancelled;
-  assert.equal(subject.get(kept.runId).status, "running");
-  assert.deepEqual(subject.listUnresolved().map(({ runId }) => runId), [kept.runId]);
+  assert.equal(subject.get(kept.taskId).status, "running");
+  assert.deepEqual(subject.listUnresolved().map(({ taskId }) => taskId), [kept.taskId]);
   other.resolve(run("success"));
 });
 

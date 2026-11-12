@@ -14,19 +14,19 @@ export type BackgroundStatus = TaskSnapshot["status"] | "cancelling";
 export type WaitReason = "changed" | "terminal" | "timeout";
 
 export interface UnresolvedBackgroundRun {
-  runId: string;
+  taskId: string;
   status: "running" | "cancelling" | "success" | "error" | "aborted";
   revision: number;
   profile: string;
 }
 
 export interface BackgroundSnapshot {
-  runId: string;
+  taskId: string;
   status: BackgroundStatus;
   revision: number;
   profile: string;
   task: string;
-  dispatch?: ModelSelection;
+  modelSelection?: ModelSelection;
   writerScopes?: string[];
   startedAt: number;
   updatedAt: number;
@@ -44,11 +44,11 @@ export interface BackgroundSnapshot {
 }
 
 interface Entry {
-  runId: string;
+  taskId: string;
   sessionId: string;
   profile: SubagentProfile;
   task: string;
-  dispatch?: ModelSelection;
+  modelSelection?: ModelSelection;
   writerScopes?: string[];
   controller: AbortController;
   runner: Promise<TaskSnapshot>;
@@ -67,7 +67,7 @@ interface Entry {
 export interface StartBackgroundOptions {
   profile: SubagentProfile;
   task: string;
-  dispatch?: ModelSelection;
+  modelSelection?: ModelSelection;
   writerScopes?: string[];
   parentSignal?: AbortSignal;
   run: (signal: AbortSignal, onUpdate: (run: TaskSnapshot) => boolean) => Promise<TaskSnapshot>;
@@ -81,13 +81,13 @@ export interface BackgroundRegistryOptions {
   settleMs?: number;
   settleCheckMs?: number;
   now?: () => number;
-  createRunId?: () => string;
+  createTaskId?: () => string;
   setTimer?: typeof setTimeout;
   clearTimer?: typeof clearTimeout;
 }
 
 const terminal = (status: BackgroundStatus): boolean => status === "success" || status === "error" || status === "aborted";
-const cloneRun = (run: TaskSnapshot): TaskSnapshot => ({ ...run, activities: run.activities.map((activity) => ({ ...activity })), ...(run.dispatch ? { dispatch: { ...run.dispatch } } : {}) });
+const cloneRun = (run: TaskSnapshot): TaskSnapshot => ({ ...run, activities: run.activities.map((activity) => ({ ...activity })), ...(run.modelSelection ? { modelSelection: { ...run.modelSelection } } : {}) });
 
 function progressKey(run: TaskSnapshot): string {
   const tools = run.activities.filter((activity) => activity.kind === "tool").map((activity) => `${activity.id ?? activity.name}:${activity.status}`).join("|");
@@ -108,7 +108,7 @@ export class BackgroundRunRegistry {
   private readonly settleMs: number;
   private readonly settleCheckMs: number;
   private readonly now: () => number;
-  private readonly createRunId: () => string;
+  private readonly createTaskId: () => string;
   private readonly setTimer: typeof setTimeout;
   private readonly clearTimer: typeof clearTimeout;
 
@@ -120,7 +120,7 @@ export class BackgroundRunRegistry {
     this.settleMs = options.settleMs ?? WAKE_SETTLE_MS;
     this.settleCheckMs = options.settleCheckMs ?? SETTLE_CHECK_MS;
     this.now = options.now ?? Date.now;
-    this.createRunId = options.createRunId ?? randomUUID;
+    this.createTaskId = options.createTaskId ?? randomUUID;
     this.setTimer = options.setTimer ?? setTimeout;
     this.clearTimer = options.clearTimer ?? clearTimeout;
   }
@@ -146,21 +146,21 @@ export class BackgroundRunRegistry {
     const writerScopes = options.writerScopes?.map((scope) => resolve(scope));
     if (writerScopes?.length) {
       const collision = active.find((entry) => entry.writerScopes && scopesOverlap(writerScopes, entry.writerScopes));
-      if (collision) throw new Error(`Writer scope overlaps active background run ${collision.runId}: ${collision.writerScopes?.join(", ")}.`);
+      if (collision) throw new Error(`Writer scope overlaps active background run ${collision.taskId}: ${collision.writerScopes?.join(", ")}.`);
     }
 
     const now = this.now();
     const controller = new AbortController();
-    const runId = this.createRunId();
-    const initial: TaskSnapshot = { status: "running", startedAt: now, lastActivityAt: now, activities: [], ...(options.dispatch ? { dispatch: { ...options.dispatch } } : {}) };
+    const taskId = this.createTaskId();
+    const initial: TaskSnapshot = { status: "running", startedAt: now, lastActivityAt: now, activities: [], ...(options.modelSelection ? { modelSelection: { ...options.modelSelection } } : {}) };
     const entry: Entry = {
-      runId, sessionId: this.sessionId, profile: options.profile, task: options.task,
-      ...(options.dispatch ? { dispatch: { ...options.dispatch } } : {}),
+      taskId, sessionId: this.sessionId, profile: options.profile, task: options.task,
+      ...(options.modelSelection ? { modelSelection: { ...options.modelSelection } } : {}),
       ...(writerScopes?.length ? { writerScopes } : {}), controller, run: initial, status: "running", resolved: false,
       revision: 1, startedAt: now, updatedAt: now, lastProgressAt: now, expiry: now + this.maxRuntimeMs,
       runner: Promise.resolve(initial), waiters: new Set(),
     };
-    this.entries.set(runId, entry);
+    this.entries.set(taskId, entry);
 
     const onParentAbort = (): void => this.requestCancel(entry);
     options.parentSignal?.addEventListener("abort", onParentAbort, { once: true });
@@ -175,18 +175,18 @@ export class BackgroundRunRegistry {
     return this.snapshot(entry);
   }
 
-  get(runId: string): BackgroundSnapshot {
-    return this.snapshot(this.require(runId));
+  get(taskId: string): BackgroundSnapshot {
+    return this.snapshot(this.require(taskId));
   }
 
   listUnresolved(): UnresolvedBackgroundRun[] {
     return [...this.entries.values()]
       .filter((entry) => !terminal(entry.status) || !entry.resolved)
-      .map((entry) => ({ runId: entry.runId, status: entry.status, revision: entry.revision, profile: entry.profile.id }));
+      .map((entry) => ({ taskId: entry.taskId, status: entry.status, revision: entry.revision, profile: entry.profile.id }));
   }
 
-  async wait(runId: string, afterRevision = 0, timeoutSeconds = 30): Promise<{ reason: WaitReason; snapshot: BackgroundSnapshot }> {
-    const entry = this.require(runId);
+  async wait(taskId: string, afterRevision = 0, timeoutSeconds = 30): Promise<{ reason: WaitReason; snapshot: BackgroundSnapshot }> {
+    const entry = this.require(taskId);
     if (terminal(entry.status)) {
       this.resolve(entry);
       return { reason: "terminal", snapshot: this.snapshot(entry) };
@@ -230,8 +230,8 @@ export class BackgroundRunRegistry {
     return { reason: timedOut ? "timeout" : terminal(entry.status) ? "terminal" : "changed", snapshot: this.snapshot(entry) };
   }
 
-  async cancel(runId: string): Promise<BackgroundSnapshot> {
-    const entry = this.require(runId);
+  async cancel(taskId: string): Promise<BackgroundSnapshot> {
+    const entry = this.require(taskId);
     if (terminal(entry.status)) {
       this.resolve(entry);
       return this.snapshot(entry);
@@ -302,8 +302,8 @@ export class BackgroundRunRegistry {
     const latest = entry.run.activities[entry.run.activities.length - 1];
     const latestUpdate = latest?.kind === "thinking" ? latest.text : latest?.kind === "tool" ? `${latest.name}: ${latest.status}` : undefined;
     return {
-      runId: entry.runId, status: entry.status, revision: entry.revision, profile: entry.profile.id, task: entry.task,
-      ...(entry.dispatch ? { dispatch: { ...entry.dispatch } } : {}), ...(entry.writerScopes ? { writerScopes: [...entry.writerScopes] } : {}),
+      taskId: entry.taskId, status: entry.status, revision: entry.revision, profile: entry.profile.id, task: entry.task,
+      ...(entry.modelSelection ? { modelSelection: { ...entry.modelSelection } } : {}), ...(entry.writerScopes ? { writerScopes: [...entry.writerScopes] } : {}),
       startedAt: entry.startedAt, updatedAt: entry.updatedAt, expiry: entry.expiry,
       idleSeconds: Math.max(0, (now - (entry.run.lastActivityAt ?? entry.startedAt)) / 1000),
       noProgressSeconds: Math.max(0, (now - entry.lastProgressAt) / 1000),
@@ -314,9 +314,9 @@ export class BackgroundRunRegistry {
     };
   }
 
-  private require(runId: string): Entry {
-    const entry = this.entries.get(runId);
-    if (!entry || entry.sessionId !== this.sessionId) throw new Error(`Unknown background subagent runId: ${runId}`);
+  private require(taskId: string): Entry {
+    const entry = this.entries.get(taskId);
+    if (!entry || entry.sessionId !== this.sessionId) throw new Error(`Unknown background subagent taskId: ${taskId}`);
     return entry;
   }
 
@@ -326,6 +326,6 @@ export class BackgroundRunRegistry {
 
   private evict(): void {
     const completed = [...this.entries.values()].filter((entry) => terminal(entry.status) && entry.resolved).sort((a, b) => a.updatedAt - b.updatedAt);
-    for (const entry of completed.slice(0, Math.max(0, completed.length - this.maxRetained))) this.entries.delete(entry.runId);
+    for (const entry of completed.slice(0, Math.max(0, completed.length - this.maxRetained))) this.entries.delete(entry.taskId);
   }
 }

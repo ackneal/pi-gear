@@ -5,12 +5,12 @@ import { compactSubagentOutput, subagentControlResult } from "./output.ts";
 
 function snapshot(status: BackgroundSnapshot["status"]): BackgroundSnapshot {
   return {
-    runId: "run-1",
+    taskId: "run-1",
     status,
     revision: 4,
     profile: "worker",
     task: "large task metadata",
-    dispatch: { model: "provider/model" },
+    modelSelection: { model: "provider/model" },
     startedAt: 1,
     updatedAt: 2,
     expiry: 3,
@@ -38,7 +38,7 @@ test("running observe output is compact and excludes retained runtime state", ()
   const output = compactSubagentOutput(snapshot("running"), "changed");
   assert.deepEqual(output, {
     reason: "changed",
-    runId: "run-1",
+    taskId: "run-1",
     status: "running",
     revision: 4,
     idleSeconds: 5,
@@ -73,6 +73,6 @@ test("control-tool results keep compact details without full runtime state", () 
   assert.deepEqual(result.details, compactSubagentOutput(base, "terminal"));
 
   const text = JSON.stringify(result);
-  assert.doesNotMatch(text, /"activities"|"task"|"dispatch"|large retained output/);
+  assert.doesNotMatch(text, /"activities"|"task"|"modelSelection"|large retained output/);
   assert.equal(result.content[0]?.type, "text");
 });

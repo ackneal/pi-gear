@@ -10,7 +10,7 @@ export interface TaskSnapshot {
   lastActivityAt?: number;
   activities: SubagentActivity[];
   activitiesTruncated?: boolean;
-  dispatch?: ModelSelection;
+  modelSelection?: ModelSelection;
   result?: string;
   modelError?: string;
   error?: string;
@@ -35,4 +35,4 @@ export interface SubagentPresentation { activity?: { starting?: string; complete
 export interface SubagentProfile { id: string; label: string; description: string; systemPrompt: string; capabilities: readonly CapabilitySpec[]; presentation?: SubagentPresentation; }
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export interface ModelSelection { model?: string; thinkingLevel?: ThinkingLevel; }
-export interface RunSubagentOptions { task: string; profile: SubagentProfile; dispatch?: ModelSelection; signal?: AbortSignal; onUpdate: (run: TaskSnapshot) => void; }
+export interface RunSubagentOptions { task: string; profile: SubagentProfile; modelSelection?: ModelSelection; signal?: AbortSignal; onUpdate: (run: TaskSnapshot) => void; }

@@ -55,7 +55,7 @@ test("TaskController snapshots wake settings independently for the same agent", 
     for (const triggers of [["completed"], ["failed"], []] as const) {
       wakeOn.clear();
       for (const trigger of triggers) wakeOn.add(trigger);
-      const task = registry.spawn({ profile, task: "Work" });
+      const task = registry.spawn({ agent: profile, task: "Work" });
       await registry.wait(task.id);
       tasks.push(task);
     }
@@ -82,7 +82,7 @@ test("shutdown waits for cancellation already in progress without replacing its 
           }),
         }),
       });
-      const task = registry.spawn({ profile: createMockProfile(), task: "Wait" });
+      const task = registry.spawn({ agent: createMockProfile(), task: "Wait" });
       let shutDown = false;
       const cancellation = registry.cancel(task.id, "Original cancellation", cause);
       const shutdown = registry.shutdown();
@@ -133,13 +133,13 @@ test("TaskController shutdown cancels all tasks and waits for runner cleanup", a
           }),
         }),
       });
-      const tasks = Array.from({ length: count }, () => registry.spawn({ profile: createMockProfile(), task: "Wait" }));
+      const tasks = Array.from({ length: count }, () => registry.spawn({ agent: createMockProfile(), task: "Wait" }));
       let settled = false;
 
       const shutdown = registry.shutdown();
       void shutdown.then(() => { settled = true; });
       assert.strictEqual(registry.shutdown(), shutdown);
-      assert.throws(() => registry.spawn({ profile: createMockProfile(), task: "Too late" }), /shut down/);
+      assert.throws(() => registry.spawn({ agent: createMockProfile(), task: "Too late" }), /shut down/);
       await Promise.resolve();
       assert.equal(aborted.length, count);
       if (count > 0) assert.equal(settled, false);
@@ -158,12 +158,12 @@ test("TaskController spawns task and tracks status", (t) => {
   const profile = createMockProfile();
 
   const task = registry.spawn({
-    profile,
+    agent: profile,
     task: "Say hello",
     targetFiles: ["test.txt"],
   });
 
-  assert.equal(task.profileId, "worker");
+  assert.equal(task.agentId, "worker");
   assert.equal(task.status, "running");
   assert.deepEqual(task.targetFiles, ["test.txt"]);
 
@@ -175,12 +175,12 @@ test("TaskController enforces maxConcurrent limit per profile", (t) => {
   const registry = registryFixture(t);
   const profile = createMockProfile("constrained");
 
-  registry.spawn({ profile, task: "Task 1" });
-  registry.spawn({ profile, task: "Task 2" });
+  registry.spawn({ agent: profile, task: "Task 1" });
+  registry.spawn({ agent: profile, task: "Task 2" });
 
   assert.throws(
     () => {
-      registry.spawn({ profile, task: "Task 3" });
+      registry.spawn({ agent: profile, task: "Task 3" });
     },
     /concurrent limit of 2 reached/,
   );
@@ -190,7 +190,7 @@ test("TaskController cancels active task", async (t) => {
   const registry = registryFixture(t);
   const profile = createMockProfile();
 
-  const task = registry.spawn({ profile, task: "To be cancelled" });
+  const task = registry.spawn({ agent: profile, task: "To be cancelled" });
   assert.equal(task.status, "running");
 
   const cancelled = await registry.cancel(task.id, "Stop now");
@@ -206,7 +206,7 @@ test("TaskController prevents overlapping targetFiles write scopes across runnin
   const profile = createMockProfile();
 
   registry.spawn({
-    profile,
+    agent: profile,
     task: "Modify src/index.ts",
     targetFiles: ["/repo/src/index.ts"],
   });
@@ -214,7 +214,7 @@ test("TaskController prevents overlapping targetFiles write scopes across runnin
   assert.throws(
     () => {
       registry.spawn({
-        profile,
+        agent: profile,
         task: "Also modify src/index.ts",
         targetFiles: ["/repo/src/index.ts"],
       });
@@ -229,7 +229,7 @@ test("TaskController aborts task when caller signal fires", async (t) => {
   const callerController = new AbortController();
 
   const task = registry.spawn({
-    profile,
+    agent: profile,
     task: "Signal abort test",
     signal: callerController.signal,
   });
@@ -245,7 +245,7 @@ test("TaskController wait resolves on revision update or settle", async (t) => {
   const registry = registryFixture(t);
   const profile = createMockProfile();
 
-  const task = registry.spawn({ profile, task: "Wait test" });
+  const task = registry.spawn({ agent: profile, task: "Wait test" });
 
   // Cancel to trigger revision bump and completion
   await registry.cancel(task.id, "Completed via cancel");
@@ -280,7 +280,7 @@ test("TaskController bounds settled history without evicting running tasks", asy
       });
       t.after(() => registry.shutdown());
       const profile = createMockProfile();
-      const running = registry.spawn({ profile, task: "Keep running" });
+      const running = registry.spawn({ agent: profile, task: "Keep running" });
       const completed: string[] = [];
       const delivered: string[] = [];
       registry.subscribe("*", (task) => {
@@ -288,7 +288,7 @@ test("TaskController bounds settled history without evicting running tasks", asy
       });
 
       for (let i = 0; i < row.expected + 3; i++) {
-        const task = registry.spawn({ profile, task: `Work ${i}` });
+        const task = registry.spawn({ agent: profile, task: `Work ${i}` });
         const waiting = registry.wait(task.id);
         assert.equal((await waiting).status, row.status);
         completed.push(task.id);
@@ -322,7 +322,7 @@ test("TaskController bounds history when runners throw", async (t) => {
       const records = [];
 
       for (let i = 0; i < 4; i++) {
-        const task = registry.spawn({ profile: createMockProfile(), task: "Fail" });
+        const task = registry.spawn({ agent: createMockProfile(), task: "Fail" });
         const settled = await registry.wait(task.id);
         assert.equal(settled.status, "failed");
         assert.equal(settled.error, synchronous ? "Runner failed synchronously" : "Runner rejected asynchronously");
@@ -373,7 +373,7 @@ test("TaskController forwards modelRuntime and extracts runtime from modelRegist
       });
 
       registry.spawn({
-        profile: createMockProfile(),
+        agent: createMockProfile(),
         task: "Verify runtime forwarding",
         ...row.options,
       });

@@ -49,7 +49,7 @@ test("AgentRegistry registers fully configured profile with all sections", () =>
       fallback: "anthropic/claude-haiku-3-5",
     },
     subagents: {
-      allowedProfiles: ["gear:researcher", "gear:reviewer"],
+      allowedAgents: ["gear:researcher", "gear:reviewer"],
       maxDepth: 2,
       maxConcurrent: 3,
     },

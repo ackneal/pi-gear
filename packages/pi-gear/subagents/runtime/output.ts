@@ -3,7 +3,7 @@ import type { BackgroundSnapshot, WaitReason } from "./background.ts";
 
 export interface CompactSubagentOutput {
   reason?: WaitReason;
-  runId: string;
+  taskId: string;
   status: BackgroundSnapshot["status"];
   revision: number;
   idleSeconds: number;
@@ -31,7 +31,7 @@ export function compactSubagentOutput(snapshot: BackgroundSnapshot, reason?: Wai
   const failed = snapshot.status === "error" || snapshot.status === "aborted";
   return {
     ...(reason ? { reason } : {}),
-    runId: snapshot.runId,
+    taskId: snapshot.taskId,
     status: snapshot.status,
     revision: snapshot.revision,
     idleSeconds: snapshot.idleSeconds,

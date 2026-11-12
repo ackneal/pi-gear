@@ -13,7 +13,7 @@ export interface SubagentSummary {
   id: SubagentId;
   mode: "inherit" | "override";
   source: "main" | "runtime";
-  dispatch: ModelSelection;
+  modelSelection: ModelSelection;
   available: boolean;
 }
 
@@ -53,17 +53,17 @@ async function selectSubagent(args: string, ctx: ExtensionCommandContext): Promi
   return SUBAGENTS.includes(selected as SubagentId) ? selected as SubagentId : undefined;
 }
 
-function mainDispatch(ctx: ExtensionContext): ModelSelection {
+function mainModelSelection(ctx: ExtensionContext): ModelSelection {
   return {
     ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
     ...(ctx.thinkingLevel ? { thinkingLevel: ctx.thinkingLevel } : {}),
   };
 }
 
-function dispatchFor(setting: SubagentModelSetting | undefined, ctx: ExtensionContext): ModelSelection {
+function resolveModelSelection(setting: SubagentModelSetting | undefined, ctx: ExtensionContext): ModelSelection {
   return setting?.mode === "override"
     ? { model: `${setting.provider}/${setting.model}`, thinkingLevel: setting.thinkingLevel }
-    : mainDispatch(ctx);
+    : mainModelSelection(ctx);
 }
 
 export function setupSubagentSettings(
@@ -73,7 +73,7 @@ export function setupSubagentSettings(
   pi.on("session_start", async () => settingsStore.load());
 
   const resolve = (id: SubagentId, ctx: ExtensionContext): ModelSelection =>
-    dispatchFor(settingsStore.get(id), ctx);
+    resolveModelSelection(settingsStore.get(id), ctx);
 
   return {
     resolve,
@@ -87,7 +87,7 @@ export function setupSubagentSettings(
           id,
           mode: setting?.mode ?? "inherit",
           source: setting ? "runtime" : "main",
-          dispatch: dispatchFor(setting, ctx),
+          modelSelection: resolveModelSelection(setting, ctx),
           available: setting?.mode === "override"
             ? availableModels.some((model) => model.provider === setting.provider && model.id === setting.model)
             : ctx.model !== undefined,

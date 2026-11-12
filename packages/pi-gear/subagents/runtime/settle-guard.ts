@@ -4,7 +4,7 @@ import type { UnresolvedBackgroundRun } from "./background.ts";
 export function formatUnresolvedRuns(runs: readonly UnresolvedBackgroundRun[]): string {
   return [
     "Background subagents are unresolved:",
-    ...runs.map((run) => `- ${run.runId} ${run.profile} status=${run.status} revision=${run.revision}`),
+    ...runs.map((run) => `- ${run.taskId} ${run.profile} status=${run.status} revision=${run.revision}`),
   ].join("\n");
 }
 

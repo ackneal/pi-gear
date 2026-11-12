@@ -27,8 +27,7 @@ export type SubagentUsage = {
 };
 
 export interface SubagentSessionOptions {
-  readonly agent?: ResolvedAgentDefinition | undefined;
-  readonly profile?: ResolvedAgentDefinition | undefined; // alias
+  readonly agent: ResolvedAgentDefinition;
   readonly cwd?: string | undefined;
   readonly model?: string | undefined;
   readonly thinkingLevel?: import("../agents/schema.ts").ThinkingLevel | undefined;
@@ -77,9 +76,9 @@ export class InProcessSubagentRunner {
     options: SubagentSessionOptions,
     createSession: SessionFactory = createAgentSession,
   ) {
-    const resolved = options.agent ?? options.profile;
+    const resolved = options.agent;
     if (!resolved) {
-      throw new Error("InProcessSubagentRunner requires an agent or profile option");
+      throw new Error("InProcessSubagentRunner requires an agent option");
     }
     this._agent = resolved;
     this._options = options;

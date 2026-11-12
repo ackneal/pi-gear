@@ -22,7 +22,7 @@ export type Theme = {
   ): string;
   bold(text: string): string;
 };
-export type SubagentRendererProfile = { id: string; label: string; presentation?: SubagentPresentation };
+export type SubagentDisplayMetadata = { id: string; label: string; presentation?: SubagentPresentation };
 
 export const STALLED_THRESHOLD_MS = 15_000;
 export const STATUS_ICON = { running: "◌", success: "●", error: "✗", aborted: "✗", unknown: "?" } as const;
@@ -37,12 +37,12 @@ export function formatToolCount(tools: readonly Extract<SubagentActivity, { kind
   return failed > 0 ? `${completed}/${tools.length} tools · ${failed} failed` : `${completed}/${tools.length} tools`;
 }
 
-function profileLabel(profile: SubagentRendererProfile): string {
-  return titleCase(profile.label).trim() || titleCase(profile.id) || "Subagent";
+function metadataLabel(metadata: SubagentDisplayMetadata): string {
+  return titleCase(metadata.label).trim() || titleCase(metadata.id) || "Subagent";
 }
 
-function activityPhrase(profile: SubagentRendererProfile, phrase: "starting" | "complete" | "drafting" | "failed" | "aborted", fallback: string): string {
-  return profile.presentation?.activity?.[phrase] ?? fallback;
+function activityPhrase(metadata: SubagentDisplayMetadata, phrase: "starting" | "complete" | "drafting" | "failed" | "aborted", fallback: string): string {
+  return metadata.presentation?.activity?.[phrase] ?? fallback;
 }
 
 function compact(text: string): string {
@@ -50,27 +50,27 @@ function compact(text: string): string {
   return oneLine.length > 100 ? `${oneLine.slice(0, 99).trimEnd()}…` : oneLine;
 }
 
-function failure(run: TaskViewSnapshot, profile: SubagentRendererProfile): string {
+function failure(run: TaskViewSnapshot, metadata: SubagentDisplayMetadata): string {
   const error = usefulText(run.error);
   if (error) return compact(error);
 
-  const label = profileLabel(profile);
-  return run.status === "aborted" ? activityPhrase(profile, "aborted", `${label} aborted`) : activityPhrase(profile, "failed", `${label} failed`);
+  const label = metadataLabel(metadata);
+  return run.status === "aborted" ? activityPhrase(metadata, "aborted", `${label} aborted`) : activityPhrase(metadata, "failed", `${label} failed`);
 }
 
-function activity(run: TaskViewSnapshot | undefined, profile: SubagentRendererProfile): string {
-  const label = profileLabel(profile);
-  if (!run) return activityPhrase(profile, "starting", `Starting ${label.toLowerCase()}`);
+function activity(run: TaskViewSnapshot | undefined, metadata: SubagentDisplayMetadata): string {
+  const label = metadataLabel(metadata);
+  if (!run) return activityPhrase(metadata, "starting", `Starting ${label.toLowerCase()}`);
   if (run.status === "unknown") return "Status unavailable";
-  if (run.status === "success") return activityPhrase(profile, "complete", `${label} complete`);
-  if (run.status === "error" || run.status === "aborted") return failure(run, profile);
+  if (run.status === "success") return activityPhrase(metadata, "complete", `${label} complete`);
+  if (run.status === "error" || run.status === "aborted") return failure(run, metadata);
   const latestRunning = [...run.activities].reverse().find((item): item is Extract<SubagentActivity, { kind: "tool" }> => item.kind === "tool" && item.status === "running");
   if (latestRunning) return `${readableProvider(latestRunning.name)} running`;
   const latestThought = [...run.activities].reverse().find((item): item is Extract<SubagentActivity, { kind: "thinking" }> => item.kind === "thinking" && Boolean(usefulText(item.text)));
   if (latestThought) return usefulText(latestThought.text).replace(/\s+/g, " ");
   const latestCompleted = [...run.activities].reverse().find((item): item is Extract<SubagentActivity, { kind: "tool" }> => item.kind === "tool" && item.status !== "running");
   if (latestCompleted) return `${readableProvider(latestCompleted.name)} ${latestCompleted.status === "success" ? "complete" : "failed"}`;
-  return run.result ? activityPhrase(profile, "drafting", `Drafting ${label.toLowerCase()}`) : activityPhrase(profile, "starting", `Starting ${label.toLowerCase()}`);
+  return run.result ? activityPhrase(metadata, "drafting", `Drafting ${label.toLowerCase()}`) : activityPhrase(metadata, "starting", `Starting ${label.toLowerCase()}`);
 }
 
 export function idleDuration(run: TaskViewSnapshot | undefined, now = Date.now()): number {
@@ -111,13 +111,13 @@ export function formatDuration(durationMs: number): string {
   return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 }
 
-function metadata(run: TaskViewSnapshot | undefined, profile: SubagentRendererProfile, now = Date.now()): string {
+function runSummary(run: TaskViewSnapshot | undefined, metadata: SubagentDisplayMetadata, now = Date.now()): string {
   const tools = run?.activities.filter((item): item is Extract<SubagentActivity, { kind: "tool" }> => item.kind === "tool") ?? [];
   let toolStr: string;
   if (!tools.length) {
     const hasThought = run?.activities.some((item) => item.kind === "thinking" && Boolean(usefulText(item.text)));
-    const name = profileLabel(profile);
-    const label = run?.status === "unknown" ? "Status unavailable" : hasThought ? "Thinking" : run?.status === "success" ? activityPhrase(profile, "complete", `${name} complete`) : run?.status === "error" || run?.status === "aborted" ? failure(run, profile) : activityPhrase(profile, "starting", `Starting ${name.toLowerCase()}`);
+    const name = metadataLabel(metadata);
+    const label = run?.status === "unknown" ? "Status unavailable" : hasThought ? "Thinking" : run?.status === "success" ? activityPhrase(metadata, "complete", `${name} complete`) : run?.status === "error" || run?.status === "aborted" ? failure(run, metadata) : activityPhrase(metadata, "starting", `Starting ${name.toLowerCase()}`);
     toolStr = compact(label);
   } else {
     toolStr = formatToolCount(tools);
@@ -127,13 +127,13 @@ function metadata(run: TaskViewSnapshot | undefined, profile: SubagentRendererPr
   return [toolStr, ...(usageStr ? [usageStr] : []), durStr].join(" · ");
 }
 
-export function collapsed(run: TaskViewSnapshot | undefined, profile: SubagentRendererProfile, theme: Theme, icon: string = STATUS_ICON[run?.status ?? "running"], now = Date.now(), task?: string, showActivity = true): string {
+export function collapsed(run: TaskViewSnapshot | undefined, metadata: SubagentDisplayMetadata, theme: Theme, icon: string = STATUS_ICON[run?.status ?? "running"], now = Date.now(), task?: string, showActivity = true): string {
   const status = run?.status ?? "running";
-  const title = theme.bold(theme.fg("toolTitle", `Agent(${profile.id || profileLabel(profile)}${task ? `: ${compact(task)}` : ""})`));
+  const title = theme.bold(theme.fg("toolTitle", `Agent(${metadata.id || metadataLabel(metadata)}${task ? `: ${compact(task)}` : ""})`));
   const iconColor = status === "error" || status === "aborted" ? "error" : status === "success" ? "success" : "muted";
   const idle = idleDuration(run, now);
   const idleSuffix = status === "running" && idle >= STALLED_THRESHOLD_MS ? ` · idle ${formatDuration(idle)}` : "";
-  return `${theme.fg(iconColor, icon)} ${title}${showActivity ? theme.fg("muted", ` · ${compact(activity(run, profile))}`) : ""}\n  ${theme.fg("dim", "└")} ${theme.fg("muted", `${metadata(run, profile, now)}${idleSuffix}`)}`;
+  return `${theme.fg(iconColor, icon)} ${title}${showActivity ? theme.fg("muted", ` · ${compact(activity(run, metadata))}`) : ""}\n  ${theme.fg("dim", "└")} ${theme.fg("muted", `${runSummary(run, metadata, now)}${idleSuffix}`)}`;
 }
 
 export function expandedDetails(run: TaskViewSnapshot | undefined, theme: Theme, width: number): string {

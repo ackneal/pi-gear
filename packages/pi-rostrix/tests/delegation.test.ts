@@ -31,6 +31,14 @@ test("delegate receipts expose each task's actual wake settings", async (t) => {
       const content = receipt.content[0];
       assert.ok(content?.type === "text");
       const data = JSON.parse(content.text);
+      assert.deepEqual(Object.keys(data).sort(), ["agentId", "status", "targetFiles", "taskId", "wakeOn"]);
+      assert.equal(data.agentId, "child");
+      assert.deepEqual(Object.keys(tasks.getTask(data.taskId)!).filter((key) => /profile/i.test(key)), []);
+      const delegateSchema = JSON.parse(JSON.stringify(tools.get("delegate")!.parameters));
+      const statusSchema = JSON.parse(JSON.stringify(tools.get("task_status")!.parameters));
+      assert.deepEqual(Object.keys(delegateSchema.properties).sort(), ["agent", "targetFiles", "task", "timeoutSeconds"]);
+      assert.deepEqual(delegateSchema.required, ["agent", "task"]);
+      assert.deepEqual(Object.keys(statusSchema.properties).sort(), ["agentId", "taskId"]);
       assert.deepEqual(data.wakeOn, wakeOn);
       assert.deepEqual(receipt.details, { taskId: data.taskId, wakeOn });
       assert.deepEqual(tasks.getTask(data.taskId)?.wakeOn, wakeOn);
@@ -63,8 +71,8 @@ test("delegation preserves the parent authorization and execution context", asyn
       tasks.spawn = (options) => {
         spawns.push(options);
         return {
-          id: "spawned", agentId: "child", profileId: "child", task: options.task,
-          depth: options.depth ?? 0, targetFiles: options.targetFiles ?? [], wakeOn: [...options.agent!.supervision.wakeOn], status: "running",
+          id: "spawned", agentId: "child", task: options.task,
+          depth: options.depth ?? 0, targetFiles: options.targetFiles ?? [], wakeOn: [...options.agent.supervision.wakeOn], status: "running",
           revision: 1, createdAt: 0, lastActivityAt: 0, activities: [],
         };
       };
@@ -112,7 +120,7 @@ test("delegate forwards tool context modelRegistry to tasks.spawn", async () => 
   tasks.spawn = (options) => {
     receivedRegistry = options.modelRegistry;
     return {
-      id: "spawned", agentId: "child", profileId: "child", task: options.task,
+      id: "spawned", agentId: "child", task: options.task,
       depth: 0, targetFiles: [], wakeOn: [], status: "running",
       revision: 1, createdAt: 0, lastActivityAt: 0, activities: [],
     };
@@ -137,7 +145,7 @@ test("task_status acknowledges individual terminal results but not listings", as
       const tasks = new TaskController();
       t.after(() => tasks.shutdown());
       tasks.getTask = () => status === "missing" ? undefined : {
-        id: "observed", agentId: "child", profileId: "child", task: "Work", depth: 0,
+        id: "observed", agentId: "child", task: "Work", depth: 0,
         targetFiles: [], wakeOn: [], status: status === "listing" ? "completed" : status,
         revision: 2, createdAt: 0, lastActivityAt: 0, activities: [], result: "Available result",
       };
@@ -154,6 +162,13 @@ test("task_status acknowledges individual terminal results but not listings", as
       assert.equal(result.isError, status === "missing" ? true : undefined);
       const content = result.content[0];
       assert.ok(content?.type === "text");
+      if (status !== "missing") {
+        const payload = JSON.parse(content.text);
+        const record = status === "listing" ? payload[0] : payload;
+        assert.equal(record.agentId, "child");
+        assert.equal(Object.hasOwn(record, "agent"), false);
+        assert.equal(Object.hasOwn(record, "profile"), false);
+      }
       if (status === "listing") {
         assert.equal(JSON.parse(content.text)[0].status, "completed");
         assert.equal(JSON.parse(content.text)[0].result, undefined);
@@ -173,7 +188,7 @@ test("task_wait acknowledges only delivered terminal results", async (t) => {
       tasks.wait = async () => {
         if (status === "error") throw new Error("Wait failed");
         return {
-          id: "observed", agentId: "child", profileId: "child", task: "Work", depth: 0,
+          id: "observed", agentId: "child", task: "Work", depth: 0,
           targetFiles: [], wakeOn: [], status, revision: 2, createdAt: 0, lastActivityAt: 0, activities: [],
         };
       };

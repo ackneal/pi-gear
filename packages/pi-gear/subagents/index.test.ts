@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { TObject, TString } from "typebox";
 import { SessionManager, type ExtensionAPI, type ExtensionToolContext, type ToolDefinition, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -18,7 +19,7 @@ function harness(sessionManager?: SessionManager) {
   let available = true;
   let contextValid = true;
   const record: TaskRecord = {
-    id: "test-run", agentId: "gear:worker", profileId: "gear:worker", task: "Inspect code",
+    id: "test-run", agentId: "gear:worker", task: "Inspect code",
     depth: 0, targetFiles: [], wakeOn: ["completed", "failed"], status: "running", revision: 1, createdAt: 10,
     startedAt: 20, lastActivityAt: 30,
     activities: [
@@ -138,7 +139,7 @@ test("completion persistence survives branch changes and invalidated session con
       clearSubagentRegistry();
       const reopened = harness(restored);
       reopened.forgetTask();
-      const observed = await reopened.execute("subagent_observe", { runId: h.record.id });
+      const observed = await reopened.execute("subagent_observe", { taskId: h.record.id });
       assert.equal(observed.isError, undefined);
       const details = observed.details as { status: string; result: string; usage: unknown };
       assert.equal(details.status, "success");
@@ -156,7 +157,7 @@ test("saved completion histories migrate only at the read boundary", async (t) =
       const manager = SessionManager.inMemory();
       const activity = { kind: "tool", name: "read", status: "success", args: { path: "legacy.ts" } };
       const saved = {
-        runId: "saved-task", status: "success", revision: 3, startedAt: 20, finishedAt: 50,
+        taskId: "saved-task", status: "success", revision: 3, startedAt: 20, finishedAt: 50,
         result: "Saved answer",
         ...(format !== "current" ? { items: format === "malformed" ? [null] : [activity], itemsTruncated: true } : {}),
         ...(format === "current" || format === "mixed" ? { activities: format === "mixed" ? [] : [activity], activitiesTruncated: format !== "mixed" } : {}),
@@ -166,7 +167,7 @@ test("saved completion histories migrate only at the read boundary", async (t) =
       h.forgetTask();
       await h.emit("session_start");
 
-      const observed = await h.execute("subagent_observe", { runId: "saved-task" });
+      const observed = await h.execute("subagent_observe", { taskId: "saved-task" });
 
       const details = observed.details as Record<string, unknown>;
       const content = JSON.parse((observed.content[0] as { text: string }).text);
@@ -181,7 +182,7 @@ test("saved completion histories migrate only at the read boundary", async (t) =
       assert.deepEqual(h.acknowledgments, ["saved-task"]);
       const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
       const component = h.tools.get("worker")!.renderResult!({ content: [], details: {
-        runId: "saved-task", status: "running", startedAt: 20, items: [],
+        taskId: "saved-task", status: "running", startedAt: 20, items: [],
       } }, { expanded: true, isPartial: false }, theme as never, {
         args: { task: "Inspect saved history" }, invalidate() {}, toolCallId: "old-call",
       } as never);
@@ -244,11 +245,12 @@ test("spawn receipts preserve actual task wakeOn for every agent", async (t) => 
         const result = await h.execute(agent.name, agent.params);
 
         assert.deepEqual(JSON.parse((result.content[0] as { text: string }).text), {
-          runId: h.record.id, status: h.record.status, revision: h.record.revision, wakeOn: scenario.wakeOn,
+          taskId: h.record.id, status: h.record.status, revision: h.record.revision, wakeOn: scenario.wakeOn,
         });
         const details = result.details as Record<string, unknown>;
         assert.deepEqual(details.wakeOn, scenario.wakeOn);
-        assert.equal(details.runId, h.record.id);
+        assert.equal(details.taskId, h.record.id);
+        assert.deepEqual(Object.keys(details).filter((key) => key.endsWith("Id")), ["taskId"]);
         assert.equal(details.revision, h.record.revision);
         assert.deepEqual(details.activities, h.record.activities.filter((activity) => activity.kind !== "message"));
         assert.equal(Object.hasOwn(details, "items"), false);
@@ -310,7 +312,7 @@ for (const agent of agents) {
         assert.equal(Object.hasOwn(savedEntry.data as object, "itemsTruncated"), false);
         assert.ok(Object.hasOwn(savedEntry.data as object, "activities"));
 
-        const observed = await h.execute("subagent_observe", { runId: h.record.id });
+        const observed = await h.execute("subagent_observe", { taskId: h.record.id });
         const details = observed.details as Record<string, unknown>;
         assert.equal(details.status, terminal.mapped);
         assert.equal(details.finishedAt, 50);
@@ -328,8 +330,8 @@ for (const agent of agents) {
 
         h.forgetTask();
         clearSubagentRegistry();
-        const restored = await h.execute("subagent_observe", { runId: h.record.id });
-        assert.deepEqual(restored.details, { ...details, dispatch: {} });
+        const restored = await h.execute("subagent_observe", { taskId: h.record.id });
+        assert.deepEqual(restored.details, { ...details, modelSelection: {} });
       } finally {
         clearSubagentRegistry();
       }
@@ -347,7 +349,7 @@ for (const scenario of ["bounded evidence", "changed session", "unknown run", "a
       await h.execute("worker", { task: "Inspect code" });
       if (scenario === "bounded evidence") {
         h.update({ activities: Array.from({ length: 10 }, (_, i) => ({ kind: "tool", name: `tool-${i}`, status: "success", args: { text: "y".repeat(3000) }, result: "x".repeat(3000) })) });
-        const observed = await h.execute("subagent_observe", { runId: h.record.id });
+        const observed = await h.execute("subagent_observe", { taskId: h.record.id });
         const content = JSON.parse((observed.content[0] as { text: string }).text);
         assert.equal(content.activities.length, 8);
         assert.equal(content.activities[0].name, "tool-2");
@@ -367,7 +369,7 @@ for (const scenario of ["bounded evidence", "changed session", "unknown run", "a
         assert.equal(h.listeners.size, 0);
         assert.equal(getSubagentEntry("call-1")?.run.finishedAt, 50);
       } else if (scenario === "running observation" || scenario === "optional fields") {
-        const observed = await h.execute("subagent_observe", { runId: h.record.id });
+        const observed = await h.execute("subagent_observe", { taskId: h.record.id });
         const details = observed.details as Record<string, unknown>;
         assert.equal(details.status, "running");
         assert.equal(details.finishedAt, undefined);
@@ -377,7 +379,7 @@ for (const scenario of ["bounded evidence", "changed session", "unknown run", "a
         assert.equal(h.entries.length, 0);
       } else {
         h.forgetTask();
-        const observed = await h.execute("subagent_observe", { runId: "missing" });
+        const observed = await h.execute("subagent_observe", { taskId: "missing" });
         assert.equal(observed.isError, true);
         assert.match((observed.content[0] as { text: string }).text, /Unknown task/);
       }
@@ -405,7 +407,7 @@ test("observe acknowledges only delivered terminal results", async (t) => {
         h.update({ status });
       }
 
-      const result = await h.execute("subagent_observe", { runId: h.record.id, timeoutSeconds: 0 });
+      const result = await h.execute("subagent_observe", { taskId: h.record.id, timeoutSeconds: 0 });
 
       assert.equal(result.isError, status === "error" ? true : undefined);
       const details = result.details as { status: string; result?: string };
@@ -415,6 +417,17 @@ test("observe acknowledges only delivered terminal results", async (t) => {
       if (status === "persisted") assert.equal(details.result, "Saved answer");
       if (status === "error") assert.match((result.content[0] as { text: string }).text, /Unknown task/);
       assert.deepEqual(h.acknowledgments, ["completed", "failed", "aborted", "persisted"].includes(status) ? [h.record.id] : []);
+    });
+  }
+});
+
+test("control schemas require taskId", async (t) => {
+  for (const name of ["subagent_observe", "subagent_cancel"]) {
+    await t.test(name, () => {
+      const schema = harness().tools.get(name)!.parameters as TObject<{ taskId: TString }>;
+      assert.deepEqual(schema.required, ["taskId"]);
+      assert.equal(schema.properties.taskId.type, "string");
+      assert.deepEqual(Object.keys(schema.properties).filter((key) => key.endsWith("Id")), ["taskId"]);
     });
   }
 });
@@ -436,16 +449,23 @@ test("terminal observe and cancel preserve saved status and revision after evict
           const liveRun = getSubagentEntry(h.record.id)?.run;
           const saved = h.entries.find((entry) => entry.type === "custom" && entry.customType === "gear:subagent-completion");
           assert.ok(saved?.type === "custom");
+          const savedDetails = saved.data as Record<string, unknown>;
+          assert.equal(savedDetails.taskId, h.record.id);
+          assert.deepEqual(Object.keys(savedDetails).filter((key) => key.endsWith("Id")), ["taskId"]);
           if (forgotten) h.forgetTask();
 
-          const result = await h.execute(tool, { runId: h.record.id });
+          const result = await h.execute(tool, { taskId: h.record.id });
 
           assert.equal(result.isError, undefined);
-          const details = result.details as { status: string; revision: number };
+          const details = result.details as Record<string, unknown>;
+          assert.equal(details.taskId, h.record.id);
+          assert.deepEqual(Object.keys(details).filter((key) => key.endsWith("Id")), ["taskId"]);
           assert.equal(details.status, mapped);
           assert.equal(details.revision, 7);
           const text = JSON.parse((result.content[0] as { text: string }).text);
           assert.equal(text.status, mapped);
+          assert.equal(text.taskId, h.record.id);
+          assert.deepEqual(Object.keys(text).filter((key) => key.endsWith("Id")), ["taskId"]);
           if (forgotten) {
             assert.deepEqual(result.details, saved.data);
             assert.equal(text.revision, 7);

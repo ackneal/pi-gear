@@ -2,7 +2,7 @@ import type { TaskRecord } from "pi-rostrix";
 import type { ModelSelection, TaskSnapshot } from "./runtime/types.ts";
 
 /** Keep runtime snapshots and live UI updates on the same projection. */
-export function toTaskSnapshot(task: TaskRecord, dispatch?: ModelSelection): TaskSnapshot {
+export function toTaskSnapshot(task: TaskRecord, modelSelection?: ModelSelection): TaskSnapshot {
   const usage = task.usage;
   return {
     status: task.status === "completed" ? "success"
@@ -15,7 +15,7 @@ export function toTaskSnapshot(task: TaskRecord, dispatch?: ModelSelection): Tas
     ...(task.activitiesTruncated !== undefined ? { activitiesTruncated: task.activitiesTruncated } : {}),
     ...(task.result !== undefined ? { result: task.result } : {}),
     ...(task.error !== undefined ? { error: task.error } : {}),
-    ...(dispatch ? { dispatch } : {}),
+    ...(modelSelection ? { modelSelection } : {}),
     ...(usage ? { usage: {
       input: usage.input,
       output: usage.output,

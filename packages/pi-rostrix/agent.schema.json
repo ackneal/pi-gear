@@ -181,13 +181,6 @@
           },
           "description": "Agents this agent is permitted to delegate to"
         },
-        "allowedProfiles": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Alias for allowedAgents"
-        },
         "maxDepth": {
           "type": "integer",
           "minimum": 0,
@@ -196,7 +189,7 @@
         "maxConcurrent": {
           "type": "integer",
           "minimum": 1,
-          "description": "Maximum concurrent subagents spawned by this agent"
+          "description": "Maximum active tasks for this agent ID (default 2)"
         }
       }
     },

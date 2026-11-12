@@ -98,12 +98,12 @@ test("setupSubagents registers asynchronous subagent and control tools", async (
   assert.deepEqual([...tools.keys()], ["researcher", "worker", "reviewer", "subagent_observe", "subagent_cancel"]);
 
   assert.match(tools.get("researcher")?.description ?? "", /Start focused read-only research/);
-  assert.match(tools.get("researcher")?.description ?? "", /Returns immediately with a runId/);
+  assert.match(tools.get("researcher")?.description ?? "", /Returns immediately with a taskId/);
 
   const workerTool = tools.get("worker")!;
   assert.equal(workerTool.label, "worker");
   assert.equal(workerTool.executionMode, "parallel");
-  assert.match(workerTool.description, /Returns immediately with a runId/);
+  assert.match(workerTool.description, /Returns immediately with a taskId/);
   assert.match(workerTool.description, /Set targetFiles when files may be modified/);
   assert.match(tools.get("subagent_observe")?.description ?? "", /finishes, goes quiet for a few seconds, or the timeout elapses/);
   assert.match(tools.get("subagent_observe")?.description ?? "", /subagent keeps running/);

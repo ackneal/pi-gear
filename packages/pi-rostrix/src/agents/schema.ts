@@ -64,9 +64,8 @@ export type AgentModel = Static<typeof AgentModelSchema>;
 
 export const AgentSubagentsSchema = Type.Object({
   allowedAgents: Type.Optional(Type.Array(Type.String(), { description: "Agents this agent is permitted to delegate to" })),
-  allowedProfiles: Type.Optional(Type.Array(Type.String(), { description: "Alias for allowedAgents" })),
   maxDepth: Type.Optional(Type.Integer({ minimum: 0, description: "Maximum nested delegation depth (default 2)" })),
-  maxConcurrent: Type.Optional(Type.Integer({ minimum: 1, description: "Maximum concurrent subagents spawned by this agent" })),
+  maxConcurrent: Type.Optional(Type.Integer({ minimum: 1, description: "Maximum active tasks for this agent ID (default 2)" })),
 });
 export type AgentSubagents = Static<typeof AgentSubagentsSchema>;
 

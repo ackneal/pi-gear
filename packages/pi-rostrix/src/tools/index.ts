@@ -30,24 +30,23 @@ export function registerTaskTools(options: TaskToolOptions): void {
     label: "Delegate Subtask",
     description: "Delegate a subtask to an agent asynchronously in the background. Returns a taskId and the task's wakeOn settings. Enabled events notify the parent via hidden rostrix:subagent_notifications custom messages containing JSON; do not repeatedly wait or poll for independent work with the relevant notifications enabled.",
     parameters: Type.Object({
-      agent: Type.Optional(Type.String({ description: "ID of the agent to execute the task" })),
-      profile: Type.Optional(Type.String({ description: "Alias for agent ID" })),
+      agent: Type.String({ description: "ID of the agent to execute the task" }),
       task: Type.String({ description: "The instructions and task prompt for the subagent" }),
       targetFiles: Type.Optional(Type.Array(Type.String(), { description: "Files the subagent is responsible for modifying" })),
       timeoutSeconds: Type.Optional(Type.Number({ description: "Optional execution timeout in seconds" })),
     }),
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx): Promise<{ isError?: boolean; content: { type: "text"; text: string }[]; details: Record<string, unknown> }> => {
-      const targetAgentId = params.agent ?? params.profile;
+      const targetAgentId = params.agent;
       if (!targetAgentId) {
         return {
           isError: true,
-          content: [{ type: "text", text: "delegate requires either an 'agent' or 'profile' parameter" }],
+          content: [{ type: "text", text: "delegate requires an 'agent' parameter" }],
           details: { missingAgent: true },
         };
       }
 
       const parent = options.getParentState?.();
-      const allowedAgents = parent?.agent?.subagents.allowedAgents ?? parent?.agent?.subagents.allowedProfiles;
+      const allowedAgents = parent?.agent?.subagents.allowedAgents;
       if (allowedAgents && !allowedAgents.includes(targetAgentId)) {
         throw new Error(`Agent '${targetAgentId}' is not allowed by the parent agent`);
       }
@@ -85,8 +84,7 @@ export function registerTaskTools(options: TaskToolOptions): void {
             text: JSON.stringify({
               taskId: taskRecord.id,
               status: taskRecord.status,
-              agent: taskRecord.agentId,
-              profile: taskRecord.profileId,
+              agentId: taskRecord.agentId,
               targetFiles: taskRecord.targetFiles,
               wakeOn: taskRecord.wakeOn,
             }, null, 2),
@@ -104,8 +102,7 @@ export function registerTaskTools(options: TaskToolOptions): void {
     description: "Query the status of delegated tasks.",
     parameters: Type.Object({
       taskId: Type.Optional(Type.String({ description: "Specific task ID to query" })),
-      agent: Type.Optional(Type.String({ description: "Filter tasks by agent ID" })),
-      profile: Type.Optional(Type.String({ description: "Alias for agent ID filter" })),
+      agentId: Type.Optional(Type.String({ description: "Filter tasks by agent ID" })),
     }),
     execute: async (_toolCallId, params): Promise<{ isError?: boolean; content: { type: "text"; text: string }[]; details: Record<string, unknown> }> => {
       if (params.taskId) {
@@ -126,8 +123,7 @@ export function registerTaskTools(options: TaskToolOptions): void {
               type: "text",
               text: JSON.stringify({
                 id: task.id,
-                agent: task.agentId,
-                profile: task.profileId,
+                agentId: task.agentId,
                 status: task.status,
                 revision: task.revision,
                 targetFiles: task.targetFiles,
@@ -141,7 +137,7 @@ export function registerTaskTools(options: TaskToolOptions): void {
         };
       }
 
-      const targetFilter = params.agent ?? params.profile;
+      const targetFilter = params.agentId;
       const tasks = taskController.listTasks(targetFilter ? { agentId: targetFilter } : undefined);
       return {
         content: [
@@ -150,8 +146,7 @@ export function registerTaskTools(options: TaskToolOptions): void {
             text: JSON.stringify(
               tasks.map((t) => ({
                 id: t.id,
-                agent: t.agentId,
-                profile: t.profileId,
+                agentId: t.agentId,
                 status: t.status,
                 revision: t.revision,
                 targetFiles: t.targetFiles,

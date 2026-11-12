@@ -183,20 +183,20 @@ Project prompt override.`,
       onWarning: (w) => warnings.push(w),
     });
 
-    assert.equal(result.profiles.length, 3, "Should discover 3 unique profiles");
+    assert.equal(result.agents.length, 3, "Should discover 3 unique profiles");
     assert.equal(result.errors.length, 1, "Should record 1 corrupted file error");
     assert.equal(warnings.length, 1);
 
-    const shared = result.profiles.find((p) => p.profile.id === "shared-agent");
+    const shared = result.agents.find((p) => p.agent.id === "shared-agent");
     assert.ok(shared);
-    assert.equal(shared.profile.label, "Project Shared Override");
+    assert.equal(shared.agent.label, "Project Shared Override");
     assert.equal(shared.scope, "project");
 
-    const userA = result.profiles.find((p) => p.profile.id === "agent-a");
+    const userA = result.agents.find((p) => p.agent.id === "agent-a");
     assert.ok(userA);
     assert.equal(userA.scope, "user");
 
-    const projectB = result.profiles.find((p) => p.profile.id === "project-b");
+    const projectB = result.agents.find((p) => p.agent.id === "project-b");
     assert.ok(projectB);
     assert.equal(projectB.scope, "project");
 

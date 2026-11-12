@@ -16,8 +16,8 @@ test("doctor reports active subagents and their resolved model settings", () => 
   const output = formatDoctor(
     sandboxStatus,
     [
-      { id: "researcher", mode: "inherit", source: "main", dispatch: { model: "main/model-a", thinkingLevel: "low" }, available: true },
-      { id: "worker", mode: "override", source: "runtime", dispatch: { model: "provider/model-b", thinkingLevel: "high" }, available: false },
+      { id: "researcher", mode: "inherit", source: "main", modelSelection: { model: "main/model-a", thinkingLevel: "low" }, available: true },
+      { id: "worker", mode: "override", source: "runtime", modelSelection: { model: "provider/model-b", thinkingLevel: "high" }, available: false },
     ],
     ["researcher"],
     "darwin",

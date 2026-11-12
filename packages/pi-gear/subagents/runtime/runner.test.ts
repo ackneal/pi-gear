@@ -126,14 +126,14 @@ test("decodes the minimized Pi JSON-mode transcript", async () => {
 
 test("child returns a final report and rejects an empty successful result", async () => {
   const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), kill: () => true });
-  const result = runChildSubagent({ task: "inspect", profile, dispatch: { model: "provider/model", thinkingLevel: "low" }, childExtension: new URL("./runner.test.ts", import.meta.url), spawnChild: () => child as never, onUpdate: () => {} });
+  const result = runChildSubagent({ task: "inspect", profile, modelSelection: { model: "provider/model", thinkingLevel: "low" }, childExtension: new URL("./runner.test.ts", import.meta.url), spawnChild: () => child as never, onUpdate: () => {} });
 
   child.stdout.emit("data", Buffer.from('{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"report"}]}}\n'));
   child.emit("close", 0);
 
   const completed = await result;
   assert.equal(completed.status, "success");
-  assert.deepEqual(completed.dispatch, { model: "provider/model", thinkingLevel: "low" });
+  assert.deepEqual(completed.modelSelection, { model: "provider/model", thinkingLevel: "low" });
 
   const empty = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), kill: () => true });
   const failed = runChildSubagent({ task: "inspect", profile, childExtension: new URL("./runner.test.ts", import.meta.url), spawnChild: () => empty as never, onUpdate: () => {} });

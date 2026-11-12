@@ -52,27 +52,27 @@ function mapStatus(status: TaskStatus): TaskSnapshot["status"] {
   }
 }
 
-function recordStart(toolCallId: string | undefined, runId: string, task: string, dispatch?: ModelSelection): void {
+function recordStart(toolCallId: string | undefined, taskId: string, task: string, modelSelection?: ModelSelection): void {
   const initialRun: TaskSnapshot = {
     status: "running",
     startedAt: Date.now(),
     activities: [],
-    ...(dispatch ? { dispatch } : {}),
+    ...(modelSelection ? { modelSelection } : {}),
   };
   if (toolCallId) recordSubagentLiveStart(toolCallId, task, initialRun);
-  recordSubagentLiveStart(runId, task, initialRun);
+  recordSubagentLiveStart(taskId, task, initialRun);
 }
 
-function recordProgress(toolCallId: string | undefined, runId: string, task: TaskRecord, dispatch?: ModelSelection): void {
-  const run = toTaskSnapshot(task, dispatch);
+function recordProgress(toolCallId: string | undefined, taskId: string, task: TaskRecord, modelSelection?: ModelSelection): void {
+  const run = toTaskSnapshot(task, modelSelection);
   if (toolCallId) recordSubagentLiveUpdate(toolCallId, run);
-  recordSubagentLiveUpdate(runId, run);
+  recordSubagentLiveUpdate(taskId, run);
 }
 
 const COMPLETION_ENTRY = "gear:subagent-completion";
-type RunDetails = TaskSnapshot & { runId: string; revision: number };
+type TaskDetails = TaskSnapshot & { taskId: string; revision: number };
 
-function observation(details: RunDetails) {
+function observation(details: TaskDetails) {
   const tools = details.activities.filter((activity) => activity.kind === "tool");
   return {
     content: [{ type: "text" as const, text: JSON.stringify({
@@ -104,28 +104,28 @@ export function setupSubagents(
   pi.on("session_start", (_event, ctx) => { sessionContext = ctx; });
   pi.on("session_shutdown", () => { sessionContext = undefined; });
 
-  function savedRun(runId: string, ctx = sessionContext): RunDetails | undefined {
+  function savedTask(taskId: string, ctx = sessionContext): TaskDetails | undefined {
     const entry = ctx?.sessionManager.getEntries().reverse().find((entry) =>
       entry.type === "custom" && entry.customType === COMPLETION_ENTRY &&
-      (entry.data as RunDetails | undefined)?.runId === runId);
-    return entry?.type === "custom" ? normalizeRunActivities(entry.data as RunDetails) : undefined;
+      (entry.data as TaskDetails | undefined)?.taskId === taskId);
+    return entry?.type === "custom" ? normalizeRunActivities(entry.data as TaskDetails) : undefined;
   }
 
-  function track(toolCallId: string, record: TaskRecord, dispatch: ModelSelection, ctx: ExtensionContext): void {
-    recordStart(toolCallId, record.id, record.task, dispatch);
+  function track(toolCallId: string, record: TaskRecord, modelSelection: ModelSelection, ctx: ExtensionContext): void {
+    recordStart(toolCallId, record.id, record.task, modelSelection);
     sessionContext = ctx;
     const sessionId = ctx.sessionManager.getSessionId();
     const sessionFile = ctx.sessionManager.getSessionFile();
     const update = (updated: TaskRecord) => {
-      recordProgress(toolCallId, record.id, updated, dispatch);
+      recordProgress(toolCallId, record.id, updated, modelSelection);
       if (mapStatus(updated.status) === "running") return;
 
       unsubscribe();
-      const completion: RunDetails = {
-        ...toTaskSnapshot(updated, dispatch), runId: updated.id, revision: updated.revision,
+      const completion: TaskDetails = {
+        ...toTaskSnapshot(updated, modelSelection), taskId: updated.id, revision: updated.revision,
       };
       if (sessionContext?.sessionManager.getSessionId() === sessionId) {
-        pi.appendEntry<RunDetails>(COMPLETION_ENTRY, completion);
+        pi.appendEntry<TaskDetails>(COMPLETION_ENTRY, completion);
       } else if (sessionFile) {
         // The old extension context is invalid after switching sessions.
         SessionManager.open(sessionFile).appendCustomEntry(COMPLETION_ENTRY, completion);
@@ -139,35 +139,35 @@ export function setupSubagents(
   pi.registerTool({
     name: RESEARCHER_TOOL_NAME,
     label: researcherProfile.label,
-    description: "Start focused read-only research. Pass the research question as question (optional scope). The researcher inspects the workspace and can search the web (Exa) and GitHub code for external evidence. Returns immediately with a runId and the task's actual wakeOn notification triggers. For independent work with completion notification enabled, continue other useful work or end the turn. Observe only for a current-step dependency or diagnosing progress, using bounded waits without polling.",
+    description: "Start focused read-only research. Pass the research question as question (optional scope). The researcher inspects the workspace and can search the web (Exa) and GitHub code for external evidence. Returns immediately with a taskId and the task's actual wakeOn notification triggers. For independent work with completion notification enabled, continue other useful work or end the turn. Observe only for a current-step dependency or diagnosing progress, using bounded waits without polling.",
     parameters: researcherParameters,
     executionMode: "parallel",
     async execute(toolCallId, { question, scope }, signal, _onUpdate, ctx) {
       const task = formatResearcherInput({ question, scope });
-      const dispatch = settings.resolve("researcher", ctx);
+      const modelSelection = settings.resolve("researcher", ctx);
 
       const resolved = runtime.resolveAgent("gear:researcher");
       const record = runtime.tasks.spawn({
         extensionFactories: [(childPi) => setupExtension(childPi, { child: true })],
-        profile: resolved,
+        agent: resolved,
         task,
         cwd: ctx.cwd,
-        model: dispatch.model,
-        thinkingLevel: dispatch.thinkingLevel,
+        model: modelSelection.model,
+        thinkingLevel: modelSelection.thinkingLevel,
         modelRegistry: ctx.modelRegistry,
         signal,
       });
 
-      track(toolCallId, record, dispatch, ctx);
+      track(toolCallId, record, modelSelection, ctx);
 
       return {
-        content: [{ type: "text", text: JSON.stringify({ runId: record.id, status: record.status, revision: record.revision, wakeOn: record.wakeOn }) }],
-        details: { ...toTaskSnapshot(record, dispatch), runId: record.id, revision: record.revision, wakeOn: record.wakeOn },
+        content: [{ type: "text", text: JSON.stringify({ taskId: record.id, status: record.status, revision: record.revision, wakeOn: record.wakeOn }) }],
+        details: { ...toTaskSnapshot(record, modelSelection), taskId: record.id, revision: record.revision, wakeOn: record.wakeOn },
       };
     },
     renderCall: renderSubagentCall,
     renderResult: (toolResult, options, theme, context) =>
-      renderSubagentResult(researcherProfile, toolResult as any, options, theme, context as any, runtime, savedRun),
+      renderSubagentResult(researcherProfile, toolResult as any, options, theme, context as any, runtime, savedTask),
     renderShell: "self",
   });
 
@@ -175,36 +175,36 @@ export function setupSubagents(
   pi.registerTool({
     name: WORKER_TOOL_NAME,
     label: workerProfile.label,
-    description: "Start one bounded task. Pass the work as task, with optional targetFiles, findings, and verification. Returns immediately with a runId and the task's actual wakeOn notification triggers. For independent work with completion notification enabled, continue other useful work or end the turn. Observe only for a current-step dependency or diagnosing progress, using bounded waits without polling. Set targetFiles when files may be modified so active scope conflicts can be rejected.",
+    description: "Start one bounded task. Pass the work as task, with optional targetFiles, findings, and verification. Returns immediately with a taskId and the task's actual wakeOn notification triggers. For independent work with completion notification enabled, continue other useful work or end the turn. Observe only for a current-step dependency or diagnosing progress, using bounded waits without polling. Set targetFiles when files may be modified so active scope conflicts can be rejected.",
     parameters: workerParameters,
     executionMode: "parallel",
     async execute(toolCallId, { task: requestedTask, targetFiles, findings, verification }, signal, _onUpdate, ctx) {
       const task = formatWorkerInput({ task: requestedTask, targetFiles, findings, verification });
-      const dispatch = settings.resolve("worker", ctx);
+      const modelSelection = settings.resolve("worker", ctx);
 
       const resolved = runtime.resolveAgent("gear:worker");
       const record = runtime.tasks.spawn({
         extensionFactories: [(childPi) => setupExtension(childPi, { child: true })],
-        profile: resolved,
+        agent: resolved,
         task,
         targetFiles: targetFiles?.map((f) => resolve(ctx.cwd, f)),
         cwd: ctx.cwd,
-        model: dispatch.model,
-        thinkingLevel: dispatch.thinkingLevel,
+        model: modelSelection.model,
+        thinkingLevel: modelSelection.thinkingLevel,
         modelRegistry: ctx.modelRegistry,
         signal,
       });
 
-      track(toolCallId, record, dispatch, ctx);
+      track(toolCallId, record, modelSelection, ctx);
 
       return {
-        content: [{ type: "text", text: JSON.stringify({ runId: record.id, status: record.status, revision: record.revision, wakeOn: record.wakeOn }) }],
-        details: { ...toTaskSnapshot(record, dispatch), runId: record.id, revision: record.revision, wakeOn: record.wakeOn },
+        content: [{ type: "text", text: JSON.stringify({ taskId: record.id, status: record.status, revision: record.revision, wakeOn: record.wakeOn }) }],
+        details: { ...toTaskSnapshot(record, modelSelection), taskId: record.id, revision: record.revision, wakeOn: record.wakeOn },
       };
     },
     renderCall: renderSubagentCall,
     renderResult: (toolResult, options, theme, context) =>
-      renderSubagentResult(workerProfile, toolResult as any, options, theme, context as any, runtime, savedRun),
+      renderSubagentResult(workerProfile, toolResult as any, options, theme, context as any, runtime, savedTask),
     renderShell: "self",
   });
 
@@ -212,35 +212,35 @@ export function setupSubagents(
   pi.registerTool({
     name: REVIEWER_TOOL_NAME,
     label: reviewerProfile.label,
-    description: "Start focused read-only code review. Pass the changes or focus area as scope, with optional context and skills. Returns immediately with a runId and the task's actual wakeOn notification triggers. For independent work with completion notification enabled, continue other useful work or end the turn. Observe only for a current-step dependency or diagnosing progress, using bounded waits without polling.",
+    description: "Start focused read-only code review. Pass the changes or focus area as scope, with optional context and skills. Returns immediately with a taskId and the task's actual wakeOn notification triggers. For independent work with completion notification enabled, continue other useful work or end the turn. Observe only for a current-step dependency or diagnosing progress, using bounded waits without polling.",
     parameters: reviewerParameters,
     executionMode: "parallel",
     async execute(toolCallId, { scope, context, skills }, signal, _onUpdate, ctx) {
       const task = formatReviewerInput({ scope, context, skills });
-      const dispatch = settings.resolve("reviewer", ctx);
+      const modelSelection = settings.resolve("reviewer", ctx);
 
       const resolved = runtime.resolveAgent("gear:reviewer");
       const record = runtime.tasks.spawn({
         extensionFactories: [(childPi) => setupExtension(childPi, { child: true })],
-        profile: resolved,
+        agent: resolved,
         task,
         cwd: ctx.cwd,
-        model: dispatch.model,
-        thinkingLevel: dispatch.thinkingLevel,
+        model: modelSelection.model,
+        thinkingLevel: modelSelection.thinkingLevel,
         modelRegistry: ctx.modelRegistry,
         signal,
       });
 
-      track(toolCallId, record, dispatch, ctx);
+      track(toolCallId, record, modelSelection, ctx);
 
       return {
-        content: [{ type: "text", text: JSON.stringify({ runId: record.id, status: record.status, revision: record.revision, wakeOn: record.wakeOn }) }],
-        details: { ...toTaskSnapshot(record, dispatch), runId: record.id, revision: record.revision, wakeOn: record.wakeOn },
+        content: [{ type: "text", text: JSON.stringify({ taskId: record.id, status: record.status, revision: record.revision, wakeOn: record.wakeOn }) }],
+        details: { ...toTaskSnapshot(record, modelSelection), taskId: record.id, revision: record.revision, wakeOn: record.wakeOn },
       };
     },
     renderCall: renderSubagentCall,
     renderResult: (toolResult, options, theme, context) =>
-      renderSubagentResult(reviewerProfile, toolResult as any, options, theme, context as any, runtime, savedRun),
+      renderSubagentResult(reviewerProfile, toolResult as any, options, theme, context as any, runtime, savedTask),
     renderShell: "self",
   });
 
@@ -250,21 +250,21 @@ export function setupSubagents(
     label: "Observe subagent",
     description: "Observe only for a current-step dependency or diagnosing progress, using bounded waits without polling. For independent work with completion notification enabled in the task's wakeOn, continue other useful work or end the turn. Wait until the run finishes, goes quiet for a few seconds, or the timeout elapses (default 30s). A timeout ends only this observation; the subagent keeps running. Prefer one long wait over repeated polling; omit afterRevision unless resuming from a known revision.",
     parameters: Type.Object({
-      runId: Type.String({ description: "Run identifier returned by researcher, worker, or reviewer." }),
+      taskId: Type.String({ description: "Task identifier returned by researcher, worker, or reviewer." }),
       afterRevision: Type.Optional(Type.Integer({ minimum: 0, description: "Last observed revision. Returns when a newer revision is available." })),
       timeoutSeconds: Type.Optional(Type.Number({ minimum: 0, description: "Maximum seconds to wait. Defaults to 30; values above 60 are clamped." })),
     }),
-    async execute(_toolCallId, { runId, afterRevision, timeoutSeconds }, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, { taskId, afterRevision, timeoutSeconds }, _signal, _onUpdate, ctx) {
       try {
-        if (!runtime.tasks.getTask(runId)) {
-          const saved = savedRun(runId, ctx);
+        if (!runtime.tasks.getTask(taskId)) {
+          const saved = savedTask(taskId, ctx);
           if (saved) {
-            runtime.monitor.acknowledgeTask(runId);
+            runtime.monitor.acknowledgeTask(taskId);
             return observation(saved);
           }
         }
 
-        const task = await runtime.tasks.wait(runId, {
+        const task = await runtime.tasks.wait(taskId, {
           ...(afterRevision !== undefined ? { afterRevision } : {}),
           timeoutSeconds: timeoutSeconds ? Math.min(timeoutSeconds, 60) : 30,
         });
@@ -276,12 +276,12 @@ export function setupSubagents(
           runtime.monitor.acknowledgeTask(task.id);
         }
 
-        return observation({ ...toTaskSnapshot(task), runId: task.id, status, revision: task.revision });
+        return observation({ ...toTaskSnapshot(task), taskId: task.id, status, revision: task.revision });
       } catch (err) {
         return {
           isError: true,
           content: [{ type: "text", text: String(err) }],
-          details: { error: String(err), runId, status: "error", revision: 0, activities: [] },
+          details: { error: String(err), taskId, status: "error", revision: 0, activities: [] },
         };
       }
     },
@@ -295,32 +295,32 @@ export function setupSubagents(
     name: "subagent_cancel",
     label: "Cancel subagent",
     description: "Cancel one subagent and wait for its child session to shut down. Other tasks and the main agent continue; repeated cancellation returns the same terminal state.",
-    parameters: Type.Object({ runId: Type.String({ description: "Run identifier returned by researcher, worker, or reviewer." }) }),
-    async execute(_toolCallId, { runId }, _signal, _onUpdate, ctx): Promise<any> {
-      await runtime.tasks.cancel(runId);
-      const task = runtime.tasks.getTask(runId);
+    parameters: Type.Object({ taskId: Type.String({ description: "Task identifier returned by researcher, worker, or reviewer." }) }),
+    async execute(_toolCallId, { taskId }, _signal, _onUpdate, ctx): Promise<any> {
+      await runtime.tasks.cancel(taskId);
+      const task = runtime.tasks.getTask(taskId);
       if (!task) {
-        const saved = savedRun(runId, ctx);
+        const saved = savedTask(taskId, ctx);
         if (saved) return observation(saved);
       }
 
       const status = task ? mapStatus(task.status) : "aborted";
       if (task) {
-        recordProgress(undefined, runId, task);
+        recordProgress(undefined, taskId, task);
       } else {
-        recordSubagentLiveUpdate(runId, { status: "aborted", startedAt: Date.now(), activities: [] });
+        recordSubagentLiveUpdate(taskId, { status: "aborted", startedAt: Date.now(), activities: [] });
       }
       return {
         content: [
           {
             type: "text",
             text: JSON.stringify({
-              runId,
+              taskId,
               status,
             }),
           },
         ],
-        details: { runId, status, revision: task?.revision ?? 0, activities: [] },
+        details: { taskId, status, revision: task?.revision ?? 0, activities: [] },
       };
     },
     renderCall: () => ({ render: () => [], invalidate: () => {} }),

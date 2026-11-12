@@ -23,8 +23,7 @@ export interface TaskControllerOptions {
 }
 
 export interface SpawnTaskOptions {
-  readonly agent?: ResolvedAgentDefinition | undefined;
-  readonly profile?: ResolvedAgentDefinition | undefined; // alias
+  readonly agent: ResolvedAgentDefinition;
   readonly task: string;
   readonly targetFiles?: readonly string[] | undefined;
   readonly parentTaskId?: string | undefined;
@@ -75,10 +74,10 @@ export class TaskController {
     const all = Array.from(this._tasks.values());
     if (!filter) return all;
 
-    const filterAgentId = filter.agentId ?? filter.profileId;
+    const filterAgentId = filter.agentId;
 
     return all.filter((t) => {
-      if (filterAgentId && t.agentId !== filterAgentId && t.profileId !== filterAgentId) return false;
+      if (filterAgentId && t.agentId !== filterAgentId) return false;
       if (filter.parentTaskId !== undefined && t.parentTaskId !== filter.parentTaskId) return false;
       if (filter.status) {
         if (Array.isArray(filter.status)) {
@@ -95,7 +94,7 @@ export class TaskController {
     let count = 0;
     for (const t of this._tasks.values()) {
       if (t.status === "running") {
-        if (!agentId || t.agentId === agentId || t.profileId === agentId) {
+        if (!agentId || t.agentId === agentId) {
           count++;
         }
       }
@@ -105,12 +104,12 @@ export class TaskController {
 
   public spawn(options: SpawnTaskOptions): TaskRecord {
     if (this._shutdownPromise) {
-      throw new Error("Task registry is shut down");
+      throw new Error("Task controller is shut down");
     }
 
-    const agent = options.agent ?? options.profile;
+    const agent = options.agent;
     if (!agent) {
-      throw new Error("spawn requires an agent or profile option");
+      throw new Error("spawn requires an agent option");
     }
     const depth = options.depth ?? 0;
 
@@ -152,7 +151,6 @@ export class TaskController {
     const taskRecord: TaskRecord = {
       id: taskId,
       agentId: agent.id,
-      profileId: agent.id,
       task: options.task,
       parentTaskId: options.parentTaskId,
       depth,

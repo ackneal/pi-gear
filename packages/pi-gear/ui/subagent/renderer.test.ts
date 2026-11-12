@@ -8,13 +8,13 @@ import {
   formatUsage,
   idleDuration,
   STALLED_THRESHOLD_MS,
-  type SubagentRendererProfile,
+  type SubagentDisplayMetadata,
   type Theme,
 } from "./format.ts";
 import { Spinner } from "./spinner.ts";
 
 const theme: Theme = { fg: (_color, text) => text, bold: (text) => text };
-const researcher: SubagentRendererProfile = {
+const researcher: SubagentDisplayMetadata = {
   id: "researcher",
   label: "researcher",
   presentation: { activity: { starting: "Researching", complete: "Research complete", drafting: "Drafting research", failed: "Research failed", aborted: "Research aborted" } },

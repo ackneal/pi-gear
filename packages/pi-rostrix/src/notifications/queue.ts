@@ -2,7 +2,7 @@ import type { TaskRecord } from "../tasks/types.ts";
 
 export interface TaskNotification {
   readonly taskId: string;
-  readonly profileId: string;
+  readonly agentId: string;
   readonly status: TaskRecord["status"];
   readonly result?: string | undefined;
   readonly error?: string | undefined;

@@ -23,7 +23,7 @@ test("NotificationQueue coalesces multiple notifications within debounce window"
 
   notificationQueue.enqueue({
     taskId: "task-1",
-    profileId: "worker",
+    agentId: "worker",
     status: "completed",
     result: "Finished step 1",
     timestamp: Date.now(),
@@ -31,7 +31,7 @@ test("NotificationQueue coalesces multiple notifications within debounce window"
 
   notificationQueue.enqueue({
     taskId: "task-2",
-    profileId: "reviewer",
+    agentId: "reviewer",
     status: "completed",
     result: "Review passed",
     timestamp: Date.now(),
@@ -71,7 +71,7 @@ function sdkFixture(failures = 0) {
 }
 
 function notification(taskId: string): TaskNotification {
-  return { taskId, profileId: "worker", status: "completed", result: `<result>${taskId} & \"data\"</result>`, timestamp: 0 };
+  return { taskId, agentId: "worker", status: "completed", result: `<result>${taskId} & \"data\"</result>`, timestamp: 0 };
 }
 
 test("ParentNotifier uses SDK lifecycle hooks and removes them on disposal", async (t) => {
@@ -176,7 +176,7 @@ test("pending notifications survive eviction and can still be acknowledged", asy
           const evicted = registry.spawn({ task: "First", agent: worker });
           await registry.wait(evicted.id);
           const snapshot = {
-            taskId: evicted.id, profileId: evicted.profileId, status: evicted.status,
+            taskId: evicted.id, agentId: evicted.agentId, status: evicted.status,
             result: evicted.result, durationMs: evicted.finishedAt! - evicted.startedAt!,
           };
           if (phase !== "debounce") monitor.notificationQueue.flush();
@@ -379,7 +379,7 @@ test("stall cancellation leaves notification ownership to the terminal subscript
         if (["completed", "failed", "aborted"].includes(task.status)) monitor.notifyTaskSettled(task);
       });
       try {
-        const task = registry.spawn({ task: "Wait", profile: {
+        const task = registry.spawn({ task: "Wait", agent: {
           id: "worker", label: "Worker", description: "Test worker", promptGuidelines: [], appendPrompt: "",
           deniedTools: [], deniedSkills: [], mcpServers: {}, subagents: { maxDepth: 2, maxConcurrent: 2 },
           supervision: { wakeOn: new Set(wake ? ["stalled"] : []) },

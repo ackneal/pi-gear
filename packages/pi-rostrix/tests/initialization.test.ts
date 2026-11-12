@@ -105,7 +105,7 @@ test("interactive initialization retains first enabled configuration and gates t
       const definition = { id: "fixture", label: "Fixture", description: "In-memory interactive fixture" };
       runtime.registerAgent(definition);
       // Supply a discovered-agent view without invoking filesystem discovery.
-      Object.defineProperty(runtime, "discoveredAgents", { value: [{ agent: definition, profile: definition, scope: "custom", filePath: "/unused/fixture.md" }] });
+      Object.defineProperty(runtime, "discoveredAgents", { value: [{ agent: definition, scope: "custom", filePath: "/unused/fixture.md" }] });
       const statuses: [string, string | undefined][] = [];
       const context = { hasUI: true, ui: { notify() {}, setStatus(key: string, value: string | undefined) { statuses.push([key, value]); } } };
       const registeredCommand = h.commands[0];
@@ -181,7 +181,7 @@ test("disposal awaits shutdown, shares its promise, releases subscriptions once,
   runtime.registerAgent({ id: "retained", label: "Retained", description: "Await cleanup" });
 
   const pending = runtime.dispose();
-  assert.throws(() => runtime.tasks.spawn({ agent: agent(), task: "Must not start during disposal" }), /Task registry is shut down/);
+  assert.throws(() => runtime.tasks.spawn({ agent: agent(), task: "Must not start during disposal" }), /Task controller is shut down/);
   assert.strictEqual(runtime.dispose(), pending);
   await Promise.resolve();
   assert.equal(runtime.isInitialized, true);

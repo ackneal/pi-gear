@@ -6,8 +6,6 @@ import { parseAgentJson, parseAgentMarkdown, AgentParseError } from "./parser.ts
 
 export interface DiscoveredAgent {
   readonly agent: AgentDefinition;
-  // Alias for backward compatibility
-  readonly profile: AgentDefinition;
   readonly filePath: string;
   readonly scope: "user" | "project" | "custom";
 }
@@ -22,8 +20,6 @@ export interface DiscoverAgentsOptions {
 
 export interface AgentDiscoveryResult {
   readonly agents: DiscoveredAgent[];
-  // Alias for backward compatibility
-  readonly profiles: DiscoveredAgent[];
   readonly errors: { filePath: string; error: string }[];
 }
 
@@ -90,7 +86,6 @@ export async function discoverAllAgents(options: DiscoverAgentsOptions = {}): Pr
 
   return {
     agents: agentList,
-    profiles: agentList,
     errors: allErrors,
   };
 }
@@ -107,7 +102,7 @@ export async function scanAgentDirectory(
   try {
     entries = await collectCandidateFiles(dirPath);
   } catch {
-    return { agents, profiles: agents, errors };
+    return { agents, errors };
   }
 
   for (const filePath of entries) {
@@ -126,7 +121,7 @@ export async function scanAgentDirectory(
         continue;
       }
 
-      agents.push({ agent, profile: agent, filePath, scope });
+      agents.push({ agent, filePath, scope });
     } catch (err) {
       const msg = err instanceof AgentParseError ? err.message : String(err);
       errors.push({ filePath, error: msg });
@@ -134,7 +129,7 @@ export async function scanAgentDirectory(
     }
   }
 
-  return { agents, profiles: agents, errors };
+  return { agents, errors };
 }
 
 async function collectCandidateFiles(dirPath: string): Promise<string[]> {

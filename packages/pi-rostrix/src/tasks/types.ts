@@ -27,8 +27,6 @@ export type TaskActivity =
 export interface TaskRecord {
   readonly id: string;
   readonly agentId: string;
-  // Alias for backward compatibility
-  readonly profileId: string;
   readonly task: string;
   readonly parentTaskId?: string | undefined;
   readonly depth: number;
@@ -51,7 +49,6 @@ export interface TaskRecord {
 
 export interface TaskFilter {
   agentId?: string | undefined;
-  profileId?: string | undefined;
   status?: TaskStatus | TaskStatus[] | undefined;
   parentTaskId?: string | undefined;
 }

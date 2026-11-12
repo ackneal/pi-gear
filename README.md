@@ -183,7 +183,7 @@ const runtime = init(pi);
 
 `init(pi, options?)` returns the shared `Runtime`. Options `autoLoadDefinitions`, `autoRegisterTaskTools`, and `autoRegisterAgentControls` default to enabled. Later calls can enable disabled features without duplicate registration or replacement of runtime state.
 
-Shutdown cancels active tasks and disposes the runtime; reload creates a new runtime. Gear's `runId` identifies the corresponding core task.
+Shutdown cancels active tasks and disposes the runtime; reload creates a new runtime. Gear tools return a `taskId`; pass it to `subagent_observe` or `subagent_cancel`.
 
 ## Security behavior and limitations
 

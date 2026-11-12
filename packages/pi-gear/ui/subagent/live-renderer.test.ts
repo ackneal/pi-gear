@@ -22,7 +22,7 @@ test("asynchronous transcript component follows live registry updates through co
 
   const component = renderSubagentResult(
     researcherProfile,
-    { content: [{ type: "text", text: "started" }], details: { ...initial, runId: "run-1" } } as AgentToolResult<TaskSnapshot>,
+    { content: [{ type: "text", text: "started" }], details: { ...initial, taskId: "task-1" } } as AgentToolResult<TaskSnapshot>,
     { isPartial: false, expanded: false } as never,
     theme,
     { toolCallId: "async-call", args: { question: "Inspect" }, invalidate: () => { invalidations++; } },
@@ -49,16 +49,16 @@ test("asynchronous transcript component follows live registry updates through co
   component.dispose();
 });
 
-test("asynchronous transcript component tracks live run by runId even when toolCallId is absent in context", () => {
+test("asynchronous transcript component tracks live task by taskId even when toolCallId is absent in context", () => {
   clearSubagentRegistry();
   const initial: TaskSnapshot = { status: "running", startedAt: Date.now(), activities: [] };
-  const runId = "task-uuid-12345";
-  recordSubagentLiveStart(runId, "Perform audit", initial);
+  const taskId = "task-uuid-12345";
+  recordSubagentLiveStart(taskId, "Perform audit", initial);
   let invalidations = 0;
 
   const component = renderSubagentResult(
     researcherProfile,
-    { content: [{ type: "text", text: "started" }], details: { ...initial, runId } } as AgentToolResult<TaskSnapshot>,
+    { content: [{ type: "text", text: "started" }], details: { ...initial, taskId } } as AgentToolResult<TaskSnapshot>,
     { isPartial: false, expanded: false } as never,
     theme,
     { invalidate: () => { invalidations++; } },
@@ -67,7 +67,7 @@ test("asynchronous transcript component tracks live run by runId even when toolC
   assert.match(rendered(component), /Researching/);
   assert.doesNotMatch(rendered(component), /aborted/i);
 
-  recordSubagentLiveUpdate(runId, {
+  recordSubagentLiveUpdate(taskId, {
     ...initial,
     status: "success",
     finishedAt: Date.now(),
@@ -200,9 +200,9 @@ test("cleared running history reports unavailable status without inventing an ab
   clearSubagentRegistry();
   t.after(clearSubagentRegistry);
   const details = {
-    runId: "old-run", status: "running", startedAt: 1,
+    taskId: "old-task", status: "running", startedAt: 1,
     activities: [{ kind: "tool", name: "read", status: "running" }],
-  } as TaskSnapshot & { runId: string };
+  } as TaskSnapshot & { taskId: string };
   const result = { content: [], details } as AgentToolResult<TaskSnapshot>;
   const original = structuredClone(result);
   recordSubagentLiveStart("history", "Inspect", details);
@@ -235,7 +235,7 @@ test("renderSubagentResult queries TaskController directly from runtime when ava
       getTask: (id: string) => {
         if (id === "task-runtime-1") {
           return {
-            taskId: "task-runtime-1",
+            id: "task-runtime-1",
             status: "completed" as const,
             createdAt: 1000,
             startedAt: 1000,
@@ -252,7 +252,7 @@ test("renderSubagentResult queries TaskController directly from runtime when ava
 
   const result = {
     content: [{ type: "text", text: "started" }],
-    details: { status: "running", startedAt: 1000, activities: [], runId: "task-runtime-1" },
+    details: { status: "running", startedAt: 1000, activities: [], taskId: "task-runtime-1" },
   } as AgentToolResult<TaskSnapshot>;
 
   const component = renderSubagentResult(
@@ -291,7 +291,7 @@ test("renderSubagentResult updates live from TaskController even when UI registr
 
   let taskListener: ((task: any) => void) | undefined;
   const mockTask = {
-    taskId: "task-live-cleared",
+    id: "task-live-cleared",
     activities: [],
     status: "running" as const,
     createdAt: 1000,
@@ -315,7 +315,7 @@ test("renderSubagentResult updates live from TaskController even when UI registr
   let invalidations = 0;
   const result = {
     content: [{ type: "text", text: "started" }],
-    details: { status: "running", startedAt: 1000, activities: [], runId: "task-live-cleared" },
+    details: { status: "running", startedAt: 1000, activities: [], taskId: "task-live-cleared" },
   } as AgentToolResult<TaskSnapshot>;
 
   const component = renderSubagentResult(

@@ -36,13 +36,13 @@ export function withoutWorkspaceSearch(profile: SubagentProfile): SubagentProfil
   };
 }
 
-export function childArgs(profile: SubagentProfile, task: string, childExtension: URL, dispatch?: ModelSelection): string[] {
+export function childArgs(profile: SubagentProfile, task: string, childExtension: URL, modelSelection?: ModelSelection): string[] {
   return [
     "--mode",
     "json",
     "--no-session",
-    ...(dispatch?.model ? ["--model", dispatch.model] : []),
-    ...(dispatch?.thinkingLevel ? ["--thinking", dispatch.thinkingLevel] : []),
+    ...(modelSelection?.model ? ["--model", modelSelection.model] : []),
+    ...(modelSelection?.thinkingLevel ? ["--thinking", modelSelection.thinkingLevel] : []),
     "--no-skills",
     "--no-prompt-templates",
     "--no-context-files",
@@ -64,11 +64,11 @@ export function spawnPiChild(
   childExtension: URL,
   spawnProcess: SpawnProcess = spawn,
   cwd: string = process.cwd(),
-  dispatch?: ModelSelection,
+  modelSelection?: ModelSelection,
   env?: NodeJS.ProcessEnv,
 ): ChildProcess {
   const invocation = resolvePiInvocation();
-  return spawnProcess(invocation.command, [...invocation.prefixArgs, ...childArgs(profile, task, childExtension, dispatch)], {
+  return spawnProcess(invocation.command, [...invocation.prefixArgs, ...childArgs(profile, task, childExtension, modelSelection)], {
     cwd,
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, ...env, PI_GEAR_CHILD: "1" },

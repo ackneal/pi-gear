@@ -34,7 +34,6 @@ export interface ResolvedAgentDefinition {
   } | undefined;
   readonly subagents: {
     readonly allowedAgents?: readonly string[] | undefined;
-    readonly allowedProfiles?: readonly string[] | undefined;
     readonly maxDepth: number;
     readonly maxConcurrent: number;
   };
@@ -48,7 +47,6 @@ export interface ResolvedAgentDefinition {
 export interface ParentDelegationLimits {
   readonly activeTools?: readonly string[] | undefined;
   readonly allowedAgents?: readonly string[] | undefined;
-  readonly allowedProfiles?: readonly string[] | undefined;
   readonly currentDepth?: number | undefined;
 }
 
@@ -188,7 +186,7 @@ export class AgentResolver {
         fallbackModel = agent.model.fallback;
       }
 
-      const rawAllowedAgents = agent.subagents?.allowedAgents ?? agent.subagents?.allowedProfiles;
+      const rawAllowedAgents = agent.subagents?.allowedAgents;
       if (rawAllowedAgents !== undefined) {
         if (allowedAgents === undefined) {
           allowedAgents = [...rawAllowedAgents];
@@ -246,7 +244,7 @@ export class AgentResolver {
       deniedSkills: Object.freeze(deniedSkills),
       ...(modelConfig ? { model: Object.freeze(modelConfig) } : {}),
       subagents: Object.freeze({
-        ...(allowedAgents !== undefined ? { allowedAgents: Object.freeze(allowedAgents), allowedProfiles: Object.freeze(allowedAgents) } : {}),
+        ...(allowedAgents !== undefined ? { allowedAgents: Object.freeze(allowedAgents) } : {}),
         maxDepth: maxDepth ?? 2,
         maxConcurrent: maxConcurrent ?? 2,
       }),
@@ -267,8 +265,8 @@ export class AgentResolver {
       );
     }
 
-    const parentAllowed = parentLimits.allowedAgents ?? parentLimits.allowedProfiles;
-    let effectiveAllowedAgents = resolved.subagents.allowedAgents ?? resolved.subagents.allowedProfiles;
+    const parentAllowed = parentLimits.allowedAgents;
+    let effectiveAllowedAgents = resolved.subagents.allowedAgents;
     if (parentAllowed !== undefined) {
       if (effectiveAllowedAgents === undefined) {
         effectiveAllowedAgents = Object.freeze([...parentAllowed]);
@@ -290,7 +288,7 @@ export class AgentResolver {
       ...(effectiveAllowedTools !== undefined ? { allowedTools: effectiveAllowedTools } : {}),
       subagents: Object.freeze({
         ...resolved.subagents,
-        ...(effectiveAllowedAgents !== undefined ? { allowedAgents: effectiveAllowedAgents, allowedProfiles: effectiveAllowedAgents } : {}),
+        ...(effectiveAllowedAgents !== undefined ? { allowedAgents: effectiveAllowedAgents } : {}),
         maxDepth: remainingDepth,
       }),
     };

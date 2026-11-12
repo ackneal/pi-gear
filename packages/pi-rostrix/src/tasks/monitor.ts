@@ -11,7 +11,7 @@ export interface TaskMonitorOptions {
 }
 
 export class TaskMonitor {
-  private readonly _taskRegistry: TaskController;
+  private readonly _taskController: TaskController;
   private readonly _notificationQueue: NotificationQueue;
   private readonly _notifier: ParentNotifier;
   private readonly _checkIntervalMs: number;
@@ -21,7 +21,7 @@ export class TaskMonitor {
   private readonly _handledTasks = new WeakSet<TaskRecord>();
 
   public constructor(taskController: TaskController, pi?: ExtensionAPI, options?: TaskMonitorOptions) {
-    this._taskRegistry = taskController;
+    this._taskController = taskController;
     this._checkIntervalMs = options?.checkIntervalMs ?? 5000;
     this._defaultStallTimeoutMs = options?.defaultStallTimeoutMs ?? 60_000;
 
@@ -44,7 +44,7 @@ export class TaskMonitor {
 
   public acknowledgeTask(taskId: string): void {
     if (this._disposed) return;
-    const task = this._taskRegistry.getTask(taskId);
+    const task = this._taskController.getTask(taskId);
     if (task && !["completed", "failed", "aborted"].includes(task.status)) return;
 
     if (task) this._handledTasks.add(task);
@@ -65,7 +65,7 @@ export class TaskMonitor {
     this._handledTasks.add(task);
     this._notificationQueue.enqueue({
       taskId: task.id,
-      profileId: task.profileId,
+      agentId: task.agentId,
       status: task.status,
       result: task.result,
       error: task.error,
@@ -85,13 +85,13 @@ export class TaskMonitor {
 
   private _checkTasks(): void {
     const now = Date.now();
-    const runningTasks = this._taskRegistry.listTasks({ status: "running" });
+    const runningTasks = this._taskController.listTasks({ status: "running" });
 
     for (const task of runningTasks) {
       // Check stall timeout
       const inactiveDuration = now - task.lastActivityAt;
       if (inactiveDuration > this._defaultStallTimeoutMs) {
-        void this._taskRegistry.cancel(task.id, `Task stalled: no activity for ${Math.round(inactiveDuration / 1000)}s`, "stalled");
+        void this._taskController.cancel(task.id, `Task stalled: no activity for ${Math.round(inactiveDuration / 1000)}s`, "stalled");
       }
     }
   }

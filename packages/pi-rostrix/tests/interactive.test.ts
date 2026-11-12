@@ -142,13 +142,11 @@ describe("Interactive Profile Cycling & Commands", () => {
     (runtime as any)._discoveredAgents = [
       {
         agent: reviewerAgent,
-        profile: reviewerAgent,
         filePath: "/user/profiles/reviewer.md",
         scope: "user",
       },
       {
         agent: analystAgent,
-        profile: analystAgent,
         filePath: "/user/profiles/analyst.md",
         scope: "user",
       },
@@ -225,7 +223,7 @@ describe("Interactive Profile Cycling & Commands", () => {
       tools: { allow: ["read", "write"] },
     };
     (runtime as any)._discoveredAgents = [
-      { agent: profileDef, profile: profileDef, filePath: "/profiles/doc-writer.md", scope: "project" },
+      { agent: profileDef, filePath: "/profiles/doc-writer.md", scope: "project" },
     ];
     runtime.registerAgent(profileDef);
 
