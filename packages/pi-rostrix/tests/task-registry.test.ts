@@ -255,6 +255,96 @@ test("TaskRegistry wait resolves on revision update or settle", async (t) => {
   assert.ok(waited.revision > 1);
 });
 
+test("TaskRegistry bounds settled history without evicting running tasks", async (t) => {
+  for (const row of [
+    { name: "default limit", limit: undefined, expected: 100, status: "completed" },
+    { name: "completed", limit: 2, expected: 2, status: "completed" },
+    { name: "failed", limit: 2, expected: 2, status: "failed" },
+    { name: "aborted", limit: 2, expected: 2, status: "aborted" },
+  ] as const) {
+    await t.test(row.name, async (t) => {
+      const registry = new TaskRegistry({
+        maxRetainedTasks: row.limit,
+        createRunner: ({ signal }) => ({
+          run: async (prompt) => {
+            if (prompt === "Keep running") {
+              await new Promise<void>((resolve) => signal!.addEventListener("abort", () => resolve(), { once: true }));
+            }
+            return {
+              status: signal?.aborted ? "aborted" : row.status,
+              result: prompt, turns: 0, durationMs: 0,
+              usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0 },
+            };
+          },
+        }),
+      });
+      t.after(() => registry.shutdown());
+      const profile = createMockProfile();
+      const running = registry.spawn({ profile, task: "Keep running" });
+      const completed: string[] = [];
+      const delivered: string[] = [];
+      registry.subscribe("*", (task) => {
+        if (task.status !== "running") delivered.push(task.id);
+      });
+
+      for (let i = 0; i < row.expected + 3; i++) {
+        const task = registry.spawn({ profile, task: `Work ${i}` });
+        const waiting = registry.wait(task.id);
+        assert.equal((await waiting).status, row.status);
+        completed.push(task.id);
+      }
+
+      assert.equal(registry.getTask(running.id)?.status, "running");
+      assert.deepEqual(registry.listTasks().map((task) => task.id), [running.id, ...completed.slice(-row.expected)]);
+      assert.deepEqual(delivered, completed);
+      assert.equal(registry.getTask(completed[0]!), undefined);
+      await assert.rejects(registry.wait(completed[0]!), /not found/);
+      assert.equal(await registry.cancel(running.id), true);
+      assert.equal(running.status, "aborted");
+      assert.equal(registry.listTasks().length, row.expected);
+    });
+  }
+});
+
+test("TaskRegistry bounds history when runners throw", async (t) => {
+  for (const synchronous of [true, false]) {
+    await t.test(synchronous ? "synchronous throw" : "async rejection", async (t) => {
+      const registry = new TaskRegistry({
+        maxRetainedTasks: 1,
+        createRunner: () => ({
+          run: () => {
+            if (synchronous) throw new Error("Runner failed synchronously");
+            return Promise.reject(new Error("Runner rejected asynchronously"));
+          },
+        }),
+      });
+      t.after(() => registry.shutdown());
+      const records = [];
+
+      for (let i = 0; i < 4; i++) {
+        const task = registry.spawn({ profile: createMockProfile(), task: "Fail" });
+        const settled = await registry.wait(task.id);
+        assert.equal(settled.status, "failed");
+        assert.equal(settled.error, synchronous ? "Runner failed synchronously" : "Runner rejected asynchronously");
+        records.push(task);
+      }
+
+      assert.deepEqual(registry.listTasks(), records.slice(-1));
+      assert.equal(registry.getRunningCount(), 0);
+      await registry.shutdown();
+      assert.deepEqual(registry.listTasks(), records.slice(-1));
+    });
+  }
+});
+
+test("TaskRegistry validates the settled history limit", async (t) => {
+  for (const limit of [0, -1, 1.5, Infinity, NaN, Number.MAX_SAFE_INTEGER + 1]) {
+    await t.test(String(limit), () => {
+      assert.throws(() => new TaskRegistry({ maxRetainedTasks: limit }), /positive safe integer/);
+    });
+  }
+});
+
 test("TaskRegistry forwards modelRuntime and extracts runtime from modelRegistry", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "rostrix-model-registry-"));
   t.after(() => rm(directory, { recursive: true, force: true }));

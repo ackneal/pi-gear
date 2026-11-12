@@ -55,6 +55,12 @@ function harness(sessionManager?: SessionManager) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
+    cancel: async (_taskId: string): Promise<boolean> => {
+      if (!available || record.status === "completed" || record.status === "failed" || record.status === "aborted") return false;
+      Object.assign(record, { status: "aborted", finishedAt: 50 });
+      for (const listener of [...listeners]) listener(record);
+      return true;
+    },
     getTask: () => available ? record : undefined,
     wait: async () => {
       if (!available) throw new Error("Unknown task");
@@ -382,7 +388,7 @@ for (const scenario of ["bounded evidence", "changed session", "unknown run", "a
 }
 
 
-test("observe acknowledges only delivered live terminal results", async (t) => {
+test("observe acknowledges only delivered terminal results", async (t) => {
   for (const status of ["completed", "failed", "aborted", "running", "pending", "blocked", "error", "persisted"] as const) {
     await t.test(status, async (t) => {
       clearSubagentRegistry();
@@ -408,8 +414,49 @@ test("observe acknowledges only delivered live terminal results", async (t) => {
       assert.equal(details.status, mapped);
       if (status === "persisted") assert.equal(details.result, "Saved answer");
       if (status === "error") assert.match((result.content[0] as { text: string }).text, /Unknown task/);
-      assert.deepEqual(h.acknowledgments, ["completed", "failed", "aborted"].includes(status) ? [h.record.id] : []);
+      assert.deepEqual(h.acknowledgments, ["completed", "failed", "aborted", "persisted"].includes(status) ? [h.record.id] : []);
     });
+  }
+});
+
+test("terminal observe and cancel preserve saved status and revision after eviction", async (t) => {
+  for (const { status, mapped } of [
+    { status: "completed", mapped: "success" },
+    { status: "failed", mapped: "error" },
+    { status: "aborted", mapped: "aborted" },
+  ] as const) {
+    for (const tool of ["subagent_observe", "subagent_cancel"] as const) {
+      for (const forgotten of [false, true]) {
+        await t.test(`${tool}: ${status}, forgotten=${forgotten}`, async (t) => {
+          clearSubagentRegistry();
+          t.after(clearSubagentRegistry);
+          const h = harness();
+          await h.execute("worker", { task: "Inspect" });
+          h.update({ status, revision: 7, finishedAt: 50, result: "Saved evidence", error: status === "failed" ? "Failure evidence" : undefined });
+          const liveRun = getSubagentEntry(h.record.id)?.run;
+          const saved = h.entries.find((entry) => entry.type === "custom" && entry.customType === "gear:subagent-completion");
+          assert.ok(saved?.type === "custom");
+          if (forgotten) h.forgetTask();
+
+          const result = await h.execute(tool, { runId: h.record.id });
+
+          assert.equal(result.isError, undefined);
+          const details = result.details as { status: string; revision: number };
+          assert.equal(details.status, mapped);
+          assert.equal(details.revision, 7);
+          const text = JSON.parse((result.content[0] as { text: string }).text);
+          assert.equal(text.status, mapped);
+          if (forgotten) {
+            assert.deepEqual(result.details, saved.data);
+            assert.equal(text.revision, 7);
+          }
+          if (forgotten) {
+            assert.deepEqual(getSubagentEntry(h.record.id)?.run, liveRun);
+          }
+          assert.deepEqual(h.acknowledgments, tool === "subagent_observe" ? [h.record.id] : []);
+        });
+      }
+    }
   }
 });
 

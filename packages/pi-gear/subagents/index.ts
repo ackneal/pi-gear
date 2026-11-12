@@ -258,7 +258,10 @@ export function setupSubagents(
       try {
         if (!runtime.tasks.getTask(runId)) {
           const saved = savedRun(runId, ctx);
-          if (saved) return observation(saved);
+          if (saved) {
+            runtime.supervisor.acknowledgeTask(runId);
+            return observation(saved);
+          }
         }
 
         const task = await runtime.tasks.wait(runId, {
@@ -293,9 +296,14 @@ export function setupSubagents(
     label: "Cancel subagent",
     description: "Cancel one subagent and wait for its process to terminate. Other runs and the main agent continue; repeated cancellation returns the same terminal state.",
     parameters: Type.Object({ runId: Type.String({ description: "Run identifier returned by researcher, worker, or reviewer." }) }),
-    async execute(_toolCallId, { runId }): Promise<any> {
+    async execute(_toolCallId, { runId }, _signal, _onUpdate, ctx): Promise<any> {
       await runtime.tasks.cancel(runId);
       const task = runtime.tasks.getTask(runId);
+      if (!task) {
+        const saved = savedRun(runId, ctx);
+        if (saved) return observation(saved);
+      }
+
       const status = task ? mapStatus(task.status) : "aborted";
       if (task) {
         recordProgress(undefined, runId, task);

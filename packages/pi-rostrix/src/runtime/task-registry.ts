@@ -17,6 +17,8 @@ function taskUsage(usage: SubagentUsage): TaskUsage {
 
 export interface TaskRegistryOptions {
   readonly maxGlobalConcurrent?: number | undefined;
+  /** Maximum settled records retained after runner cleanup. Defaults to 100. */
+  readonly maxRetainedTasks?: number | undefined;
   readonly createRunner?: (options: SubagentSessionOptions) => Pick<InProcessSubagentRunner, "run">;
 }
 
@@ -50,6 +52,7 @@ export class TaskRegistry {
   private readonly _abortControllers: Map<string, AbortController> = new Map();
   private readonly _listeners: Map<string, Set<TaskListener>> = new Map();
   private readonly _maxGlobalConcurrent: number;
+  private readonly _maxRetainedTasks: number;
   private _nextId = 1;
   private _shutdownPromise?: Promise<void>;
 
@@ -58,6 +61,10 @@ export class TaskRegistry {
   public constructor(options?: TaskRegistryOptions) {
     this.options = options;
     this._maxGlobalConcurrent = options?.maxGlobalConcurrent ?? 4;
+    this._maxRetainedTasks = options?.maxRetainedTasks ?? 100;
+    if (!Number.isSafeInteger(this._maxRetainedTasks) || this._maxRetainedTasks < 1) {
+      throw new Error("maxRetainedTasks must be a positive safe integer");
+    }
   }
 
   public getTask(id: string): TaskRecord | undefined {
@@ -204,8 +211,8 @@ export class TaskRegistry {
     });
     this._runners.set(taskId, runner);
 
-    // Kick off execution asynchronously
-    const runPromise = (async () => {
+    // Register the promise before even a synchronously throwing runner can settle.
+    const runPromise = Promise.resolve().then(async () => {
       try {
         const result = await runner.run(options.task);
         if (timeoutTimer) clearTimeout(timeoutTimer);
@@ -234,8 +241,9 @@ export class TaskRegistry {
         this._runners.delete(taskId);
         this._abortControllers.delete(taskId);
         this._runnerPromises.delete(taskId);
+        this._pruneTasks();
       }
-    })();
+    });
     this._runnerPromises.set(taskId, runPromise);
 
     return taskRecord;
@@ -390,6 +398,17 @@ export class TaskRegistry {
       set.delete(listener);
       if (set.size === 0) this._listeners.delete(taskId);
     };
+  }
+
+  private _pruneTasks(): void {
+    const settled = this.listTasks({ status: ["completed", "failed", "aborted"] })
+      .filter((task) => !this._runnerPromises.has(task.id))
+      .sort((left, right) => (left.finishedAt ?? left.createdAt) - (right.finishedAt ?? right.createdAt));
+
+    for (const task of settled.slice(0, Math.max(0, settled.length - this._maxRetainedTasks))) {
+      this._tasks.delete(task.id);
+      this._listeners.delete(task.id);
+    }
   }
 
   private _updateTask(taskId: string, patch: Partial<TaskRecord>): void {

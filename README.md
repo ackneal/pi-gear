@@ -155,6 +155,8 @@ Each extension may belong to only one server. `languageIds` must map every confi
 
 Expanded Agent results show the task, all retained tool-call summaries, and then the answer. Activity omits raw tool output and thinking. Older activity is marked when the runtime retention limit drops entries.
 
+Rostrix retains up to 100 settled task records in memory by default. It removes older records after runner cleanup, without removing running tasks or pending notification payloads. SDK callers can set `TaskRegistryOptions.maxRetainedTasks` to a positive integer. Gear can still observe saved completion results from the session history; standalone Rostrix status and wait calls report removed records as not found. This limit does not truncate saved session history.
+
 Successful Pi `edit` and `write` calls synchronize matching LSP files and report new or changed diagnostics automatically.
 
 ## Security behavior and limitations

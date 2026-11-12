@@ -18,7 +18,7 @@ export class TaskSupervisor {
   private readonly _defaultStallTimeoutMs: number;
   private _intervalTimer?: NodeJS.Timeout | undefined;
   private _disposed = false;
-  private readonly _handledTasks = new Set<string>();
+  private readonly _handledTasks = new WeakSet<TaskRecord>();
 
   public constructor(taskRegistry: TaskRegistry, pi?: ExtensionAPI, options?: TaskSupervisorOptions) {
     this._taskRegistry = taskRegistry;
@@ -45,14 +45,14 @@ export class TaskSupervisor {
   public acknowledgeTask(taskId: string): void {
     if (this._disposed) return;
     const task = this._taskRegistry.getTask(taskId);
-    if (!task || !["completed", "failed", "aborted"].includes(task.status)) return;
+    if (task && !["completed", "failed", "aborted"].includes(task.status)) return;
 
-    this._handledTasks.add(taskId);
+    if (task) this._handledTasks.add(task);
     this._inbox.remove(taskId);
   }
 
   public notifyTaskSettled(task: TaskRecord): void {
-    if (this._disposed || this._handledTasks.has(task.id)) return;
+    if (this._disposed || this._handledTasks.has(task)) return;
 
     // The runtime has no blocked/input event; needs_input is not synthesized.
     const trigger = task.status === "completed" || task.status === "failed"
@@ -62,7 +62,7 @@ export class TaskSupervisor {
 
     const durationMs = task.startedAt ? (task.finishedAt ?? Date.now()) - task.startedAt : undefined;
 
-    this._handledTasks.add(task.id);
+    this._handledTasks.add(task);
     this._inbox.enqueue({
       taskId: task.id,
       profileId: task.profileId,
@@ -103,6 +103,5 @@ export class TaskSupervisor {
       this._intervalTimer = undefined;
     }
     this._wakeUpManager.dispose();
-    this._handledTasks.clear();
   }
 }

@@ -156,6 +156,64 @@ test("acknowledged terminal results cannot produce a delayed duplicate wake-up",
   }
 });
 
+test("pending notifications survive eviction and can still be acknowledged", async (t) => {
+  for (const phase of ["debounce", "busy", "retry"] as const) {
+    for (const acknowledge of [false, true]) {
+      await t.test(`${phase}, acknowledge evicted: ${acknowledge}`, async () => {
+        const registry = new TaskRegistry({
+          maxRetainedTasks: 1,
+          createRunner: () => ({ run: async (prompt) => ({
+            status: "completed", result: `Result: ${prompt}`, turns: 1, durationMs: 1,
+            usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, cost: 0 },
+          }) }),
+        });
+        const { pi, messages, attempts } = sdkFixture(phase === "retry" ? 1 : 0);
+        const supervisor = new TaskSupervisor(registry, pi, { debounceMs: 10_000 });
+        const unsubscribe = registry.subscribe("*", (task) => supervisor.notifyTaskSettled(task));
+        try {
+          if (phase === "busy") supervisor.wakeUpManager.setParentIdle(false);
+          const worker = agent({ supervision: { wakeOn: new Set(["completed"]) } });
+          const evicted = registry.spawn({ task: "First", agent: worker });
+          await registry.wait(evicted.id);
+          const snapshot = {
+            taskId: evicted.id, profileId: evicted.profileId, status: evicted.status,
+            result: evicted.result, durationMs: evicted.finishedAt! - evicted.startedAt!,
+          };
+          if (phase !== "debounce") supervisor.inbox.flush();
+          assert.deepEqual(messages, []);
+
+          const retained = registry.spawn({ task: "Second", agent: worker });
+          await registry.wait(retained.id);
+          assert.equal(registry.getTask(evicted.id), undefined);
+          assert.equal(registry.getTask(retained.id), retained);
+          if (acknowledge) supervisor.acknowledgeTask(evicted.id);
+          supervisor.wakeUpManager.setParentIdle(true);
+          supervisor.inbox.flush();
+
+          assert.equal(messages.length, 1);
+          const delivered = JSON.parse(messages[0]!).notifications as InboxNotification[];
+          assert.deepEqual(delivered.map((item) => item.taskId), acknowledge ? [retained.id] : [evicted.id, retained.id]);
+          if (!acknowledge) {
+            const { timestamp, ...actual } = delivered[0]!;
+            assert.deepEqual(actual, snapshot);
+            assert.equal(typeof timestamp, "number");
+          }
+          assert.equal(attempts(), phase === "retry" ? 2 : 1);
+
+          supervisor.notifyTaskSettled(evicted);
+          supervisor.notifyTaskSettled(retained);
+          supervisor.inbox.flush();
+          assert.equal(messages.length, 1);
+        } finally {
+          unsubscribe();
+          supervisor.dispose();
+          await registry.shutdown();
+        }
+      });
+    }
+  }
+});
+
 test("consuming one result preserves other pending tasks and delivery retry", async () => {
   const registry = new TaskRegistry({ createRunner: () => ({ run: async () => ({
     status: "completed", result: "Done", turns: 1, durationMs: 1,
