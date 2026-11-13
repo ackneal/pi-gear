@@ -45,26 +45,43 @@ const killProcessGroup = (pid: number | undefined): boolean => {
   }
 };
 
-export function createSandboxedBashOperations(callbacks: SandboxProcessCallbacks): BashOperations {
+type SandboxRuntimeLike = Pick<
+  typeof SandboxManager,
+  "wrapWithSandbox" | "annotateStderrWithSandboxFailures" | "cleanupAfterCommand"
+>;
+
+export function createSandboxedBashOperations(
+  callbacks: SandboxProcessCallbacks,
+  sandbox: SandboxRuntimeLike = SandboxManager,
+): BashOperations {
   return {
     async exec(command, cwd, options) {
       if (!callbacks.isAvailable()) {
         throw executionDidNotRun(callbacks, command, `Sandbox unavailable: ${callbacks.unavailableReason()}`);
+      }
+      if (options.signal?.aborted) {
+        throw new Error("Command cancelled");
       }
 
       let wrappedCommand: string;
       const commandId = randomUUID();
       try {
         const customConfig = await callbacks.customConfigFor();
-        wrappedCommand = await SandboxManager.wrapWithSandbox(command, "bash", customConfig, options.signal, {
+        if (options.signal?.aborted) {
+          throw new Error("Command cancelled");
+        }
+        wrappedCommand = await sandbox.wrapWithSandbox(command, "bash", customConfig, options.signal, {
           commandId,
           commandText: command,
         });
       } catch (error) {
         if (options.signal?.aborted) {
-          throw new Error(`Sandbox aborted while wrapping: ${errorMessage(error)}`);
+          throw new Error("Command cancelled");
         }
         throw executionDidNotRun(callbacks, command, `Sandbox preparation failed: ${errorMessage(error)}`);
+      }
+      if (options.signal?.aborted) {
+        throw new Error("Command cancelled");
       }
 
       return await new Promise<{ exitCode: number | null }>((resolve, reject) => {
@@ -80,7 +97,7 @@ export function createSandboxedBashOperations(callbacks: SandboxProcessCallbacks
         });
         const abort = (): void => {
           aborted = true;
-          if (!killProcessGroup(child.pid)) {
+          if (child.pid !== undefined && !killProcessGroup(child.pid)) {
             child.kill("SIGKILL");
           }
         };
@@ -100,10 +117,10 @@ export function createSandboxedBashOperations(callbacks: SandboxProcessCallbacks
             clearTimeout(timer);
           }
           options.signal?.removeEventListener("abort", abort);
-          const annotation = SandboxManager.annotateStderrWithSandboxFailures(commandId, stderr);
+          const annotation = sandbox.annotateStderrWithSandboxFailures(commandId, stderr);
           if (annotation !== stderr) options.onData(Buffer.from(`\nSandbox violation: ${annotation.slice(stderr.length)}\nNo unsandboxed fallback occurred; the user may manually run the original command outside Pi.\n`));
           try {
-            SandboxManager.cleanupAfterCommand();
+            sandbox.cleanupAfterCommand();
           } catch {
             // Command cleanup must not replace its process, timeout, or abort result.
             callbacks.onCleanupFailure();
@@ -120,14 +137,18 @@ export function createSandboxedBashOperations(callbacks: SandboxProcessCallbacks
         child.stderr.on("data", (data: Buffer) => { stderr += data; options.onData(data); });
         child.stdout.on("error", () => undefined);
         child.stderr.on("error", () => undefined);
-        child.on("error", (error: Error) =>
-          finish(new Error(`Sandbox process failed: ${error.message}`)),
-        );
+        child.on("error", (error: Error) => {
+          if (aborted) {
+            finish(new Error("Command cancelled"));
+          } else {
+            finish(new Error(`Sandbox process failed: ${errorMessage(error)}`));
+          }
+        });
         child.on("close", (code: number | null) => {
           if (timedOut) {
             finish(new Error(`Sandbox timed out after ${timeout} seconds`));
           } else if (aborted) {
-            finish(new Error("Sandbox aborted"));
+            finish(new Error("Command cancelled"));
           } else {
             finish({ exitCode: code });
           }
