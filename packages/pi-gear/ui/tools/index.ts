@@ -15,6 +15,7 @@ import {
   type ToolDefinition,
   type ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
+import { statSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { stripVTControlCharacters } from "node:util";
@@ -40,7 +41,7 @@ type AnyContext = {
 };
 type AnyResult = AgentToolResult<any>;
 
-type TextMode = "compact" | "detail";
+type TextMode = "compact" | "wrap" | "detail";
 type TextBlock = { value: string; mode: TextMode; truncatedHint: string | undefined };
 
 class CompactText {
@@ -48,10 +49,10 @@ class CompactText {
   constructor(value: string, mode: TextMode = "compact", truncatedHint?: string) {
     this.blocks = [{ value, mode, truncatedHint }];
   }
-  static headerAndDetail(header: string, detail: string, headerHint?: string): CompactText {
+  static headerAndDetail(header: string, detail: string, headerHint?: string, headerMode: TextMode = "compact"): CompactText {
     const component = new CompactText("");
     component.blocks = [
-      { value: header, mode: "compact", truncatedHint: headerHint },
+      { value: header, mode: headerMode, truncatedHint: headerHint },
       { value: detail, mode: "detail", truncatedHint: undefined },
     ];
     return component;
@@ -63,9 +64,11 @@ class CompactText {
       return value.split("\n").flatMap((line) =>
         mode === "compact"
           ? truncateOneLine(line, lineWidth, truncatedHint)
-          : line === ""
-            ? [""]
-            : wrapTextWithAnsi(line, Math.max(1, lineWidth - 2)).map((part) => " ".repeat(Math.min(2, Math.max(0, lineWidth - 1))) + part),
+          : mode === "wrap"
+            ? wrapTextWithAnsi(line, lineWidth)
+            : line === ""
+              ? [""]
+              : wrapTextWithAnsi(line, Math.max(1, lineWidth - 2)).map((part) => " ".repeat(Math.min(2, Math.max(0, lineWidth - 1))) + part),
       );
     });
   }
@@ -88,6 +91,29 @@ function clean(value: unknown): string {
   return typeof value === "string"
     ? value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/[\r\n]+/g, " ")
     : "";
+}
+
+function expandHome(path: string): string {
+  if (path === "~") return homedir();
+  if (path.startsWith("~/")) return resolve(homedir(), path.slice(2));
+  return path;
+}
+
+function resolveFilePath(raw: string, cwd: string): string {
+  const expanded = expandHome(raw);
+  return isAbsolute(expanded) ? resolve(expanded) : resolve(cwd, expanded);
+}
+
+const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|bmp)$/i;
+
+function isImagePath(rawPath: string): boolean {
+  return Boolean(rawPath) && IMAGE_EXTENSIONS.test(basename(rawPath));
+}
+
+function contextState(context: AnyContext): Record<string, unknown> | undefined {
+  return context?.state && typeof context.state === "object"
+    ? (context.state as Record<string, unknown>)
+    : undefined;
 }
 
 function displayPath(value: unknown, cwd: string): string {
@@ -174,6 +200,19 @@ function fileCall(label: string) {
         "\n" + label + (context.expanded ? expandedStatus : ` ${name}${theme.fg("dim", ` (${keyText("app.tools.expand")} to expand)`)}\n`), 0, 0,
       ), theme, context.lastComponent);
     }
+    if (label === "READ" && !context.isError) {
+      const rawTarget = clean(args.file_path ?? args.path ?? args.filepath);
+      const state = contextState(context);
+      const isImage = typeof state?.isImage === "boolean" ? state.isImage : isImagePath(rawTarget);
+      if (isImage) {
+        const absolutePath = rawTarget ? resolveFilePath(rawTarget, context.cwd) : "";
+        const filename = absolutePath ? basename(absolutePath) : "<path>";
+        const title = headerText(toolStatus(context), label, filename, theme);
+        if (!context.expanded || !absolutePath) return new CompactText(title, "wrap");
+        return CompactText.headerAndDetail(title, theme.fg("muted", `Path: ${absolutePath}`), undefined, "wrap");
+      }
+    }
+
     const suffix = label === "READ" ? readRange(args) : "";
     return header(toolStatus(context), label, `${displayPath(args.file_path ?? args.path ?? args.filepath, context.cwd)}${suffix}`, theme);
   };
@@ -290,6 +329,73 @@ export function lspToolRenderers(
   return { renderShell: "self", renderCall: paddedRenderer(callFn), renderResult: paddedRenderer(resultFn) };
 }
 
+type ImageContentItem = { type: "image"; data: string; mimeType: string };
+
+function imageFormatLabel(mimeType: string | undefined): string | undefined {
+  if (!mimeType) return undefined;
+  const subtype = mimeType.split(";")[0]?.trim().split("/")[1]?.trim();
+  return subtype ? subtype.toUpperCase() : undefined;
+}
+
+function imageDimensionsText(image: ImageContentItem, text: string): string | undefined {
+  const resizedMatch = text.match(/original (\d+)x(\d+)/);
+  if (resizedMatch && Number(resizedMatch[1]) > 0 && Number(resizedMatch[2]) > 0) {
+    return `${resizedMatch[1]}\u00d7${resizedMatch[2]}`;
+  }
+
+  try {
+    const dims = getImageDimensions(image.data, image.mimeType);
+    if (dims && dims.widthPx > 0 && dims.heightPx > 0) {
+      return `${dims.widthPx}\u00d7${dims.heightPx}`;
+    }
+  } catch {}
+  return undefined;
+}
+
+function formatByteSize(bytes: number): string {
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) {
+    const kb = bytes / 1024;
+    return `${(kb < 10 ? kb.toFixed(1) : Math.round(kb).toString()).replace(/\.0$/, "")} KB`;
+  }
+  if (bytes < 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, "")} MB`;
+  }
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1).replace(/\.0$/, "")} GB`;
+}
+
+function resolveImageFileSize(result: AnyResult, args: Record<string, unknown>, cwd: string): number | undefined {
+  const detailSize = result.details?.fileSize;
+  if (typeof detailSize === "number" && Number.isFinite(detailSize) && detailSize >= 0) {
+    return detailSize;
+  }
+
+  const rawPath = clean(args.file_path ?? args.path ?? args.filepath);
+  if (!rawPath) return undefined;
+
+  try {
+    const stats = statSync(resolveFilePath(rawPath, cwd), { throwIfNoEntry: false });
+    return stats?.isFile() ? stats.size : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function imageSummaryText(
+  image: ImageContentItem,
+  text: string,
+  result: AnyResult,
+  args: Record<string, unknown>,
+  cwd: string,
+): string {
+  const format = imageFormatLabel(image.mimeType);
+  const dimensions = imageDimensionsText(image, text);
+  const bytes = resolveImageFileSize(result, args, cwd);
+  const size = bytes !== undefined ? formatByteSize(bytes) : undefined;
+
+  return [format, dimensions, size].filter((part): part is string => Boolean(part)).join(" · ");
+}
+
 function fileResult(kind: "read" | "edit" | "write", base: AnyDefinition) {
   return (result: AnyResult, options: ToolRenderResultOptions, theme: Theme, context: AnyContext) => {
     const text = textResult(result);
@@ -316,12 +422,30 @@ function fileResult(kind: "read" | "edit" | "write", base: AnyDefinition) {
         body.addChild(new Spacer(1));
         return skillBox(body, theme, context.lastComponent);
       }
+
+      const imageItem = result.content.find((item): item is ImageContentItem => item.type === "image");
+      const state = contextState(context);
+      if (!options.isPartial && state) {
+        const hasImage = imageItem !== undefined;
+        const rawTarget = clean(args.file_path ?? args.path ?? args.filepath);
+        const previous = typeof state.isImage === "boolean" ? state.isImage : isImagePath(rawTarget);
+        state.isImage = hasImage;
+        if (previous !== hasImage) {
+          queueMicrotask(() => context.invalidate?.());
+        }
+      }
+
       if (options.expanded && base.renderResult) {
         const lastComponent = context.lastComponent instanceof Text ? context.lastComponent : undefined;
         return indentDetails(base.renderResult(result, options, theme, { ...context, lastComponent } as never), true);
       }
-      const images = result.content.filter((item) => item.type === "image").length;
-      return summary(images > 0 ? count(images, "image") : count(readLineCount(result, text), "line"), theme);
+
+      if (imageItem) {
+        const summaryText = imageSummaryText(imageItem, text, result, args, context.cwd);
+        return summaryText ? summary(summaryText, theme) : empty();
+      }
+
+      return summary(count(readLineCount(result, text), "line"), theme);
     }
 
     if (kind === "edit") {
