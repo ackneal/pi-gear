@@ -1,42 +1,23 @@
 {
-  "name": "pi-gear",
+  "name": "pi-gear-monorepo",
   "version": "0.1.0",
-  "description": "Pi coding-agent extension with macOS-sandboxed Bash, filesystem and network policy, task planning, subagents, and LSP tools.",
-  "keywords": [
-    "pi-package",
-    "pi-extension",
-    "pi-coding-agent",
-    "coding-agent",
-    "ai-agent",
-    "macos-sandbox",
-    "filesystem-policy",
-    "network-policy",
-    "task-planning",
-    "subagents",
-    "language-server-protocol",
-    "lsp"
-  ],
+  "private": true,
   "packageManager": "bun@1.3.13",
-  "license": "MIT",
+  "workspaces": [
+    "packages/*"
+  ],
   "type": "module",
   "pi": {
     "extensions": [
-      "./index.ts"
+      "./packages/pi-gear/index.ts"
     ]
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --experimental-strip-types --test capabilities/*/*.test.ts commands/*.test.ts config/*.test.ts context/*/*.test.ts execution/*.test.ts execution/*/*.test.ts execution/*/*/*.test.ts lifecycle/*.test.ts lsp/*.test.ts workspace/*.test.ts subagents/*/*.test.ts subagents/*/*/*.test.ts ui/*/*.test.ts",
-    "test:sandbox:macos": "node --experimental-strip-types --test execution/sandbox/integration.test.ts && node --experimental-strip-types --test --test-name-pattern='sandbox spawn abort and timeout' execution/sandbox/spawn.test.ts"
-  },
-  "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "0.0.71",
-    "@ff-labs/fff-bun": "0.10.5"
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=1.0.0 <2.0.0",
-    "@earendil-works/pi-tui": ">=1.0.0 <2.0.0",
-    "typebox": "*"
+    "test": "node --experimental-strip-types --test --test-timeout=30000 packages/pi-rostrix/tests/**/*.test.ts packages/pi-gear/agents/*.test.ts packages/pi-gear/capabilities/*/*.test.ts packages/pi-gear/commands/*.test.ts packages/pi-gear/config/*.test.ts packages/pi-gear/context/*/*.test.ts packages/pi-gear/execution/*.test.ts packages/pi-gear/execution/*/*.test.ts packages/pi-gear/execution/*/*/*.test.ts packages/pi-gear/lifecycle/*.test.ts packages/pi-gear/lsp/*.test.ts packages/pi-gear/workspace/*.test.ts packages/pi-gear/subagents/*.test.ts packages/pi-gear/subagents/*/*.test.ts packages/pi-gear/subagents/*/*/*.test.ts packages/pi-gear/ui/*/*.test.ts",
+    "test:rostrix": "cd packages/pi-rostrix && bun run test",
+    "test:gear": "cd packages/pi-gear && bun run test",
+    "test:sandbox:macos": "cd packages/pi-gear && bun run test:sandbox:macos"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.0.2",

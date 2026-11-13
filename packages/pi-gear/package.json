@@ -1,0 +1,48 @@
+{
+  "name": "pi-gear",
+  "version": "0.1.0",
+  "description": "Pi coding-agent extension with macOS-sandboxed Bash, filesystem and network policy, task planning, subagents, and LSP tools.",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "coding-agent",
+    "ai-agent",
+    "macos-sandbox",
+    "filesystem-policy",
+    "network-policy",
+    "task-planning",
+    "subagents",
+    "language-server-protocol",
+    "lsp"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --experimental-strip-types --test --test-timeout=30000 agents/*.test.ts capabilities/*/*.test.ts commands/*.test.ts config/*.test.ts context/*/*.test.ts execution/*.test.ts execution/*/*.test.ts execution/*/*/*.test.ts lifecycle/*.test.ts lsp/*.test.ts workspace/*.test.ts subagents/*.test.ts subagents/*/*.test.ts subagents/*/*/*.test.ts ui/*/*.test.ts",
+    "test:sandbox:macos": "node --experimental-strip-types --test --test-timeout=30000 execution/sandbox/integration.test.ts && node --experimental-strip-types --test --test-timeout=30000 --test-name-pattern='sandbox spawn abort and timeout' execution/sandbox/spawn.test.ts"
+  },
+  "dependencies": {
+    "pi-rostrix": "0.1.0",
+    "@anthropic-ai/sandbox-runtime": "0.0.71",
+    "@ff-labs/fff-bun": "0.10.5"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=1.0.0 <2.0.0",
+    "@earendil-works/pi-tui": ">=1.0.0 <2.0.0",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.0.2",
+    "@earendil-works/pi-tui": "1.0.2",
+    "typebox": "1.3.13",
+    "@types/node": "26.2.0",
+    "typescript": "7.0.2"
+  }
+}

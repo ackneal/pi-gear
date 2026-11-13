@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "index.ts",
+    "commands/**/*.ts",
+    "context/**/*.ts",
+    "config/**/*.ts",
+    "execution/**/*.ts",
+    "capabilities/**/*.ts",
+    "lifecycle/**/*.ts",
+    "subagents/**/*.ts",
+    "ui/**/*.ts",
+    "workspace/**/*.ts"
+  ]
+}

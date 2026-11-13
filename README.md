@@ -46,13 +46,13 @@ pi-gear loads policy from:
 ~/.pi/agent/pi-gear/config.json
 ```
 
-More precisely, it uses `<PI_CODING_AGENT_DIR>/pi-gear/config.json`. If that file does not exist, the repository's [`config.json`](config.json) is used as the default and copyable example. An invalid user config fails closed; pi-gear does not silently fall back to defaults.
+More precisely, it uses `<PI_CODING_AGENT_DIR>/pi-gear/config.json`. If that file does not exist, the repository's [`config.json`](packages/pi-gear/config.json) is used as the default and copyable example. An invalid user config fails closed; pi-gear does not silently fall back to defaults.
 
 Start a user config from `config.json` and retain its schema reference for editor validation, autocomplete, and tooltips:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/ackneal/pi-gear/main/config.schema.json",
+  "$schema": "https://raw.githubusercontent.com/ackneal/pi-gear/main/packages/pi-gear/config.schema.json",
   "version": 1,
   "sandbox": {
     "enabled": true,
@@ -62,7 +62,7 @@ Start a user config from `config.json` and retain its schema reference for edito
 }
 ```
 
-`$schema` is optional metadata and does not affect runtime behavior. Unknown fields and invalid values are rejected. The complete contract is in [`config.schema.json`](config.schema.json).
+`$schema` is optional metadata and does not affect runtime behavior. Unknown fields and invalid values are rejected. The complete contract is in [`config.schema.json`](packages/pi-gear/config.schema.json).
 
 ## Sandbox configuration
 
@@ -145,17 +145,45 @@ Each extension may belong to only one server. `languageIds` must map every confi
 
 - **`/gear:doctor`** — reports sandbox state (enabled and available, enabled but unavailable, or disabled by configuration), filesystem/network behavior, subagent settings, and LSP availability.
 - **`/gear:plan`** — shows the current task plan without starting a model turn.
-- **`/gear:subagent-model`** — sets persistent model and thinking defaults in `~/.pi/agent/pi-gear/runtime.json`.
+- **`/gear:subagent-model`** — sets persistent model and thinking defaults in `~/.pi/agent/gear/runtime.json`.
 - **`task_state`** — manages a goal, outcome steps, constraints, and decision-relevant findings.
 - **`diagnostics`** — returns LSP diagnostics for changed files or the workspace.
 - **`navigation`** — resolves definitions or references with 1-based positions.
-- **`researcher`** — delegates focused read-only research to an isolated Pi child process.
-- **`worker`** — delegates bounded implementation work to a child process.
-- **`reviewer`** — delegates focused read-only code review to a child process.
+- **`researcher`** — delegates focused read-only research to a child agent session.
+- **`worker`** — delegates bounded implementation work to a child agent session.
+- **`reviewer`** — delegates focused read-only code review to a child agent session.
+
+These tools create in-memory child sessions in the host process. Children receive explicit task inputs rather than a copy of the parent conversation. Their tool and extension setup is scoped to the child session; this is not an OS process isolation boundary.
 
 Expanded Agent results show the task, all retained tool-call summaries, and then the answer. Activity omits raw tool output and thinking. Older activity is marked when the runtime retention limit drops entries.
 
+Rostrix retains up to 100 settled task records in memory by default. It removes older records after runner cleanup, without removing running tasks or pending notification payloads. SDK callers can set `TaskControllerOptions.maxRetainedTasks` to a positive integer. Gear can still observe saved completion results from the session history; standalone Rostrix status and wait calls report removed records as not found. This limit does not truncate saved session history.
+
 Successful Pi `edit` and `write` calls synchronize matching LSP files and report new or changed diagnostics automatically.
+
+## Agent definitions and execution
+
+An agent definition describes a role and its policies. Resolving it applies definition inheritance and supplied parent limits; it does not create a session or start a task.
+
+Activating a definition applies tools, MCP registrations, and prompt settings to the existing session. It preserves conversation history, but changes the context supplied to later model calls. Activation does not select a different model or thinking level.
+
+Delegating a task creates a child session with its own conversation history. The current runner prefixes the task input with the resolved role prompt. It applies tool restrictions and child MCP configuration, and selects an explicitly requested model before the definition's preferred model.
+
+Skills allow/deny, model fallback, and the definition's `reviewIntervalSeconds` and `maxDurationSeconds` fields are parsed but are not execution guarantees. The explicit task timeout is enforced separately. `maxConcurrent` currently limits active tasks for a target agent ID, not the number of children a parent can launch.
+
+Background completion notifications follow each task's `wakeOn` settings. Notifications wait while the parent is busy and are delivered after its current run settles. Ending a parent turn does not cancel the task or close the session.
+
+### Developer API
+
+```ts
+import { init } from "pi-rostrix";
+
+const runtime = init(pi);
+```
+
+`init(pi, options?)` returns the shared `Runtime`. Options `autoLoadDefinitions`, `autoRegisterTaskTools`, and `autoRegisterAgentControls` default to enabled. Later calls can enable disabled features without duplicate registration or replacement of runtime state.
+
+Shutdown cancels active tasks and disposes the runtime; reload creates a new runtime. Gear tools return a `taskId`; pass it to `subagent_observe` or `subagent_cancel`.
 
 ## Security behavior and limitations
 
@@ -196,6 +224,6 @@ bun run test
 
 Sandbox integration tests require macOS, `/usr/bin/sandbox-exec`, and permission to create Runtime sockets under `/tmp/claude`; restricted environments may report `EPERM`.
 
-Main areas: `config/` parses policy, `execution/` implements sandbox and filesystem enforcement, `context/` manages prompt/task state, `subagents/` runs delegated agents, `lsp/` provides code intelligence, and `ui/` renders Pi components.
+`packages/pi-gear/` contains the coding-agent extension. `packages/pi-rostrix/` provides agent definitions, activation, and task execution.
 
 Released under the [MIT License](LICENSE).
