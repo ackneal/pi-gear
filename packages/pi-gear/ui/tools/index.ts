@@ -1,4 +1,4 @@
-import { configureOutputPadding, indentDetails, paddedRenderer } from "./padding.ts";
+import { configureOutputPadding, indentDetails, padOutput, paddedRenderer } from "./padding.ts";
 import {
   createBashToolDefinition,
   createEditToolDefinition,
@@ -15,7 +15,8 @@ import {
   type ToolDefinition,
   type ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
-import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { statSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { stripVTControlCharacters } from "node:util";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
@@ -147,9 +148,41 @@ function parseArgsObject(rawArgs: unknown): Record<string, unknown> {
   return {};
 }
 
-function skillPath(args: Record<string, unknown>): string | undefined {
-  const path = args.file_path ?? args.path ?? args.filepath;
-  return typeof path === "string" && basename(path) === "SKILL.md" ? path : undefined;
+type SkillTarget = {
+  readonly skillName: string;
+  readonly skillDir: string;
+  readonly relativePath: string | undefined;
+};
+
+function isRegularFile(path: string): boolean {
+  try {
+    return Boolean(statSync(path, { throwIfNoEntry: false })?.isFile());
+  } catch {
+    return false;
+  }
+}
+
+function resolveSkillTarget(args: Record<string, unknown>, cwd: string): SkillTarget | undefined {
+  const raw = args.file_path ?? args.path ?? args.filepath;
+  if (typeof raw !== "string" || !raw) return undefined;
+
+  const expanded = raw.startsWith("~/") ? resolve(homedir(), raw.slice(2)) : raw;
+  const absolute = isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
+  if (basename(absolute) === "SKILL.md") {
+    const skillDir = dirname(absolute);
+    return { skillName: basename(skillDir), skillDir, relativePath: undefined };
+  }
+
+  let dir = dirname(absolute);
+  const home = homedir();
+  while (dir !== dirname(dir) && dir !== home) {
+    if (isRegularFile(join(dir, "SKILL.md"))) {
+      const relativePath = relative(dir, absolute).split(sep).join("/");
+      return { skillName: basename(dir), skillDir: dir, relativePath: relativePath || undefined };
+    }
+    dir = dirname(dir);
+  }
+  return undefined;
 }
 
 function skillBox(component: Component, theme: Theme, previous?: unknown): Box {
@@ -163,15 +196,16 @@ function skillBox(component: Component, theme: Theme, previous?: unknown): Box {
 function fileCall(label: string) {
   return (rawArgs: unknown, theme: Theme, context: AnyContext) => {
     const args = parseArgsObject(rawArgs ?? context?.args);
-    const skill = label === "READ" ? skillPath(args) : undefined;
+    const skill = label === "READ" ? resolveSkillTarget(args, context.cwd) : undefined;
     if (skill) {
       const status = toolStatus(context);
       const state = status === "success" ? "" : `${statusMark(status, theme)} `;
-      const label = theme.fg("customMessageLabel", theme.bold("[skill]"));
-      const name = state + theme.fg("customMessageText", `${basename(dirname(skill))}${readRange(args)}`);
-      const expandedStatus = state || readRange(args) ? ` ${name}` : "";
+      const badge = theme.fg("customMessageLabel", theme.bold("[skill]"));
+      const target = skill.relativePath ? `${skill.skillName}: ${skill.relativePath}` : skill.skillName;
+      const name = state + theme.fg("customMessageText", `${target}${readRange(args)}`);
+      const expandedStatus = state || readRange(args) || skill.relativePath ? ` ${name}` : "";
       return skillBox(new Text(
-        "\n" + label + (context.expanded ? expandedStatus : ` ${name}${theme.fg("dim", ` (${keyText("app.tools.expand")} to expand)`)}\n`), 0, 0,
+        "\n" + badge + (context.expanded ? expandedStatus : ` ${name}${theme.fg("dim", ` (${keyText("app.tools.expand")} to expand)`)}\n`), 0, 0,
       ), theme, context.lastComponent);
     }
     const suffix = label === "READ" ? readRange(args) : "";
@@ -297,22 +331,28 @@ function fileResult(kind: "read" | "edit" | "write", base: AnyDefinition) {
 
     if (kind === "read") {
       const args = parseArgsObject(context.args);
-      if (skillPath(args) && result.content.every((item) => item.type === "text")) {
+      const skill = resolveSkillTarget(args, context.cwd);
+      if (skill && result.content.every((item) => item.type === "text")) {
         if (!options.expanded) {
           return result.details?.truncation?.truncated || /\[(?:Showing|Output truncated|\d+ more lines? in file\.)/.test(text)
-            ? summary("Partial skill · expand to view read limits", theme)
+            ? summary(skill.relativePath ? "Partial file · expand to view read limits" : "Partial skill · expand to view read limits", theme)
             : empty();
         }
-        const startsAtBeginning = args.offset == null || args.offset === 1;
-        const content = startsAtBeginning ? text.replace(/^---\r?\n(?:.*\r?\n)*?---(?:\r?\n|$)/, "") : text;
-        const path = skillPath(args)!;
-        const name = basename(dirname(path));
-        const expandedPath = path.startsWith("~/") ? resolve(homedir(), path.slice(2)) : path;
-        const directory = isAbsolute(expandedPath) ? dirname(expandedPath) : resolve(context.cwd, dirname(expandedPath));
         const body = new Container();
-        body.addChild(new Markdown(`**${name}**\n\nReferences are relative to ${directory}.\n\n${content}`, 0, 0, getMarkdownTheme(), {
-          color: (value) => theme.fg("customMessageText", value),
-        }));
+        if (!skill.relativePath) {
+          const startsAtBeginning = args.offset == null || args.offset === 1;
+          const content = startsAtBeginning ? text.replace(/^---\r?\n(?:.*\r?\n)*?---(?:\r?\n|$)/, "") : text;
+          body.addChild(new Markdown(`**${skill.skillName}**\n\nReferences are relative to ${skill.skillDir}.\n\n${content}`, 0, 0, getMarkdownTheme(), {
+            color: (value) => theme.fg("customMessageText", value),
+          }));
+        } else {
+          const normalized = text.replace(/\r\n?/g, "\n").replace(/\t/g, "  ");
+          const language = getLanguageFromPath(skill.relativePath);
+          const lines = language
+            ? highlightCode(normalized, language)
+            : normalized.split("\n").map((line) => theme.fg("customMessageText", line));
+          body.addChild(new Text(lines.join("\n"), 0, 0));
+        }
         body.addChild(new Spacer(1));
         return skillBox(body, theme, context.lastComponent);
       }
@@ -443,18 +483,18 @@ function createFileToolDefinition(
       : createWriteToolDefinition(cwd);
   const callFn = kind === "write" ? writeCall : fileCall(kind.toUpperCase());
   const resultFn = fileResult(kind, base);
-  const paddedCall = paddedRenderer(callFn);
-  const paddedResult = paddedRenderer(resultFn);
 
   return {
     ...base,
     renderShell: "self",
-    renderCall: (args, theme, context) => kind === "read" && skillPath(parseArgsObject(args ?? context.args))
-      ? callFn(args, theme, context)
-      : paddedCall(args, theme, context),
-    renderResult: (result, options, theme, context) => kind === "read" && skillPath(parseArgsObject(context.args))
-      ? resultFn(result, options, theme, context)
-      : paddedResult(result, options, theme, context),
+    renderCall: (args, theme, context) => {
+      const component = callFn(args, theme, context);
+      return component instanceof Box ? component : padOutput(component);
+    },
+    renderResult: (result, options, theme, context) => {
+      const component = resultFn(result, options, theme, context);
+      return component instanceof Box ? component : padOutput(component);
+    },
   };
 }
 
