@@ -385,8 +385,8 @@ test("TaskController forwards modelRuntime and extracts runtime from modelRegist
 
 test("TaskController enforces supervision.maxDurationSeconds as default and ceiling", async (t) => {
   for (const row of [
-    { name: "neither set", maxDurationSeconds: undefined, timeoutSeconds: undefined, expected: undefined },
-    { name: "non-positive call timeout ignored when ceiling unset", maxDurationSeconds: undefined, timeoutSeconds: 0, expected: undefined },
+    { name: "neither set uses 24h default", maxDurationSeconds: undefined, timeoutSeconds: undefined, expected: 86_400 },
+    { name: "non-positive call timeout ignored when ceiling unset, uses 24h default", maxDurationSeconds: undefined, timeoutSeconds: 0, expected: 86_400 },
     { name: "definition default applies", maxDurationSeconds: 0.05, timeoutSeconds: undefined, expected: 0.05 },
     { name: "zero call timeout cannot bypass ceiling", maxDurationSeconds: 0.05, timeoutSeconds: 0, expected: 0.05 },
     { name: "negative call timeout cannot bypass ceiling", maxDurationSeconds: 0.05, timeoutSeconds: -5, expected: 0.05 },
@@ -397,8 +397,9 @@ test("TaskController enforces supervision.maxDurationSeconds as default and ceil
     { name: "zero maxDurationSeconds ignored so call timeout still applies", maxDurationSeconds: 0, timeoutSeconds: 0.04, expected: 0.04 },
     { name: "negative maxDurationSeconds ignored so call timeout still applies", maxDurationSeconds: -5, timeoutSeconds: 0.04, expected: 0.04 },
     { name: "NaN maxDurationSeconds ignored so call timeout still applies", maxDurationSeconds: Number.NaN, timeoutSeconds: 0.04, expected: 0.04 },
-    { name: "Infinity maxDurationSeconds ignored", maxDurationSeconds: Number.POSITIVE_INFINITY, timeoutSeconds: undefined, expected: undefined },
-    { name: "oversized timeout clamped to 24h ceiling", maxDurationSeconds: 30 * 86_400, timeoutSeconds: undefined, expected: 86_400 },
+    { name: "Infinity maxDurationSeconds ignored, uses 24h default", maxDurationSeconds: Number.POSITIVE_INFINITY, timeoutSeconds: undefined, expected: 86_400 },
+    { name: "values above 24h default are allowed", maxDurationSeconds: 2 * 86_400, timeoutSeconds: undefined, expected: 2 * 86_400 },
+    { name: "oversized timeout clamped to Node timer limit", maxDurationSeconds: 30 * 86_400, timeoutSeconds: undefined, expected: 2_147_483 },
   ]) {
     await t.test(row.name, async (t) => {
       const registry = registryFixture(t);

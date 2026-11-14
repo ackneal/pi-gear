@@ -148,7 +148,8 @@ export class TaskController {
       }
     }
 
-    const MAX_TASK_TIMEOUT_SECONDS = 86_400;
+    const DEFAULT_TASK_TIMEOUT_SECONDS = 86_400;
+    const MAX_NODE_TIMEOUT_SECONDS = Math.floor(2_147_483_647 / 1000);
     const taskId = `task-${this._nextId++}-${Date.now().toString(36)}`;
     const now = Date.now();
     const normalizePositiveTimeout = (seconds: unknown): number | undefined =>
@@ -158,10 +159,8 @@ export class TaskController {
     const rawTimeoutSeconds =
       normalizedCallTimeout !== undefined && normalizedMaxDuration !== undefined
         ? Math.min(normalizedCallTimeout, normalizedMaxDuration)
-        : (normalizedCallTimeout ?? normalizedMaxDuration);
-    const effectiveTimeoutSeconds = rawTimeoutSeconds !== undefined
-      ? Math.min(rawTimeoutSeconds, MAX_TASK_TIMEOUT_SECONDS)
-      : undefined;
+        : (normalizedCallTimeout ?? normalizedMaxDuration ?? DEFAULT_TASK_TIMEOUT_SECONDS);
+    const effectiveTimeoutSeconds = Math.min(rawTimeoutSeconds, MAX_NODE_TIMEOUT_SECONDS);
 
     const taskRecord: TaskRecord = {
       id: taskId,
