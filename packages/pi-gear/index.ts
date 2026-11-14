@@ -16,17 +16,30 @@ export default async function extension(pi: ExtensionAPI): Promise<void> {
   return setupExtension(pi, { child: process.env.PI_GEAR_CHILD === "1" });
 }
 
-export async function setupExtension(pi: ExtensionAPI, options: { child: boolean }): Promise<void> {
-  const { child } = options;
+export async function setupExtension(
+  pi: ExtensionAPI,
+  options: { child: boolean; fffEndpoint?: ((cwd?: string) => string | undefined) | undefined },
+): Promise<void> {
+  const { child, fffEndpoint } = options;
   const config = await loadExtensionConfig();
   const execution = setupExecution(pi, config, { child });
   const lifecycle = setupLifecycle(pi, { child });
-  const workspace = setupWorkspace(pi, execution.filesystem, lifecycle.fff);
+  const fffSource = fffEndpoint
+    ? {
+        current: lifecycle.fff.current,
+        endpoint: (cwd?: string) => lifecycle.fff.endpoint(cwd) ?? fffEndpoint(cwd),
+        failure: lifecycle.fff.failure,
+      }
+    : lifecycle.fff;
+  const workspace = setupWorkspace(pi, execution.filesystem, fffSource);
 
   const runtime = init(pi, {
     autoRegisterTaskTools: false,
     autoRegisterAgentControls: false,
     autoLoadDefinitions: !child,
+    ...(config.subagents?.stallTimeoutSeconds !== undefined
+      ? { stallTimeoutMs: config.subagents.stallTimeoutSeconds * 1000 }
+      : {}),
   });
   for (const definition of BUILTIN_AGENT_DEFINITIONS) {
     if (!runtime.getAgent(definition.id)) {
@@ -43,6 +56,6 @@ export async function setupExtension(pi: ExtensionAPI, options: { child: boolean
   // Children share runtime services but cannot spawn another layer of subagents.
   if (child) return;
 
-  const subagents = setupSubagents(pi, workspace, runtime);
+  const subagents = setupSubagents(pi, workspace, runtime, config);
   setupCommands(pi, { execution, subagents, lsp, workspace, runtime });
 }

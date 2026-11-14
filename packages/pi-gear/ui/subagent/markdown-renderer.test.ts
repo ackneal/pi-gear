@@ -96,7 +96,7 @@ const cases: {
     task: "task **literal**",
     assertOutput: (text) => {
       assert.match(text, /task \*\*literal\*\*/);
-      assert.match(text, /Execution history/);
+      assert.match(text, /Tool activity/);
       assert.match(text, /activity \*\*literal\*\*/);
       assert.match(text, /Rendered answer/);
       assert.doesNotMatch(text, /\*\*Rendered answer\*\*/);

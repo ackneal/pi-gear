@@ -96,7 +96,7 @@ test("delegation guidance preserves research terms and explains asynchronous sub
   assert.match(prompt, /Use reviewer for independent read-only review when requested or after non-trivial code changes pass focused checks/);
   assert.match(prompt, /Pass the change scope, requirements or intent in context, and applicable coding or review skill paths in skills/);
   assert.match(prompt, /Reviewer does not modify files; evaluate findings, fix confirmed issues, and re-verify in the main agent/);
-  assert.match(prompt, /Subagents do not inherit the parent agent's skills; provide the absolute path of any skill needed for the delegated task/);
+  assert.match(prompt, /Worker and reviewer inherit user skills automatically; researchers do not inherit skills, so provide the absolute path for any project-local or extra skill needed/);
   for (const guidance of [
     "Dispatch does not require observation.",
     "Notifications depend on each task's returned wakeOn triggers.",

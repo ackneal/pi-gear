@@ -13,6 +13,9 @@ export function toTaskSnapshot(task: TaskRecord, modelSelection?: ModelSelection
     activities: task.activities.filter((activity) => activity.kind !== "message"),
     ...(task.finishedAt !== undefined ? { finishedAt: task.finishedAt } : {}),
     ...(task.activitiesTruncated !== undefined ? { activitiesTruncated: task.activitiesTruncated } : {}),
+    ...(task.toolActivitiesTruncated !== undefined
+      ? { toolActivitiesTruncated: task.toolActivitiesTruncated }
+      : task.activitiesTruncated ? { toolActivitiesTruncated: false } : {}),
     ...(task.result !== undefined ? { result: task.result } : {}),
     ...(task.error !== undefined ? { error: task.error } : {}),
     ...(modelSelection ? { modelSelection } : {}),
@@ -24,6 +27,7 @@ export function toTaskSnapshot(task: TaskRecord, modelSelection?: ModelSelection
       ...(usage.cacheWrite1h !== undefined ? { cacheWrite1h: usage.cacheWrite1h } : {}),
       ...(usage.reasoning !== undefined ? { reasoning: usage.reasoning } : {}),
       ...(usage.totalTokens !== undefined ? { totalTokens: usage.totalTokens } : {}),
+      ...(usage.estimated ? { estimated: true } : {}),
       ...(usage.cost ? { cost: {
         ...(usage.cost.input !== undefined ? { input: usage.cost.input } : {}),
         ...(usage.cost.output !== undefined ? { output: usage.cost.output } : {}),

@@ -382,3 +382,49 @@ test("TaskController forwards modelRuntime and extracts runtime from modelRegist
     });
   }
 });
+
+test("TaskController enforces supervision.maxDurationSeconds as default and ceiling", async (t) => {
+  for (const row of [
+    { name: "neither set", maxDurationSeconds: undefined, timeoutSeconds: undefined, expected: undefined },
+    { name: "non-positive call timeout ignored when ceiling unset", maxDurationSeconds: undefined, timeoutSeconds: 0, expected: undefined },
+    { name: "definition default applies", maxDurationSeconds: 0.05, timeoutSeconds: undefined, expected: 0.05 },
+    { name: "zero call timeout cannot bypass ceiling", maxDurationSeconds: 0.05, timeoutSeconds: 0, expected: 0.05 },
+    { name: "negative call timeout cannot bypass ceiling", maxDurationSeconds: 0.05, timeoutSeconds: -5, expected: 0.05 },
+    { name: "NaN call timeout cannot bypass ceiling", maxDurationSeconds: 0.05, timeoutSeconds: Number.NaN, expected: 0.05 },
+    { name: "Infinity call timeout cannot bypass ceiling", maxDurationSeconds: 0.05, timeoutSeconds: Number.POSITIVE_INFINITY, expected: 0.05 },
+    { name: "narrower call timeout wins", maxDurationSeconds: 0.2, timeoutSeconds: 0.04, expected: 0.04 },
+    { name: "definition ceiling caps longer call timeout", maxDurationSeconds: 0.05, timeoutSeconds: 10, expected: 0.05 },
+  ]) {
+    await t.test(row.name, async (t) => {
+      const registry = registryFixture(t);
+      const profile: ResolvedAgentDefinition = {
+        ...createMockProfile(),
+        supervision: {
+          wakeOn: Object.freeze(new Set<"completed" | "failed" | "needs_input" | "stalled">()),
+          ...(row.maxDurationSeconds !== undefined ? { maxDurationSeconds: row.maxDurationSeconds } : {}),
+        },
+      };
+
+      const task = registry.spawn({
+        agent: profile,
+        task: "Check duration limit",
+        ...(row.timeoutSeconds !== undefined ? { timeoutSeconds: row.timeoutSeconds } : {}),
+      });
+
+      assert.equal(task.timeoutSeconds, row.expected);
+
+      if (row.expected !== undefined && row.expected <= 0.05) {
+        const keepAlive = setTimeout(() => {}, 2000);
+        try {
+          const settled = await registry.wait(task.id, { timeoutSeconds: 2 });
+          assert.equal(settled.status, "aborted");
+          assert.match(settled.error ?? "", new RegExp(`timed out after ${row.expected}s`));
+        } finally {
+          clearTimeout(keepAlive);
+        }
+      } else {
+        await registry.cancel(task.id, "Done");
+      }
+    });
+  }
+});

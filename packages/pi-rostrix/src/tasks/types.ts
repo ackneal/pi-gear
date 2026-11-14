@@ -10,6 +10,7 @@ export type TaskUsage = {
   cacheWrite1h?: number | undefined;
   reasoning?: number | undefined;
   totalTokens?: number | undefined;
+  estimated?: boolean | undefined;
   cost?: {
     input?: number | undefined;
     output?: number | undefined;
@@ -44,6 +45,7 @@ export interface TaskRecord {
   usage?: TaskUsage | undefined;
   activities: TaskActivity[];
   activitiesTruncated?: boolean | undefined;
+  toolActivitiesTruncated?: boolean | undefined;
   readonly timeoutSeconds?: number | undefined;
 }
 

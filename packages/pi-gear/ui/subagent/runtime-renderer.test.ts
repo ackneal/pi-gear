@@ -49,7 +49,7 @@ for (const source of ["snapshot", "subscription"] as const) {
         id: "task-evidence", agentId: "researcher", task: "Inspect",
         depth: 0, targetFiles: [], wakeOn: [], status: "completed", revision: 5,
         createdAt: 1000, startedAt: 1000, lastActivityAt: 3000, finishedAt: 3000,
-        result: "Verified answer", activitiesTruncated: true,
+        result: "Verified answer", activitiesTruncated: true, toolActivitiesTruncated: true,
         activities: [
           { kind: "message", role: "assistant", text: "Not an activity row" },
           { kind: "tool", id: "tool-1", name: "read", args: { path: "evidence.txt" }, status: "success", result: "Evidence" },
@@ -87,7 +87,7 @@ for (const source of ["snapshot", "subscription"] as const) {
       assert.doesNotMatch(output, /aborted|Not an activity row/);
       if (expanded) {
         assert.match(output, /Read · success · evidence\.txt/);
-        assert.match(output, /Earlier activity omitted/);
+        assert.match(output, /Earlier tool activity omitted/);
         assert.match(output, /Verified answer/);
       }
     });

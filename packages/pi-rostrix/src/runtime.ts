@@ -24,6 +24,7 @@ export interface RuntimeOptions {
   commandName?: string | false;
   shortcut?: string;
   statusKey?: string;
+  stallTimeoutMs?: number;
 }
 
 export interface Runtime {
@@ -66,10 +67,14 @@ class RuntimeImpl implements Runtime {
   private _discoveryPromise?: Promise<AgentDiscoveryResult> | undefined;
   private _discoveredAgents: DiscoveredAgent[] = [];
 
-  constructor(pi: ExtensionAPI) {
+  constructor(pi: ExtensionAPI, options: RuntimeOptions = {}) {
     this._activator = new AgentActivator(pi);
     this._tasks = new TaskController();
-    this._monitor = new TaskMonitor(this._tasks, pi);
+    this._monitor = new TaskMonitor(
+      this._tasks,
+      pi,
+      options.stallTimeoutMs !== undefined ? { defaultStallTimeoutMs: options.stallTimeoutMs } : undefined,
+    );
     this._initialized = true;
 
     this._unsubscribeTasks = this._tasks.subscribe("*", (task) => {
@@ -240,7 +245,7 @@ export function init(pi: ExtensionAPI, options: RuntimeOptions = {}): Runtime {
   const globalObj = globalThis as any;
   let runtime = globalObj[RUNTIME_SYMBOL] as RuntimeImpl | undefined;
   if (!runtime) {
-    runtime = new RuntimeImpl(pi);
+    runtime = new RuntimeImpl(pi, options);
     globalObj[RUNTIME_SYMBOL] = runtime;
   }
 

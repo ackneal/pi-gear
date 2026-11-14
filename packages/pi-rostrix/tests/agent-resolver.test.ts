@@ -5,6 +5,8 @@ import {
   AgentRegistry,
   AgentResolver,
   matchesPattern,
+  isAgentPromptTemplateAllowed,
+  isAgentSkillAllowed,
   isAgentToolAllowed,
   type AgentDefinition,
 } from "../src/index.ts";
@@ -228,5 +230,112 @@ test("parent currentDepth subtracts from inherited maxDepth and clamps at zero",
     const registry = new AgentRegistry();
     registry.register({ id: "agent", label: "Agent", description: "Depth policy", subagents: { maxDepth: 3 } });
     assert.equal(new AgentResolver(registry).resolve("agent", { currentDepth }).subagents.maxDepth, expected);
+  }
+});
+
+test("extension policy defaults to none and resolves inheritance chain", () => {
+  const cases = [
+    {
+      name: "default without extensions block",
+      base: {},
+      child: undefined,
+      expected: { inherit: "none", paths: [], exclude: [] },
+    },
+    {
+      name: "child inherits parent paths and overrides inherit mode",
+      base: { extensions: { inherit: "user" as const, paths: ["a.ts", "shared.ts"], exclude: ["drop-a.ts"] } },
+      child: { extensions: { inherit: "all" as const, paths: ["b.ts", "shared.ts"], exclude: ["drop-b.ts", "drop-a.ts"] } },
+      expected: { inherit: "all", paths: ["a.ts", "shared.ts", "b.ts"], exclude: ["drop-a.ts", "drop-b.ts"] },
+    },
+    {
+      name: "child without extensions preserves parent inherit mode",
+      base: { extensions: { inherit: "user" as const, paths: ["a.ts"] } },
+      child: {},
+      expected: { inherit: "user", paths: ["a.ts"], exclude: [] },
+    },
+  ];
+
+  for (const row of cases) {
+    const registry = new AgentRegistry();
+    registry.register({ id: "base", label: "Base", description: "Base", ...row.base });
+    if (row.child) {
+      registry.register({ id: "child", label: "Child", description: "Child", extends: "base", ...row.child });
+    }
+    const resolved = new AgentResolver(registry).resolve(row.child ? "child" : "base");
+    assert.deepEqual(resolved.extensions, row.expected, row.name);
+  }
+});
+
+test("prompt inherit, contextFiles, skills, and promptTemplates resolve inheritance chains", () => {
+  const cases = [
+    {
+      name: "defaults isolate prompt files, context files, skills, and prompt templates",
+      base: {},
+      child: undefined,
+      expectedPromptInherit: { system: "none", append: "none" },
+      expectedContextFiles: { inherit: "none", paths: [], exclude: [] },
+      expectedSkills: { inherit: "none", paths: [], exclude: [] },
+      skillChecks: { names: ["skill-good", "other"], expected: [true, true] },
+      expectedDeniedSkills: [],
+      expectedPromptTemplates: { inherit: "none", paths: [], exclude: [], allowConstraints: [], deny: [] },
+      promptChecks: { names: ["tpl-good", "other"], expected: [true, true] },
+    },
+    {
+      name: "child inherits paths, combines exclusions/denies, narrows orthogonal wildcards, and overrides inherit mode",
+      base: {
+        prompt: { inheritSystemPrompt: "user" as const, inheritAppendSystemPrompt: "all" as const },
+        contextFiles: { inherit: "user" as const, paths: ["a/AGENTS.md"], exclude: ["drop-a.md"] },
+        skills: { inherit: "user" as const, paths: ["skills/a"], exclude: ["skills/drop-a"], allow: ["skill-*", "extra"], deny: ["skill-bad"] },
+        promptTemplates: { inherit: "user" as const, paths: ["prompts/a"], exclude: ["prompts/drop-a.md"], allow: ["tpl-*", "keep"], deny: ["tpl-bad"] },
+      },
+      child: {
+        prompt: { inheritSystemPrompt: "project" as const },
+        contextFiles: { inherit: "all" as const, paths: ["b/AGENTS.md", "a/AGENTS.md"], exclude: ["drop-b.md"] },
+        skills: { inherit: "all" as const, paths: ["skills/b"], exclude: ["skills/drop-b"], allow: ["*-good", "skill-bad"], deny: [] },
+        promptTemplates: { inherit: "all" as const, paths: ["prompts/b"], exclude: ["prompts/drop-b.md"], allow: ["*-good", "tpl-bad"] },
+      },
+      expectedPromptInherit: { system: "project", append: "all" },
+      expectedContextFiles: { inherit: "all", paths: ["a/AGENTS.md", "b/AGENTS.md"], exclude: ["drop-a.md", "drop-b.md"] },
+      expectedSkills: { inherit: "all", paths: ["skills/a", "skills/b"], exclude: ["skills/drop-a", "skills/drop-b"] },
+      skillChecks: { names: ["skill-good", "skill-bad", "other-good", "extra"], expected: [true, false, false, false] },
+      expectedDeniedSkills: ["skill-bad"],
+      expectedPromptTemplates: {
+        inherit: "all",
+        paths: ["prompts/a", "prompts/b"],
+        exclude: ["prompts/drop-a.md", "prompts/drop-b.md"],
+        allow: ["*-good"],
+        allowConstraints: [["tpl-*", "keep"]],
+        deny: ["tpl-bad"],
+      },
+      promptChecks: { names: ["tpl-good", "tpl-bad", "other-good", "keep"], expected: [true, false, false, false] },
+    },
+  ];
+
+  for (const row of cases) {
+    const registry = new AgentRegistry();
+    registry.register({ id: "base", label: "Base", description: "Base", ...row.base });
+    if (row.child) {
+      registry.register({ id: "child", label: "Child", description: "Child", extends: "base", ...row.child });
+    }
+    const resolved = new AgentResolver(registry).resolve(row.child ? "child" : "base");
+    assert.deepEqual(
+      { system: resolved.inheritSystemPrompt, append: resolved.inheritAppendSystemPrompt },
+      row.expectedPromptInherit,
+      row.name,
+    );
+    assert.deepEqual(resolved.contextFiles, row.expectedContextFiles, row.name);
+    assert.deepEqual(resolved.skills, row.expectedSkills, row.name);
+    assert.deepEqual(
+      row.skillChecks.names.map((name) => isAgentSkillAllowed(name, resolved)),
+      row.skillChecks.expected,
+      row.name,
+    );
+    assert.deepEqual(resolved.deniedSkills, row.expectedDeniedSkills, row.name);
+    assert.deepEqual(resolved.promptTemplates, row.expectedPromptTemplates, row.name);
+    assert.deepEqual(
+      row.promptChecks.names.map((name) => isAgentPromptTemplateAllowed(name, resolved)),
+      row.promptChecks.expected,
+      row.name,
+    );
   }
 });
