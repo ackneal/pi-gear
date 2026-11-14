@@ -46,6 +46,54 @@
             "type": "string"
           },
           "description": "Additional rules appended to prompt guidelines"
+        },
+        "inheritSystemPrompt": {
+          "type": "string",
+          "enum": [
+            "none",
+            "user",
+            "project",
+            "all"
+          ]
+        },
+        "inheritAppendSystemPrompt": {
+          "type": "string",
+          "enum": [
+            "none",
+            "user",
+            "project",
+            "all"
+          ]
+        }
+      }
+    },
+    "contextFiles": {
+      "type": "object",
+      "properties": {
+        "inherit": {
+          "type": "string",
+          "enum": [
+            "none",
+            "user",
+            "project",
+            "all"
+          ]
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Additional context file or directory paths (AGENTS.md / CLAUDE.md) to load in the subagent"
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Context file or directory paths to exclude from inherited or explicit paths"
         }
       }
     },
@@ -144,6 +192,71 @@
     "skills": {
       "type": "object",
       "properties": {
+        "inherit": {
+          "type": "string",
+          "enum": [
+            "none",
+            "user",
+            "all"
+          ]
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Additional skill file or directory paths to load in the subagent"
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Skill file or directory paths to exclude from inherited or explicit paths"
+        },
+        "allow": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deny": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "promptTemplates": {
+      "type": "object",
+      "properties": {
+        "inherit": {
+          "type": "string",
+          "enum": [
+            "none",
+            "user",
+            "all"
+          ]
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Additional prompt template file or directory paths to load in the subagent"
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Prompt template file or directory paths to exclude from inherited or explicit paths"
+        },
         "allow": {
           "type": "array",
           "items": {
@@ -227,6 +340,35 @@
         "maxDurationSeconds": {
           "type": "number",
           "minimum": 1
+        }
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "properties": {
+        "inherit": {
+          "type": "string",
+          "enum": [
+            "none",
+            "user",
+            "all"
+          ]
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Additional extension file or directory paths to load in the subagent"
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Extension file or directory paths to exclude from inherited or explicit paths"
         }
       }
     }

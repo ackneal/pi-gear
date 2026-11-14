@@ -11,10 +11,27 @@ export const ThinkingLevelSchema = Type.Union([
 ]);
 export type ThinkingLevel = Static<typeof ThinkingLevelSchema>;
 
+export const ExtensionInheritModeSchema = Type.Union([
+  Type.Literal("none"),
+  Type.Literal("user"),
+  Type.Literal("all"),
+]);
+export type ExtensionInheritMode = Static<typeof ExtensionInheritModeSchema>;
+
+export const ContextInheritModeSchema = Type.Union([
+  Type.Literal("none"),
+  Type.Literal("user"),
+  Type.Literal("project"),
+  Type.Literal("all"),
+]);
+export type ContextInheritMode = Static<typeof ContextInheritModeSchema>;
+
 export const AgentPromptSchema = Type.Object({
   systemPrompt: Type.Optional(Type.String({ description: "Base system prompt or prefix" })),
   appendPrompt: Type.Optional(Type.String({ description: "Appended system instructions" })),
   guidelines: Type.Optional(Type.Array(Type.String(), { description: "Additional rules appended to prompt guidelines" })),
+  inheritSystemPrompt: Type.Optional(ContextInheritModeSchema),
+  inheritAppendSystemPrompt: Type.Optional(ContextInheritModeSchema),
 });
 export type AgentPrompt = Static<typeof AgentPromptSchema>;
 
@@ -51,6 +68,13 @@ export const AgentMcpServerSchema = Type.Object({
 export type AgentMcpServer = Static<typeof AgentMcpServerSchema>;
 
 export const AgentSkillsSchema = Type.Object({
+  inherit: Type.Optional(ExtensionInheritModeSchema),
+  paths: Type.Optional(Type.Array(Type.String({ minLength: 1 }), {
+    description: "Additional skill file or directory paths to load in the subagent",
+  })),
+  exclude: Type.Optional(Type.Array(Type.String({ minLength: 1 }), {
+    description: "Skill file or directory paths to exclude from inherited or explicit paths",
+  })),
   allow: Type.Optional(Type.Array(Type.String())),
   deny: Type.Optional(Type.Array(Type.String())),
 });
@@ -86,18 +110,56 @@ export const AgentSupervisionSchema = Type.Object({
 });
 export type AgentSupervision = Static<typeof AgentSupervisionSchema>;
 
+export const AgentContextFilesSchema = Type.Object({
+  inherit: Type.Optional(ContextInheritModeSchema),
+  paths: Type.Optional(Type.Array(Type.String({ minLength: 1 }), {
+    description: "Additional context file or directory paths (AGENTS.md / CLAUDE.md) to load in the subagent",
+  })),
+  exclude: Type.Optional(Type.Array(Type.String({ minLength: 1 }), {
+    description: "Context file or directory paths to exclude from inherited or explicit paths",
+  })),
+});
+export type AgentContextFiles = Static<typeof AgentContextFilesSchema>;
+
+export const AgentPromptTemplatesSchema = Type.Object({
+  inherit: Type.Optional(ExtensionInheritModeSchema),
+  paths: Type.Optional(Type.Array(Type.String({ minLength: 1 }), {
+    description: "Additional prompt template file or directory paths to load in the subagent",
+  })),
+  exclude: Type.Optional(Type.Array(Type.String({ minLength: 1 }), {
+    description: "Prompt template file or directory paths to exclude from inherited or explicit paths",
+  })),
+  allow: Type.Optional(Type.Array(Type.String())),
+  deny: Type.Optional(Type.Array(Type.String())),
+});
+export type AgentPromptTemplates = Static<typeof AgentPromptTemplatesSchema>;
+
+export const AgentExtensionsSchema = Type.Object({
+  inherit: Type.Optional(ExtensionInheritModeSchema),
+  paths: Type.Optional(Type.Array(Type.String({ minLength: 1 }), {
+    description: "Additional extension file or directory paths to load in the subagent",
+  })),
+  exclude: Type.Optional(Type.Array(Type.String({ minLength: 1 }), {
+    description: "Extension file or directory paths to exclude from inherited or explicit paths",
+  })),
+});
+export type AgentExtensions = Static<typeof AgentExtensionsSchema>;
+
 export const AgentDefinitionSchema = Type.Object({
   id: Type.String({ minLength: 1, description: "Unique identifier for this agent (e.g. 'worker' or 'gear:worker')" }),
   label: Type.String({ minLength: 1, description: "Human-readable display label" }),
   description: Type.String({ minLength: 1, description: "Description for the model when selecting an agent" }),
   extends: Type.Optional(Type.String({ minLength: 1, description: "Parent agent ID for inheritance" })),
   prompt: Type.Optional(AgentPromptSchema),
+  contextFiles: Type.Optional(AgentContextFilesSchema),
   tools: Type.Optional(AgentToolsSchema),
   mcpServers: Type.Optional(Type.Record(Type.String(), AgentMcpServerSchema)),
   skills: Type.Optional(AgentSkillsSchema),
+  promptTemplates: Type.Optional(AgentPromptTemplatesSchema),
   model: Type.Optional(AgentModelSchema),
   subagents: Type.Optional(AgentSubagentsSchema),
   supervision: Type.Optional(AgentSupervisionSchema),
+  extensions: Type.Optional(AgentExtensionsSchema),
 });
 export type AgentDefinition = Static<typeof AgentDefinitionSchema>;
 

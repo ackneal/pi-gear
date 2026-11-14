@@ -11,6 +11,7 @@ function toTaskUsage(usage: SubagentUsage): TaskUsage {
     cacheRead: usage.cacheReadTokens,
     cacheWrite: usage.cacheWriteTokens,
     totalTokens: usage.totalTokens,
+    ...(usage.estimated ? { estimated: true } : {}),
     cost: { total: usage.cost },
   };
 }
@@ -36,6 +37,8 @@ export interface SpawnTaskOptions {
   readonly modelRuntime?: ModelRuntime | undefined;
   readonly signal?: AbortSignal | undefined;
   readonly extensionFactories?: SubagentSessionOptions["extensionFactories"];
+  readonly additionalExtensionPaths?: SubagentSessionOptions["additionalExtensionPaths"];
+  readonly excludeExtensionPaths?: SubagentSessionOptions["excludeExtensionPaths"];
 }
 
 type TaskListener = (task: TaskRecord) => void;
@@ -147,6 +150,15 @@ export class TaskController {
 
     const taskId = `task-${this._nextId++}-${Date.now().toString(36)}`;
     const now = Date.now();
+    const maxDurationSeconds = agent.supervision?.maxDurationSeconds;
+    const normalizedCallTimeout =
+      typeof options.timeoutSeconds === "number" && Number.isFinite(options.timeoutSeconds) && options.timeoutSeconds > 0
+        ? options.timeoutSeconds
+        : undefined;
+    const effectiveTimeoutSeconds =
+      normalizedCallTimeout !== undefined && maxDurationSeconds !== undefined
+        ? Math.min(normalizedCallTimeout, maxDurationSeconds)
+        : (normalizedCallTimeout ?? maxDurationSeconds);
 
     const taskRecord: TaskRecord = {
       id: taskId,
@@ -162,7 +174,7 @@ export class TaskController {
       startedAt: now,
       lastActivityAt: now,
       activities: [],
-      timeoutSeconds: options.timeoutSeconds,
+      timeoutSeconds: effectiveTimeoutSeconds,
     };
 
     this._tasks.set(taskId, taskRecord);
@@ -182,10 +194,10 @@ export class TaskController {
     }
 
     let timeoutTimer: NodeJS.Timeout | undefined;
-    if (options.timeoutSeconds && options.timeoutSeconds > 0) {
+    if (effectiveTimeoutSeconds && effectiveTimeoutSeconds > 0) {
       timeoutTimer = setTimeout(() => {
-        this.cancel(taskId, `Task timed out after ${options.timeoutSeconds}s`);
-      }, options.timeoutSeconds * 1000);
+        this.cancel(taskId, `Task timed out after ${effectiveTimeoutSeconds}s`);
+      }, effectiveTimeoutSeconds * 1000);
       timeoutTimer.unref();
     }
 
@@ -198,6 +210,8 @@ export class TaskController {
       thinkingLevel: options.thinkingLevel,
       modelRuntime: options.modelRuntime ?? (options.modelRegistry ? (options.modelRegistry as any).runtime : undefined),
       extensionFactories: options.extensionFactories,
+      additionalExtensionPaths: options.additionalExtensionPaths,
+      excludeExtensionPaths: options.excludeExtensionPaths,
       signal: controller.signal,
       onEvent: (event) => {
         recorder.record(event);
