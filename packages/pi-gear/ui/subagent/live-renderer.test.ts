@@ -152,7 +152,7 @@ test("task headers and expanded results follow render options", (t) => {
     if (expanded) {
       assert.ok(!output.includes("question:"));
       assert.ok(!output.includes("Result:"));
-      assert.match(output, /files[\s\S]*Execution history[\s\S]*Read · success\s*\n\s*\n\s*Final detail/);
+      assert.match(output, /files[\s\S]*Tool activity[\s\S]*Read · success\s*\n\s*\n\s*Final detail/);
     }
     assert.equal(output.includes("Run failed"), Boolean(error));
   }

@@ -19,19 +19,27 @@ function isHistory(value: unknown): value is SubagentActivity[] {
   return Array.isArray(value) && value.every(isActivity);
 }
 
-export function normalizeRunActivities<T extends object>(run: T): Omit<T, "items" | "itemsTruncated" | "activities" | "activitiesTruncated"> & {
+export function normalizeRunActivities<T extends object>(run: T): Omit<T, "items" | "itemsTruncated" | "activities" | "activitiesTruncated" | "toolActivitiesTruncated"> & {
   activities: SubagentActivity[];
   activitiesTruncated?: boolean;
+  toolActivitiesTruncated?: boolean;
 } {
-  const { items, itemsTruncated, activities, activitiesTruncated, ...fields } = run as T & {
+  const { items, itemsTruncated, activities, activitiesTruncated, toolActivitiesTruncated, ...fields } = run as T & {
     items?: unknown;
     itemsTruncated?: unknown;
     activities?: unknown;
     activitiesTruncated?: unknown;
+    toolActivitiesTruncated?: unknown;
   };
   const history = isHistory(activities) ? activities : isHistory(items) ? items : [];
   const truncated = typeof activitiesTruncated === "boolean" ? activitiesTruncated
     : typeof itemsTruncated === "boolean" ? itemsTruncated : undefined;
+  const toolsTruncated = typeof toolActivitiesTruncated === "boolean" ? toolActivitiesTruncated : undefined;
 
-  return { ...fields, activities: history, ...(truncated === undefined ? {} : { activitiesTruncated: truncated }) };
+  return {
+    ...fields,
+    activities: history,
+    ...(truncated === undefined ? {} : { activitiesTruncated: truncated }),
+    ...(toolsTruncated === undefined ? {} : { toolActivitiesTruncated: toolsTruncated }),
+  };
 }

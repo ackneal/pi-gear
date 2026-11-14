@@ -11,7 +11,7 @@ const partialResult: AgentToolResult<undefined> = { content: [{ type: "text", te
 const result: AgentToolResult<{ lines: number }> = { content: [{ type: "text", text: "done" }], details: { lines: 1 } };
 const circularDetails: { self?: unknown } = {};
 circularDetails.self = circularDetails;
-const cases: { name: string; events: AgentSessionEvent[]; expected: TaskActivity[]; truncated?: boolean }[] = [
+const cases: { name: string; events: AgentSessionEvent[]; expected: TaskActivity[]; truncated?: boolean; toolsTruncated?: boolean }[] = [
   {
     name: "tool start preserves args and running state",
     events: [start],
@@ -57,6 +57,7 @@ const cases: { name: string; events: AgentSessionEvent[]; expected: TaskActivity
     events: Array.from({ length: 105 }, (_, index) => ({ ...start, toolCallId: String(index) })),
     expected: Array.from({ length: 100 }, (_, index) => ({ kind: "tool", id: String(index + 5), name: "read", args: { path: "file.ts" }, status: "running" })),
     truncated: true,
+    toolsTruncated: true,
   },
   {
     name: "non-JSON tool details do not break event delivery",
@@ -103,6 +104,7 @@ test("registry records bounded SDK events and live usage", async (t) => {
       assert.deepEqual(finished.activities, row.expected);
       assert.deepEqual(finished.usage, expectedUsage);
       assert.equal(finished.activitiesTruncated ?? false, row.truncated ?? false);
+      assert.equal(finished.toolActivitiesTruncated ?? false, row.toolsTruncated ?? false);
       assert.ok(finished.revision > 1);
     });
   }

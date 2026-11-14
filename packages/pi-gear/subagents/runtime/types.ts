@@ -10,6 +10,7 @@ export interface TaskSnapshot {
   lastActivityAt?: number;
   activities: SubagentActivity[];
   activitiesTruncated?: boolean;
+  toolActivitiesTruncated?: boolean;
   modelSelection?: ModelSelection;
   result?: string;
   modelError?: string;

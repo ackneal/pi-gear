@@ -45,6 +45,7 @@ export interface TaskRecord {
   usage?: TaskUsage | undefined;
   activities: TaskActivity[];
   activitiesTruncated?: boolean | undefined;
+  toolActivitiesTruncated?: boolean | undefined;
   readonly timeoutSeconds?: number | undefined;
 }
 

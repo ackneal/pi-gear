@@ -13,6 +13,9 @@ export function toTaskSnapshot(task: TaskRecord, modelSelection?: ModelSelection
     activities: task.activities.filter((activity) => activity.kind !== "message"),
     ...(task.finishedAt !== undefined ? { finishedAt: task.finishedAt } : {}),
     ...(task.activitiesTruncated !== undefined ? { activitiesTruncated: task.activitiesTruncated } : {}),
+    ...(task.toolActivitiesTruncated !== undefined
+      ? { toolActivitiesTruncated: task.toolActivitiesTruncated }
+      : task.activitiesTruncated ? { toolActivitiesTruncated: false } : {}),
     ...(task.result !== undefined ? { result: task.result } : {}),
     ...(task.error !== undefined ? { error: task.error } : {}),
     ...(modelSelection ? { modelSelection } : {}),
