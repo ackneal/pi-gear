@@ -100,7 +100,8 @@ function expandHome(path: string): string {
 }
 
 function resolveFilePath(raw: string, cwd: string): string {
-  const expanded = expandHome(raw);
+  const normalized = raw.startsWith("@") ? raw.slice(1) : raw;
+  const expanded = expandHome(normalized);
   return isAbsolute(expanded) ? resolve(expanded) : resolve(cwd, expanded);
 }
 

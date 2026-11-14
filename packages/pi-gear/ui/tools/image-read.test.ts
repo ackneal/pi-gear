@@ -101,6 +101,13 @@ test("image read renderCall displays basename, expanded resolved path, and wraps
       expectedLines: ["● Read(photo.png)"],
     },
     {
+      name: "at-prefixed path expanded",
+      args: { path: "@assets/images/photo.png" },
+      expanded: true,
+      width: 120,
+      expectedLines: ["● Read(photo.png)", "  Path: /workspace/assets/images/photo.png"],
+    },
+    {
       name: "relative path with dot-dot segments expanded",
       args: { path: "assets/../nested/./photo.jpg" },
       expanded: true,
