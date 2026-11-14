@@ -37,8 +37,18 @@ export interface LspConfig {
   readonly idleTimeoutMinutes?: number;
 }
 
+export type SubagentExtensionInheritMode = "none" | "user" | "all";
+
+export interface SubagentExtensionConfig {
+  readonly inheritExtensions?: SubagentExtensionInheritMode;
+  readonly extensionPaths?: readonly string[];
+  readonly excludeExtensions?: readonly string[];
+  readonly stallTimeoutSeconds?: number;
+}
+
 export interface ExtensionConfig extends AccessPolicy {
   readonly $schema?: string;
   readonly version: 1;
   readonly lsp?: LspConfig;
+  readonly subagents?: SubagentExtensionConfig;
 }

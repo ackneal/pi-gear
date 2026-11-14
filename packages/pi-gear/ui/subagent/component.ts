@@ -27,6 +27,7 @@ export class SubagentResultComponent extends Text {
     this.run = run;
     this.options = options;
     this.format = format;
+    if (this.live && run?.status !== "running") this.releaseLiveSubscription();
     this.syncSpinner();
     this.updateText();
   }
@@ -71,7 +72,7 @@ export class SubagentResultComponent extends Text {
   }
 
   private syncSpinner(): void {
-    if (this.run?.status === "running" && this.options?.isPartial && !this.live) this.start(); else this.stop();
+    if (this.run?.status === "running" && (this.options?.isPartial || this.live)) this.start(); else this.stop();
   }
 
   private releaseLiveSubscription(): void {

@@ -26,7 +26,7 @@ for (const status of ["running", "success", "error", "aborted"] as const) {
       assert.ok(rows.every((row) => visibleWidth(row) <= width));
       assert.doesNotMatch(output, /PRIVATE|\u001b\[31m|\t/);
       if (width === 300) {
-        assert.match(output, /Earlier activity omitted/);
+        assert.match(output, /Earlier tool activity omitted/);
         assert.match(rows[0]!, status === "running" ? /running/ : /interrupted/);
         assert.match(rows[1]!, /error/);
         assert.match(rows[2]!, /success/);
@@ -41,3 +41,22 @@ for (const activities of [[], [{ kind: "thinking" as const, text: "private" }]])
     assert.equal(expandedActivity({ status: "success", startedAt: 0, activities }, theme, 80), "");
   });
 }
+
+test("expandedActivity distinguishes Exa actions and extracts query and url targets", () => {
+  const cases = [
+    { name: "mcp__exa__web_search_exa", args: { query: "agy release notes" }, status: "success" as const, expected: "Exa search · success · agy release notes" },
+    { name: "mcp__exa__web_fetch_exa", args: { url: "https://example.com/notes" }, status: "error" as const, expected: "Exa fetch · error · https://example.com/notes" },
+    { name: "mcp__exa__crawling_exa", args: { urls: ["https://example.com/a", "https://example.com/b"], action: "crawl" }, status: "success" as const, expected: "Exa fetch · success · https://example.com/a" },
+    { name: "mcp__gh_grep__searchGitHub", args: { query: "readableProvider" }, status: "success" as const, expected: "GitHub grep · success · readableProvider" },
+    { name: "read", args: { path: "\u001b[31m\t" }, status: "success" as const, expected: "Read · success$" },
+  ];
+  const output = expandedActivity({
+    status: "success",
+    startedAt: 0,
+    activitiesTruncated: true,
+    toolActivitiesTruncated: false,
+    activities: cases.map(({ name, args, status }) => ({ kind: "tool" as const, name, args, status })),
+  }, theme, 200);
+  assert.doesNotMatch(output, /Earlier tool activity omitted/);
+  for (const { expected } of cases) assert.match(output, new RegExp(expected, "m"));
+});

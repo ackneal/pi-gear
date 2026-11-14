@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { TaskMonitor } from "../src/tasks/monitor.ts";
+import { DEFAULT_STALL_TIMEOUT_MS, TaskMonitor } from "../src/tasks/monitor.ts";
 import { TaskController } from "../src/tasks/controller.ts";
 import type { SubagentTaskResult } from "../src/tasks/session-runner.ts";
 import { NotificationQueue, type TaskNotification } from "../src/notifications/queue.ts";
@@ -405,4 +405,8 @@ test("stall cancellation leaves notification ownership to the terminal subscript
       }
     });
   }
+});
+
+test("default stall timeout tolerates longer compaction or reasoning pauses", () => {
+  assert.equal(DEFAULT_STALL_TIMEOUT_MS, 180_000);
 });

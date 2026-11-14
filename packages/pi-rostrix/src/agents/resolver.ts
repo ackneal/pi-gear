@@ -1,6 +1,8 @@
 import {
   type AgentDefinition,
   type AgentMcpServer,
+  type ContextInheritMode,
+  type ExtensionInheritMode,
   type SupervisionWakeTrigger,
 } from "./schema.ts";
 import type { AgentRegistry } from "./registry.ts";
@@ -19,6 +21,13 @@ export interface ResolvedAgentDefinition {
   readonly systemPrompt?: string | undefined;
   readonly appendPrompt?: string | undefined;
   readonly promptGuidelines: readonly string[];
+  readonly inheritSystemPrompt?: ContextInheritMode | undefined;
+  readonly inheritAppendSystemPrompt?: ContextInheritMode | undefined;
+  readonly contextFiles?: {
+    readonly inherit: ContextInheritMode;
+    readonly paths: readonly string[];
+    readonly exclude: readonly string[];
+  } | undefined;
   /** One allow-list; additional lists are conjunctive, not alternative patterns. */
   readonly allowedTools?: readonly string[] | undefined;
   readonly toolAllowConstraints?: readonly (readonly string[])[] | undefined;
@@ -26,8 +35,22 @@ export interface ResolvedAgentDefinition {
   readonly parentActiveTools?: readonly string[] | undefined;
   readonly deniedTools: readonly string[];
   readonly mcpServers: Readonly<Record<string, AgentMcpServer>>;
+  readonly skills?: {
+    readonly inherit: ExtensionInheritMode;
+    readonly paths: readonly string[];
+    readonly exclude: readonly string[];
+  } | undefined;
   readonly allowedSkills?: readonly string[] | undefined;
+  readonly skillAllowConstraints?: readonly (readonly string[])[] | undefined;
   readonly deniedSkills: readonly string[];
+  readonly promptTemplates?: {
+    readonly inherit: ExtensionInheritMode;
+    readonly paths: readonly string[];
+    readonly exclude: readonly string[];
+    readonly allow?: readonly string[] | undefined;
+    readonly allowConstraints?: readonly (readonly string[])[] | undefined;
+    readonly deny: readonly string[];
+  } | undefined;
   readonly model?: {
     readonly preferred?: string | undefined;
     readonly fallback?: string | undefined;
@@ -42,6 +65,11 @@ export interface ResolvedAgentDefinition {
     readonly reviewIntervalSeconds?: number | undefined;
     readonly maxDurationSeconds?: number | undefined;
   };
+  readonly extensions?: {
+    readonly inherit: ExtensionInheritMode;
+    readonly paths: readonly string[];
+    readonly exclude: readonly string[];
+  } | undefined;
 }
 
 export interface ParentDelegationLimits {
@@ -67,11 +95,30 @@ export function isToolAllowed(name: string, allow?: readonly string[] | undefine
   return allow.some((pat) => matchesPattern(name, pat));
 }
 
+function isAllowedByConstraints(
+  name: string,
+  allow?: readonly string[] | undefined,
+  constraints?: readonly (readonly string[])[] | undefined,
+  deny?: readonly string[] | undefined,
+): boolean {
+  return isToolAllowed(name, allow, deny)
+    && (constraints ?? []).every((group) => isToolAllowed(name, group));
+}
+
 /** Complete tool policy: every allow-list must match, denies always win. */
 export function isAgentToolAllowed(name: string, agent: ResolvedAgentDefinition): boolean {
-  return isToolAllowed(name, agent.allowedTools, agent.deniedTools)
-    && (agent.toolAllowConstraints ?? []).every((allow) => isToolAllowed(name, allow))
+  return isAllowedByConstraints(name, agent.allowedTools, agent.toolAllowConstraints, agent.deniedTools)
     && (agent.parentActiveTools === undefined || agent.parentActiveTools.includes(name));
+}
+
+/** Complete skill policy: every allow-list in the inheritance chain must match, denies always win. */
+export function isAgentSkillAllowed(name: string, agent: ResolvedAgentDefinition): boolean {
+  return isAllowedByConstraints(name, agent.allowedSkills, agent.skillAllowConstraints, agent.deniedSkills);
+}
+
+/** Complete prompt-template policy: every allow-list in the inheritance chain must match, denies always win. */
+export function isAgentPromptTemplateAllowed(name: string, agent: ResolvedAgentDefinition): boolean {
+  return isAllowedByConstraints(name, agent.promptTemplates?.allow, agent.promptTemplates?.allowConstraints, agent.promptTemplates?.deny);
 }
 
 export class AgentResolver {
@@ -121,14 +168,31 @@ export class AgentResolver {
     let systemPrompt: string | undefined;
     const appendPrompts: string[] = [];
     const guidelines: string[] = [];
+    let inheritSystemPrompt: ContextInheritMode | undefined;
+    let inheritAppendSystemPrompt: ContextInheritMode | undefined;
+
+    let contextInherit: ContextInheritMode | undefined;
+    const contextPaths: string[] = [];
+    const contextExclude: string[] = [];
 
     let allowedTools: string[] | undefined;
     const toolAllowConstraints: (readonly string[])[] = [];
     const deniedTools: string[] = [];
     const mcpServers: Record<string, AgentMcpServer> = {};
 
+    let skillInherit: ExtensionInheritMode | undefined;
+    const skillPaths: string[] = [];
+    const skillExclude: string[] = [];
     let allowedSkills: string[] | undefined;
+    const skillAllowConstraints: (readonly string[])[] = [];
     const deniedSkills: string[] = [];
+
+    let promptTemplateInherit: ExtensionInheritMode | undefined;
+    const promptTemplatePaths: string[] = [];
+    const promptTemplateExclude: string[] = [];
+    let allowedPromptTemplates: string[] | undefined;
+    const promptTemplateAllowConstraints: (readonly string[])[] = [];
+    const deniedPromptTemplates: string[] = [];
 
     let preferredModel: string | undefined;
     let fallbackModel: string | undefined;
@@ -141,6 +205,10 @@ export class AgentResolver {
     let reviewIntervalSeconds: number | undefined;
     let maxDurationSeconds: number | undefined;
 
+    let extensionInherit: ExtensionInheritMode | undefined;
+    const extensionPaths: string[] = [];
+    const extensionExclude: string[] = [];
+
     for (const agent of chain) {
       if (agent.prompt?.systemPrompt !== undefined) {
         systemPrompt = agent.prompt.systemPrompt;
@@ -150,6 +218,26 @@ export class AgentResolver {
       }
       if (agent.prompt?.guidelines) {
         guidelines.push(...agent.prompt.guidelines);
+      }
+      if (agent.prompt?.inheritSystemPrompt !== undefined) {
+        inheritSystemPrompt = agent.prompt.inheritSystemPrompt;
+      }
+      if (agent.prompt?.inheritAppendSystemPrompt !== undefined) {
+        inheritAppendSystemPrompt = agent.prompt.inheritAppendSystemPrompt;
+      }
+
+      if (agent.contextFiles?.inherit !== undefined) {
+        contextInherit = agent.contextFiles.inherit;
+      }
+      if (agent.contextFiles?.paths) {
+        for (const p of agent.contextFiles.paths) {
+          if (!contextPaths.includes(p)) contextPaths.push(p);
+        }
+      }
+      if (agent.contextFiles?.exclude) {
+        for (const p of agent.contextFiles.exclude) {
+          if (!contextExclude.includes(p)) contextExclude.push(p);
+        }
       }
 
       if (agent.tools?.allow !== undefined) {
@@ -168,15 +256,50 @@ export class AgentResolver {
         }
       }
 
-      if (agent.skills?.allow !== undefined) {
-        if (allowedSkills === undefined) {
-          allowedSkills = [...agent.skills.allow];
-        } else {
-          allowedSkills = allowedSkills.filter((s) => agent.skills!.allow!.includes(s));
+      if (agent.skills?.inherit !== undefined) {
+        skillInherit = agent.skills.inherit;
+      }
+      if (agent.skills?.paths) {
+        for (const p of agent.skills.paths) {
+          if (!skillPaths.includes(p)) skillPaths.push(p);
         }
+      }
+      if (agent.skills?.exclude) {
+        for (const p of agent.skills.exclude) {
+          if (!skillExclude.includes(p)) skillExclude.push(p);
+        }
+      }
+      if (agent.skills?.allow !== undefined) {
+        if (allowedSkills !== undefined) {
+          skillAllowConstraints.push(Object.freeze(allowedSkills));
+        }
+        allowedSkills = [...agent.skills.allow];
       }
       if (agent.skills?.deny) {
         deniedSkills.push(...agent.skills.deny);
+      }
+
+      if (agent.promptTemplates?.inherit !== undefined) {
+        promptTemplateInherit = agent.promptTemplates.inherit;
+      }
+      if (agent.promptTemplates?.paths) {
+        for (const p of agent.promptTemplates.paths) {
+          if (!promptTemplatePaths.includes(p)) promptTemplatePaths.push(p);
+        }
+      }
+      if (agent.promptTemplates?.exclude) {
+        for (const p of agent.promptTemplates.exclude) {
+          if (!promptTemplateExclude.includes(p)) promptTemplateExclude.push(p);
+        }
+      }
+      if (agent.promptTemplates?.allow !== undefined) {
+        if (allowedPromptTemplates !== undefined) {
+          promptTemplateAllowConstraints.push(Object.freeze(allowedPromptTemplates));
+        }
+        allowedPromptTemplates = [...agent.promptTemplates.allow];
+      }
+      if (agent.promptTemplates?.deny) {
+        deniedPromptTemplates.push(...agent.promptTemplates.deny);
       }
 
       if (agent.model?.preferred !== undefined) {
@@ -216,10 +339,27 @@ export class AgentResolver {
           ? Math.min(maxDurationSeconds, agent.supervision.maxDurationSeconds)
           : agent.supervision.maxDurationSeconds;
       }
+
+      if (agent.extensions?.inherit !== undefined) {
+        extensionInherit = agent.extensions.inherit;
+      }
+      if (agent.extensions?.paths) {
+        for (const p of agent.extensions.paths) {
+          if (!extensionPaths.includes(p)) extensionPaths.push(p);
+        }
+      }
+      if (agent.extensions?.exclude) {
+        for (const p of agent.extensions.exclude) {
+          if (!extensionExclude.includes(p)) extensionExclude.push(p);
+        }
+      }
     }
 
     if (allowedSkills !== undefined && deniedSkills.length > 0) {
-      allowedSkills = allowedSkills.filter((s) => !deniedSkills.includes(s));
+      allowedSkills = allowedSkills.filter((s) => !deniedSkills.some((pat) => matchesPattern(s, pat)));
+    }
+    if (allowedPromptTemplates !== undefined && deniedPromptTemplates.length > 0) {
+      allowedPromptTemplates = allowedPromptTemplates.filter((p) => !deniedPromptTemplates.some((pat) => matchesPattern(p, pat)));
     }
 
     const modelConfig = (preferredModel || fallbackModel)
@@ -236,12 +376,33 @@ export class AgentResolver {
       ...(systemPrompt !== undefined ? { systemPrompt } : {}),
       ...(appendPrompts.length > 0 ? { appendPrompt: appendPrompts.join("\n\n") } : {}),
       promptGuidelines: Object.freeze(guidelines),
+      inheritSystemPrompt: inheritSystemPrompt ?? "none",
+      inheritAppendSystemPrompt: inheritAppendSystemPrompt ?? "none",
+      contextFiles: Object.freeze({
+        inherit: contextInherit ?? "none",
+        paths: Object.freeze(contextPaths),
+        exclude: Object.freeze(contextExclude),
+      }),
       ...(allowedTools !== undefined ? { allowedTools: Object.freeze(allowedTools) } : {}),
       toolAllowConstraints: Object.freeze(toolAllowConstraints),
       deniedTools: Object.freeze(deniedTools),
       mcpServers: Object.freeze(mcpServers),
+      skills: Object.freeze({
+        inherit: skillInherit ?? "none",
+        paths: Object.freeze(skillPaths),
+        exclude: Object.freeze(skillExclude),
+      }),
       ...(allowedSkills !== undefined ? { allowedSkills: Object.freeze(allowedSkills) } : {}),
+      skillAllowConstraints: Object.freeze(skillAllowConstraints),
       deniedSkills: Object.freeze(deniedSkills),
+      promptTemplates: Object.freeze({
+        inherit: promptTemplateInherit ?? "none",
+        paths: Object.freeze(promptTemplatePaths),
+        exclude: Object.freeze(promptTemplateExclude),
+        ...(allowedPromptTemplates !== undefined ? { allow: Object.freeze(allowedPromptTemplates) } : {}),
+        allowConstraints: Object.freeze(promptTemplateAllowConstraints),
+        deny: Object.freeze(deniedPromptTemplates),
+      }),
       ...(modelConfig ? { model: Object.freeze(modelConfig) } : {}),
       subagents: Object.freeze({
         ...(allowedAgents !== undefined ? { allowedAgents: Object.freeze(allowedAgents) } : {}),
@@ -252,6 +413,11 @@ export class AgentResolver {
         wakeOn: Object.freeze(wakeOn),
         ...(reviewIntervalSeconds !== undefined ? { reviewIntervalSeconds } : {}),
         ...(maxDurationSeconds !== undefined ? { maxDurationSeconds } : {}),
+      }),
+      extensions: Object.freeze({
+        inherit: extensionInherit ?? "none",
+        paths: Object.freeze(extensionPaths),
+        exclude: Object.freeze(extensionExclude),
       }),
     };
   }

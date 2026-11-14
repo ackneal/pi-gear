@@ -1,6 +1,7 @@
-import { SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { init, type Runtime, type TaskRecord, type TaskStatus } from "pi-rostrix";
+import { parseArgs, SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { init, type ResolvedAgentDefinition, type Runtime, type TaskRecord, type TaskStatus } from "pi-rostrix";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 import {
   recordSubagentLiveStart,
@@ -25,12 +26,50 @@ import {
   workerParameters,
   workerProfile,
 } from "./agents/worker/index.ts";
+import type { ExtensionConfig } from "../config/types.ts";
 import type { ModelSelection, TaskSnapshot } from "./runtime/types.ts";
 import type { WorkspaceServices } from "../workspace/setup.ts";
 import { setupSubagentSettings, SUBAGENTS, type SubagentSettings } from "./settings.ts";
 import { toTaskSnapshot } from "./task-snapshot.ts";
 import { normalizeRunActivities } from "./activities.ts";
 import { setupExtension } from "../index.ts";
+
+export const PI_GEAR_ENTRY_PATH = fileURLToPath(new URL("../index.ts", import.meta.url));
+
+export function resolveSubagentExtensionOptions(
+  agent: ResolvedAgentDefinition,
+  config?: Pick<ExtensionConfig, "subagents">,
+  argv: readonly string[] = process.argv.slice(2),
+) {
+  const inheritOverride = config?.subagents?.inheritExtensions;
+  const effectiveAgent: ResolvedAgentDefinition = inheritOverride === undefined
+    ? agent
+    : {
+        ...agent,
+        extensions: Object.freeze({
+          paths: agent.extensions?.paths ?? Object.freeze([]),
+          exclude: agent.extensions?.exclude ?? Object.freeze([]),
+          inherit: inheritOverride,
+        }),
+      };
+
+  const inherit = effectiveAgent.extensions?.inherit ?? "none";
+  const cliExtensions = inherit === "none" ? [] : (parseArgs([...argv]).extensions ?? []);
+  const additionalExtensionPaths = [
+    ...cliExtensions,
+    ...(config?.subagents?.extensionPaths ?? []),
+  ];
+  const excludeExtensionPaths = [
+    PI_GEAR_ENTRY_PATH,
+    ...(config?.subagents?.excludeExtensions ?? []),
+  ];
+
+  return {
+    agent: effectiveAgent,
+    ...(additionalExtensionPaths.length > 0 ? { additionalExtensionPaths } : {}),
+    excludeExtensionPaths,
+  };
+}
 
 export interface SubagentServices {
   settings: SubagentSettings;
@@ -94,8 +133,9 @@ function observation(details: TaskDetails) {
 
 export function setupSubagents(
   pi: ExtensionAPI,
-  _workspace?: WorkspaceServices,
+  workspace?: WorkspaceServices,
   providedRuntime?: Runtime,
+  config?: ExtensionConfig,
 ): SubagentServices {
   const runtime = providedRuntime ?? init(pi, { autoRegisterTaskTools: false });
   runtime.addDelegationToolNames(SUBAGENTS);
@@ -148,8 +188,8 @@ export function setupSubagents(
 
       const resolved = runtime.resolveAgent("gear:researcher");
       const record = runtime.tasks.spawn({
-        extensionFactories: [(childPi) => setupExtension(childPi, { child: true })],
-        agent: resolved,
+        extensionFactories: [(childPi) => setupExtension(childPi, { child: true, fffEndpoint: workspace?.endpoint })],
+        ...resolveSubagentExtensionOptions(resolved, config),
         task,
         cwd: ctx.cwd,
         model: modelSelection.model,
@@ -184,8 +224,8 @@ export function setupSubagents(
 
       const resolved = runtime.resolveAgent("gear:worker");
       const record = runtime.tasks.spawn({
-        extensionFactories: [(childPi) => setupExtension(childPi, { child: true })],
-        agent: resolved,
+        extensionFactories: [(childPi) => setupExtension(childPi, { child: true, fffEndpoint: workspace?.endpoint })],
+        ...resolveSubagentExtensionOptions(resolved, config),
         task,
         targetFiles: targetFiles?.map((f) => resolve(ctx.cwd, f)),
         cwd: ctx.cwd,
@@ -221,8 +261,8 @@ export function setupSubagents(
 
       const resolved = runtime.resolveAgent("gear:reviewer");
       const record = runtime.tasks.spawn({
-        extensionFactories: [(childPi) => setupExtension(childPi, { child: true })],
-        agent: resolved,
+        extensionFactories: [(childPi) => setupExtension(childPi, { child: true, fffEndpoint: workspace?.endpoint })],
+        ...resolveSubagentExtensionOptions(resolved, config),
         task,
         cwd: ctx.cwd,
         model: modelSelection.model,

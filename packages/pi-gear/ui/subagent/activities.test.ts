@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { normalizeRunActivities } from "../../subagents/activities.ts";
+import { toTaskSnapshot } from "../../subagents/task-snapshot.ts";
 import { researcherProfile } from "../../subagents/agents/researcher/index.ts";
 import type { TaskSnapshot } from "../../subagents/runtime/types.ts";
 import { renderSubagentResult } from "./renderer.ts";
@@ -52,8 +53,26 @@ for (const legacy of [false, true]) {
     t.after(() => (component as SubagentResultComponent).dispose());
     const output = component.render(80).join("\n");
     assert.match(output, /Read · success/);
-    assert.match(output, /Earlier activity omitted/);
+    assert.match(output, /Earlier tool activity omitted/);
     assert.match(output, /Answer/);
     assert.deepEqual(details, original);
   });
 }
+
+test("normalizeRunActivities validates toolActivitiesTruncated as boolean", () => {
+  const valid = normalizeRunActivities({ ...metadata, activities: history, toolActivitiesTruncated: false });
+  assert.equal(valid.toolActivitiesTruncated, false);
+
+  const invalid = normalizeRunActivities({ ...metadata, activities: history, toolActivitiesTruncated: "invalid" });
+  assert.equal("toolActivitiesTruncated" in invalid, false);
+});
+
+test("toTaskSnapshot sets toolActivitiesTruncated to false when only activitiesTruncated is true", () => {
+  const base = {
+    id: "t-1", agentId: "researcher", task: "Inspect", depth: 0, targetFiles: [], wakeOn: [],
+    status: "completed" as const, revision: 1, createdAt: 1, lastActivityAt: 2, activities: [],
+  };
+  assert.equal(toTaskSnapshot({ ...base, activitiesTruncated: true }).toolActivitiesTruncated, false);
+  assert.equal(toTaskSnapshot({ ...base, activitiesTruncated: true, toolActivitiesTruncated: true }).toolActivitiesTruncated, true);
+  assert.equal(toTaskSnapshot(base).toolActivitiesTruncated, undefined);
+});

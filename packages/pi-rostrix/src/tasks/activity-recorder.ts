@@ -32,8 +32,9 @@ export class TaskActivityRecorder {
   private append(activity: TaskActivity): void {
     this.task.activities.push(activity);
     if (this.task.activities.length > MAX_ACTIVITIES) {
-      this.task.activities.shift();
+      const removed = this.task.activities.shift();
       this.task.activitiesTruncated = true;
+      if (removed?.kind === "tool") this.task.toolActivitiesTruncated = true;
     }
   }
 

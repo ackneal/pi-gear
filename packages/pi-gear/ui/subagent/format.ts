@@ -100,7 +100,8 @@ export function formatUsage(usage: TaskViewSnapshot["usage"]): string | undefine
   const inTokens = (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
   const outTokens = usage.output ?? 0;
   const totalCost = usage.cost?.total ?? 0;
-  return `↑${formatTokens(inTokens)} ↓${formatTokens(outTokens)} · ${formatCost(totalCost)}`;
+  const outStr = usage.estimated ? `~${formatTokens(outTokens)}` : formatTokens(outTokens);
+  return `↑${formatTokens(inTokens)} ↓${outStr} · ${formatCost(totalCost)}${usage.estimated ? " (est.)" : ""}`;
 }
 
 export function formatDuration(durationMs: number): string {

@@ -137,6 +137,10 @@ test("formatUsage formats input, cache, output, and cost", () => {
   // outTokens = 450 -> 450
   // totalCost = 0.002 -> $0.002
   assert.equal(formatUsage(usage), "↑1.3k ↓450 · $0.002");
+  assert.equal(
+    formatUsage({ input: 1_000, output: 12, cost: { total: 0.005 }, estimated: true }),
+    "↑1.0k ↓~12 · $0.005 (est.)",
+  );
 });
 
 test("collapsed metadata renders tool fraction and usage accurately", () => {

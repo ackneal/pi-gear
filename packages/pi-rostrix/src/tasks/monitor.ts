@@ -4,6 +4,8 @@ import type { TaskRecord } from "./types.ts";
 import { NotificationQueue } from "../notifications/queue.ts";
 import { ParentNotifier } from "../notifications/parent-notifier.ts";
 
+export const DEFAULT_STALL_TIMEOUT_MS = 180_000;
+
 export interface TaskMonitorOptions {
   readonly checkIntervalMs?: number | undefined;
   readonly defaultStallTimeoutMs?: number | undefined;
@@ -23,7 +25,7 @@ export class TaskMonitor {
   public constructor(taskController: TaskController, pi?: ExtensionAPI, options?: TaskMonitorOptions) {
     this._taskController = taskController;
     this._checkIntervalMs = options?.checkIntervalMs ?? 5000;
-    this._defaultStallTimeoutMs = options?.defaultStallTimeoutMs ?? 60_000;
+    this._defaultStallTimeoutMs = options?.defaultStallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS;
 
     this._notificationQueue = new NotificationQueue({
       debounceMs: options?.debounceMs ?? 150,

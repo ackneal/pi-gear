@@ -11,6 +11,17 @@ export function readableProvider(name: string): string {
   return provider.replace(/^(?:mcp|tool)[_-]*/i, "").replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Tool";
 }
 
+export function readableActivityName(name: string): string {
+  const provider = readableProvider(name);
+  if (provider !== "Exa") return provider;
+
+  const normalized = name.toLowerCase();
+  if (/(?:^|_)web_search(?:_|$)|(?:^|_)search(?:_|$)/.test(normalized)) return "Exa search";
+  if (/(?:^|_)web_fetch(?:_|$)|(?:^|_)fetch(?:_|$)|crawling/.test(normalized)) return "Exa fetch";
+  if (/(?:^|_)code_context(?:_|$)/.test(normalized)) return "Exa code";
+  return provider;
+}
+
 export function cleanPlainText(value: string): string {
   return value.replace(INTERNAL_ID, "").replace(/^\s*thinking:\s*/i, "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/[ \t]{2,}/g, " ").trim();
 }
