@@ -879,3 +879,40 @@ test("runner filters inherited and explicit skills and promptTemplates", async (
   }
 });
 
+test("runner skips session.prompt when signal aborts during session setup", async () => {
+  const ac = new AbortController();
+  let promptCalled = false;
+  let disposed = false;
+
+  const runner = new InProcessSubagentRunner(
+    {
+      agent: agent(),
+      cwd: process.cwd(),
+      signal: ac.signal,
+    },
+    async () => {
+      ac.abort("Timed out during setup");
+      return {
+        session: {
+          bindExtensions: async () => {},
+          subscribe: () => () => {},
+          prompt: async () => {
+            promptCalled = true;
+          },
+          abort: async () => {},
+          extensionRunner: { emit: async () => {} },
+          dispose: () => {
+            disposed = true;
+          },
+        },
+      };
+    },
+  );
+
+  const result = await runner.run("Work");
+  assert.equal(promptCalled, false);
+  assert.equal(disposed, true);
+  assert.equal(result.status, "aborted");
+  assert.equal(result.error, "Timed out during setup");
+});
+

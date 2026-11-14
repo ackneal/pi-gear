@@ -150,15 +150,14 @@ export class TaskController {
 
     const taskId = `task-${this._nextId++}-${Date.now().toString(36)}`;
     const now = Date.now();
-    const maxDurationSeconds = agent.supervision?.maxDurationSeconds;
-    const normalizedCallTimeout =
-      typeof options.timeoutSeconds === "number" && Number.isFinite(options.timeoutSeconds) && options.timeoutSeconds > 0
-        ? options.timeoutSeconds
-        : undefined;
+    const normalizePositiveTimeout = (seconds: unknown): number | undefined =>
+      typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 ? seconds : undefined;
+    const normalizedCallTimeout = normalizePositiveTimeout(options.timeoutSeconds);
+    const normalizedMaxDuration = normalizePositiveTimeout(agent.supervision?.maxDurationSeconds);
     const effectiveTimeoutSeconds =
-      normalizedCallTimeout !== undefined && maxDurationSeconds !== undefined
-        ? Math.min(normalizedCallTimeout, maxDurationSeconds)
-        : (normalizedCallTimeout ?? maxDurationSeconds);
+      normalizedCallTimeout !== undefined && normalizedMaxDuration !== undefined
+        ? Math.min(normalizedCallTimeout, normalizedMaxDuration)
+        : (normalizedCallTimeout ?? normalizedMaxDuration);
 
     const taskRecord: TaskRecord = {
       id: taskId,
@@ -195,9 +194,10 @@ export class TaskController {
 
     let timeoutTimer: NodeJS.Timeout | undefined;
     if (effectiveTimeoutSeconds && effectiveTimeoutSeconds > 0) {
+      const MAX_TIMEOUT_MS = 2_147_483_647;
       timeoutTimer = setTimeout(() => {
         this.cancel(taskId, `Task timed out after ${effectiveTimeoutSeconds}s`);
-      }, effectiveTimeoutSeconds * 1000);
+      }, Math.min(effectiveTimeoutSeconds * 1000, MAX_TIMEOUT_MS));
       timeoutTimer.unref();
     }
 

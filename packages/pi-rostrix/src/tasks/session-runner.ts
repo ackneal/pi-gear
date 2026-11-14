@@ -496,6 +496,18 @@ export class InProcessSubagentRunner {
     });
 
     try {
+      if (this._options.signal?.aborted) {
+        return {
+          status: "aborted",
+          error: typeof this._options.signal.reason === "string" && this._options.signal.reason.trim()
+            ? this._options.signal.reason
+            : "Subagent aborted before prompt execution",
+          usage: collectUsage(),
+          turns,
+          durationMs: Date.now() - startedAt,
+        };
+      }
+
       await session.prompt(taskPrompt);
 
       const usage = collectUsage();
@@ -503,6 +515,9 @@ export class InProcessSubagentRunner {
       if (this._options.signal?.aborted) {
         return {
           status: "aborted",
+          error: lastAssistantError ?? (typeof this._options.signal.reason === "string" && this._options.signal.reason.trim()
+            ? this._options.signal.reason
+            : undefined),
           result: latestAssistantText || undefined,
           usage,
           turns,

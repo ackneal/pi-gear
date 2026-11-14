@@ -394,6 +394,10 @@ test("TaskController enforces supervision.maxDurationSeconds as default and ceil
     { name: "Infinity call timeout cannot bypass ceiling", maxDurationSeconds: 0.05, timeoutSeconds: Number.POSITIVE_INFINITY, expected: 0.05 },
     { name: "narrower call timeout wins", maxDurationSeconds: 0.2, timeoutSeconds: 0.04, expected: 0.04 },
     { name: "definition ceiling caps longer call timeout", maxDurationSeconds: 0.05, timeoutSeconds: 10, expected: 0.05 },
+    { name: "zero maxDurationSeconds ignored so call timeout still applies", maxDurationSeconds: 0, timeoutSeconds: 0.04, expected: 0.04 },
+    { name: "negative maxDurationSeconds ignored so call timeout still applies", maxDurationSeconds: -5, timeoutSeconds: 0.04, expected: 0.04 },
+    { name: "NaN maxDurationSeconds ignored so call timeout still applies", maxDurationSeconds: Number.NaN, timeoutSeconds: 0.04, expected: 0.04 },
+    { name: "Infinity maxDurationSeconds ignored", maxDurationSeconds: Number.POSITIVE_INFINITY, timeoutSeconds: undefined, expected: undefined },
   ]) {
     await t.test(row.name, async (t) => {
       const registry = registryFixture(t);
