@@ -138,7 +138,9 @@ export function createSandboxedBashOperations(
         child.stdout.on("error", () => undefined);
         child.stderr.on("error", () => undefined);
         child.on("error", (error: Error) => {
-          if (aborted) {
+          if (timedOut) {
+            finish(new Error(`Sandbox timed out after ${timeout} seconds`));
+          } else if (aborted) {
             finish(new Error("Command cancelled"));
           } else {
             finish(new Error(`Sandbox process failed: ${errorMessage(error)}`));
