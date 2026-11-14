@@ -22,6 +22,7 @@ export interface TaskSnapshot {
     cacheWrite1h?: number;
     reasoning?: number;
     totalTokens?: number;
+    estimated?: boolean;
     cost?: {
       input?: number;
       output?: number;

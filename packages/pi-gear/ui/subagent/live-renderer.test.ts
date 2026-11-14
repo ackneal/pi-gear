@@ -346,3 +346,53 @@ test("renderSubagentResult updates live from TaskController even when UI registr
   assert.match(updatedOutput, /● Agent\(researcher\)/);
 });
 
+test("live card timer redraws while running and stops on completion and dispose", async (t) => {
+  clearSubagentRegistry();
+  t.after(() => clearSubagentRegistry());
+  const initial: TaskSnapshot = { status: "running", startedAt: Date.now(), activities: [] };
+  recordSubagentLiveStart("live-timer-call", "Inspect", initial);
+  let invalidations = 0;
+
+  const component = renderSubagentResult(
+    researcherProfile,
+    { content: [{ type: "text", text: "started" }], details: { ...initial, taskId: "task-timer-1" } } as AgentToolResult<TaskSnapshot>,
+    { isPartial: false, expanded: false } as never,
+    theme,
+    { toolCallId: "live-timer-call", args: { question: "Inspect" }, invalidate: () => { invalidations++; } },
+  );
+  assert.ok(component instanceof SubagentResultComponent);
+  t.after(() => component.dispose());
+
+  // Wait > 150ms so the 100ms timer ticks at least once without any external event
+  await new Promise((resolve) => setTimeout(resolve, 160));
+  const afterRunningTicks = invalidations;
+  assert.ok(afterRunningTicks >= 1, `expected live timer redraws while running, got ${afterRunningTicks}`);
+
+  // Complete the task -> timer must stop
+  recordSubagentLiveUpdate("live-timer-call", {
+    ...initial,
+    status: "success",
+    finishedAt: Date.now(),
+    result: "Done",
+  });
+  const afterCompletion = invalidations;
+  await new Promise((resolve) => setTimeout(resolve, 160));
+  assert.equal(invalidations, afterCompletion, "timer must stop after completion");
+
+  // Also verify dispose stops a running live card's timer
+  const initial2: TaskSnapshot = { status: "running", startedAt: Date.now(), activities: [] };
+  recordSubagentLiveStart("live-timer-call-2", "Inspect 2", initial2);
+  let invalidations2 = 0;
+  const component2 = renderSubagentResult(
+    researcherProfile,
+    { content: [{ type: "text", text: "started" }], details: { ...initial2, taskId: "task-timer-2" } } as AgentToolResult<TaskSnapshot>,
+    { isPartial: false, expanded: false } as never,
+    theme,
+    { toolCallId: "live-timer-call-2", args: { question: "Inspect 2" }, invalidate: () => { invalidations2++; } },
+  );
+  assert.ok(component2 instanceof SubagentResultComponent);
+  component2.dispose();
+  await new Promise((resolve) => setTimeout(resolve, 160));
+  assert.equal(invalidations2, 0, "timer must stop immediately on dispose");
+});
+

@@ -77,6 +77,34 @@
           "items": { "$ref": "#/$defs/lspServer" }
         }
       }
+    },
+    "subagents": {
+      "type": "object",
+      "description": "Optional extension inheritance policy for gear-managed subagents.",
+      "additionalProperties": false,
+      "properties": {
+        "inheritExtensions": {
+          "enum": ["none", "user", "all"],
+          "description": "Controls whether subagents inherit host extensions ('none', 'user', or 'all')."
+        },
+        "extensionPaths": {
+          "type": "array",
+          "description": "Additional extension file or directory paths loaded by subagents.",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "excludeExtensions": {
+          "type": "array",
+          "description": "Extension file or directory paths excluded from subagents.",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "stallTimeoutSeconds": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 86400,
+          "default": 180,
+          "description": "Seconds without subagent activity before the task monitor aborts a stalled task."
+        }
+      }
     }
   },
   "$defs": {

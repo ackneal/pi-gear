@@ -24,6 +24,7 @@ export function toTaskSnapshot(task: TaskRecord, modelSelection?: ModelSelection
       ...(usage.cacheWrite1h !== undefined ? { cacheWrite1h: usage.cacheWrite1h } : {}),
       ...(usage.reasoning !== undefined ? { reasoning: usage.reasoning } : {}),
       ...(usage.totalTokens !== undefined ? { totalTokens: usage.totalTokens } : {}),
+      ...(usage.estimated ? { estimated: true } : {}),
       ...(usage.cost ? { cost: {
         ...(usage.cost.input !== undefined ? { input: usage.cost.input } : {}),
         ...(usage.cost.output !== undefined ? { output: usage.cost.output } : {}),

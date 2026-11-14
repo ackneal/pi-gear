@@ -8,7 +8,14 @@ export const WORKER_DEFINITION: AgentDefinition = {
   label: "Gear Worker",
   description: "Bounded worker subagent for parallel execution with targetFiles scopes.",
   prompt: {
-    systemPrompt: WORKER_SYSTEM_PROMPT,
+    inheritSystemPrompt: "all",
+    appendPrompt: WORKER_SYSTEM_PROMPT,
+  },
+  contextFiles: {
+    inherit: "all",
+  },
+  skills: {
+    inherit: "user",
   },
   tools: {
     allow: ["read", "find", "grep", "edit", "write", "bash", "fff_*"],
@@ -18,7 +25,10 @@ export const WORKER_DEFINITION: AgentDefinition = {
     maxConcurrent: 4,
   },
   supervision: {
-    wakeOn: ["completed", "failed"],
+    wakeOn: ["completed", "failed", "stalled"],
+  },
+  extensions: {
+    inherit: "user",
   },
 };
 
@@ -28,6 +38,9 @@ export const RESEARCHER_DEFINITION: AgentDefinition = {
   description: "Focused read-only researcher for workspace, GitHub and web search.",
   prompt: {
     systemPrompt: RESEARCHER_SYSTEM_PROMPT,
+  },
+  contextFiles: {
+    inherit: "user",
   },
   tools: {
     allow: ["read", "find", "grep", "fff_*", "github_*", "exa_*", "mcp__exa__*", "mcp__gh_grep__*"],
@@ -54,7 +67,10 @@ export const RESEARCHER_DEFINITION: AgentDefinition = {
     maxConcurrent: 2,
   },
   supervision: {
-    wakeOn: ["completed", "failed"],
+    wakeOn: ["completed", "failed", "stalled"],
+  },
+  extensions: {
+    inherit: "user",
   },
 };
 
@@ -63,7 +79,14 @@ export const REVIEWER_DEFINITION: AgentDefinition = {
   label: "Gear Reviewer",
   description: "Focused read-only code reviewer.",
   prompt: {
-    systemPrompt: REVIEWER_SYSTEM_PROMPT,
+    inheritSystemPrompt: "all",
+    appendPrompt: REVIEWER_SYSTEM_PROMPT,
+  },
+  contextFiles: {
+    inherit: "all",
+  },
+  skills: {
+    inherit: "user",
   },
   tools: {
     allow: ["read", "find", "grep", "bash", "fff_*"],
@@ -74,7 +97,10 @@ export const REVIEWER_DEFINITION: AgentDefinition = {
     maxConcurrent: 2,
   },
   supervision: {
-    wakeOn: ["completed", "failed"],
+    wakeOn: ["completed", "failed", "stalled"],
+  },
+  extensions: {
+    inherit: "user",
   },
 };
 

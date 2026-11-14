@@ -5,8 +5,11 @@ import { SessionManager, type ExtensionAPI, type ExtensionToolContext, type Tool
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Runtime, TaskRecord, TaskStatus } from "pi-rostrix";
-import { setupSubagents } from "./index.ts";
+import type { ResolvedAgentDefinition, Runtime, TaskRecord, TaskStatus } from "pi-rostrix";
+import { PI_GEAR_ENTRY_PATH, resolveSubagentExtensionOptions, setupSubagents } from "./index.ts";
+import { setupExtension } from "../index.ts";
+import { FffClient } from "../lifecycle/fff-client.ts";
+import { FFF_SOCKET_ENV } from "../lifecycle/fff-protocol.ts";
 import { composePrompt } from "../context/prompt/index.ts";
 import { clearSubagentRegistry, getSubagentEntry } from "../ui/subagent/registry.ts";
 import { SubagentResultComponent } from "../ui/subagent/component.ts";
@@ -490,8 +493,112 @@ test("Gear subagent dispatch passes context modelRegistry to tasks.spawn", async
         : tool === "worker" ? { task: "Do it" }
         : { scope: "Changes" };
       await h.execute(tool, params);
-      const options = h.getLastSpawnOptions() as { modelRegistry?: unknown };
+      const options = h.getLastSpawnOptions() as {
+        modelRegistry?: unknown;
+        extensionFactories?: unknown[];
+        excludeExtensionPaths?: string[];
+      };
       assert.ok(options.modelRegistry);
+      assert.equal(options.extensionFactories?.length, 1);
+      assert.ok(options.excludeExtensionPaths?.includes(PI_GEAR_ENTRY_PATH));
     });
   }
+});
+
+test("resolveSubagentExtensionOptions excludes pi-gear entry, forwards CLI extensions, and respects config overrides", () => {
+  const baseAgent = {
+    id: "gear:worker",
+    label: "Gear Worker",
+    description: "Worker",
+    promptGuidelines: [],
+    deniedTools: [],
+    mcpServers: {},
+    deniedSkills: [],
+    subagents: { maxDepth: 1, maxConcurrent: 4 },
+    supervision: { wakeOn: new Set(["completed", "failed"]) },
+    extensions: { inherit: "user", paths: [], exclude: [] },
+  } as unknown as ResolvedAgentDefinition;
+
+  const cases = [
+    {
+      name: "inherits CLI extensions when user mode is active",
+      config: undefined,
+      argv: ["-e", "/ext/bridge.ts", "--extension", "/ext/gear"],
+      expectedInherit: "user",
+      expectedAdditional: ["/ext/bridge.ts", "/ext/gear"],
+      expectedExcluded: [PI_GEAR_ENTRY_PATH],
+    },
+    {
+      name: "config override to none suppresses CLI extensions but merges explicit extensionPaths",
+      config: { subagents: { inheritExtensions: "none" as const, extensionPaths: ["/ext/explicit.ts"], excludeExtensions: ["/ext/drop.ts"] } },
+      argv: ["-e", "/ext/bridge.ts"],
+      expectedInherit: "none",
+      expectedAdditional: ["/ext/explicit.ts"],
+      expectedExcluded: [PI_GEAR_ENTRY_PATH, "/ext/drop.ts"],
+    },
+    {
+      name: "config override to all combines CLI and explicit extensionPaths",
+      config: { subagents: { inheritExtensions: "all" as const, extensionPaths: ["/ext/extra.ts"] } },
+      argv: ["-e", "/ext/bridge.ts"],
+      expectedInherit: "all",
+      expectedAdditional: ["/ext/bridge.ts", "/ext/extra.ts"],
+      expectedExcluded: [PI_GEAR_ENTRY_PATH],
+    },
+  ];
+
+  for (const row of cases) {
+    const resolved = resolveSubagentExtensionOptions(baseAgent, row.config, row.argv);
+    assert.equal(resolved.agent.extensions?.inherit, row.expectedInherit, row.name);
+    assert.deepEqual(resolved.additionalExtensionPaths ?? [], row.expectedAdditional, row.name);
+    assert.deepEqual(resolved.excludeExtensionPaths, row.expectedExcluded, row.name);
+  }
+});
+
+test("setupExtension for child connects workspace to parent fffEndpoint without env var", async (t) => {
+  const previous = process.env[FFF_SOCKET_ENV];
+  delete process.env[FFF_SOCKET_ENV];
+  t.after(() => {
+    if (previous === undefined) delete process.env[FFF_SOCKET_ENV];
+    else process.env[FFF_SOCKET_ENV] = previous;
+  });
+
+  const connectedEndpoints: string[] = [];
+  const registeredTools: string[] = [];
+  const handlers = new Map<string, ((event: unknown, ctx: unknown) => unknown)[]>();
+  const mockClient = {
+    close: () => {},
+    request: async () => ({}),
+    subscribe: async () => async () => {},
+  } as unknown as FffClient;
+  t.mock.method(FffClient, "connect", async (endpoint: string) => {
+    connectedEndpoints.push(endpoint);
+    return mockClient;
+  });
+
+  const childPi = {
+    on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => {
+      handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+    },
+    registerTool: (tool: { name: string }) => { registeredTools.push(tool.name); },
+    registerCommand: () => {},
+    registerMessageRenderer: () => {},
+    registerMarkdownTransformer: () => {},
+    getActiveTools: () => ["read", "find", "grep"],
+    setActiveTools: () => {},
+    getSettings: () => ({}),
+    events: { emit: () => {}, on: () => () => {} },
+  } as unknown as ExtensionAPI;
+
+  await setupExtension(childPi, {
+    child: true,
+    fffEndpoint: (cwd) => (cwd === "/workspace" ? "/tmp/parent-fff.sock" : undefined),
+  });
+
+  for (const handler of handlers.get("session_start") ?? []) {
+    await handler({}, { cwd: "/workspace", hasUI: false, ui: { setHiddenThinkingLabel: () => {} } });
+  }
+
+  assert.deepEqual(connectedEndpoints, ["/tmp/parent-fff.sock"]);
+  assert.ok(registeredTools.includes("find"));
+  assert.ok(registeredTools.includes("grep"));
 });

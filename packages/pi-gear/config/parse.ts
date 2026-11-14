@@ -7,6 +7,8 @@ import type {
   LspConfig,
   LspServerConfig,
   NetworkRule,
+  SubagentExtensionConfig,
+  SubagentExtensionInheritMode,
 } from "./types.ts";
 export type {
   AccessPolicy,
@@ -17,6 +19,8 @@ export type {
   LspServerConfig,
   NetworkAccess,
   NetworkRule,
+  SubagentExtensionConfig,
+  SubagentExtensionInheritMode,
 } from "./types.ts";
 
 const object = (value: unknown, name: string): Record<string, unknown> => {
@@ -222,10 +226,58 @@ const lspConfig = (value: unknown): LspConfig => {
   });
 };
 
+const optionalStringArray = (value: unknown, name: string): readonly string[] => {
+  if (!Array.isArray(value)) {
+    throw new Error(`${name} must be an array`);
+  }
+  return Object.freeze(value.map((entry, index) => string(entry, `${name}[${index}]`)));
+};
+
+const VALID_INHERIT_MODES = new Set<SubagentExtensionInheritMode>(["none", "user", "all"]);
+const MAX_STALL_TIMEOUT_SECONDS = 86_400;
+
+const subagentsConfig = (value: unknown): SubagentExtensionConfig => {
+  const subagents = object(value, "subagents");
+  exactKeys(subagents, "subagents", [], ["inheritExtensions", "extensionPaths", "excludeExtensions", "stallTimeoutSeconds"]);
+
+  let inheritExtensions: SubagentExtensionInheritMode | undefined;
+  if (subagents.inheritExtensions !== undefined) {
+    const mode = string(subagents.inheritExtensions, "subagents.inheritExtensions") as SubagentExtensionInheritMode;
+    if (!VALID_INHERIT_MODES.has(mode)) {
+      throw new Error("subagents.inheritExtensions must be one of none, user, all");
+    }
+    inheritExtensions = mode;
+  }
+
+  let stallTimeoutSeconds: number | undefined;
+  if (subagents.stallTimeoutSeconds !== undefined) {
+    if (
+      typeof subagents.stallTimeoutSeconds !== "number" ||
+      !Number.isFinite(subagents.stallTimeoutSeconds) ||
+      subagents.stallTimeoutSeconds < 1 ||
+      subagents.stallTimeoutSeconds > MAX_STALL_TIMEOUT_SECONDS
+    ) {
+      throw new Error(`subagents.stallTimeoutSeconds must be between 1 and ${MAX_STALL_TIMEOUT_SECONDS}`);
+    }
+    stallTimeoutSeconds = subagents.stallTimeoutSeconds;
+  }
+
+  return Object.freeze({
+    ...(inheritExtensions === undefined ? {} : { inheritExtensions }),
+    ...(subagents.extensionPaths === undefined
+      ? {}
+      : { extensionPaths: optionalStringArray(subagents.extensionPaths, "subagents.extensionPaths") }),
+    ...(subagents.excludeExtensions === undefined
+      ? {}
+      : { excludeExtensions: optionalStringArray(subagents.excludeExtensions, "subagents.excludeExtensions") }),
+    ...(stallTimeoutSeconds === undefined ? {} : { stallTimeoutSeconds }),
+  });
+};
+
 export const parseExtensionConfig = (value: unknown): ExtensionConfig => {
   try {
     const root = object(value, "config");
-    exactKeys(root, "config", ["version", "filesystem"], ["$schema", "sandbox", "lsp"]);
+    exactKeys(root, "config", ["version", "filesystem"], ["$schema", "sandbox", "lsp", "subagents"]);
     const filesystem = object(root.filesystem, "filesystem");
     exactKeys(filesystem, "filesystem", ["rules"]);
 
@@ -243,6 +295,7 @@ export const parseExtensionConfig = (value: unknown): ExtensionConfig => {
       version: version(root.version),
       ...policy,
       ...(root.lsp === undefined ? {} : { lsp: lspConfig(root.lsp) }),
+      ...(root.subagents === undefined ? {} : { subagents: subagentsConfig(root.subagents) }),
     });
   } catch (error) {
     throw new Error(

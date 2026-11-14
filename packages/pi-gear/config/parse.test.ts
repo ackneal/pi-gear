@@ -171,3 +171,41 @@ test("filesystem rules accept an optional boolean follow flag", () => {
     },
   }), /invalid keys/);
 });
+
+test("subagents extension policy configuration parses valid policies and rejects invalid inputs", () => {
+  assert.equal(parseExtensionConfig(validConfig()).subagents, undefined);
+
+  for (const mode of ["none", "user", "all"] as const) {
+    const parsed = parseExtensionConfig({
+      ...validConfig() as object,
+      subagents: {
+        inheritExtensions: mode,
+        extensionPaths: ["./ext-a.ts"],
+        excludeExtensions: ["./ext-b.ts"],
+        stallTimeoutSeconds: 180,
+      },
+    });
+    assert.deepEqual(parsed.subagents, {
+      inheritExtensions: mode,
+      extensionPaths: ["./ext-a.ts"],
+      excludeExtensions: ["./ext-b.ts"],
+      stallTimeoutSeconds: 180,
+    });
+  }
+
+  for (const invalid of [
+    { inheritExtensions: "project" },
+    { extensionPaths: [""] },
+    { excludeExtensions: "not-an-array" },
+    { stallTimeoutSeconds: 0 },
+    { stallTimeoutSeconds: 86_401 },
+    { stallTimeoutSeconds: "180" },
+    { stallTimeoutSeconds: Number.NaN },
+    { unknown: true },
+  ]) {
+    assert.throws(() => parseExtensionConfig({
+      ...validConfig() as object,
+      subagents: invalid,
+    }), /Invalid policy configuration/);
+  }
+});
