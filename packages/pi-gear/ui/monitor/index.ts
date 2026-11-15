@@ -9,9 +9,11 @@ import {
   buildAgentConfigSummaries,
   createMonitorState,
   extractMainAgentResources,
-  resolvePanelExpanded,
+  nextPanelMode,
+  resolvePanelMode,
   summarizeSessionUsage,
   type MonitorSnapshot,
+  type PanelMode,
   type SessionEntryLike,
 } from "./state.ts";
 
@@ -110,14 +112,9 @@ export function setupWorkspaceMonitor(
     };
   };
 
-  const toggleDetail = () => {
-    state.detailExpanded = !state.detailExpanded;
-    requestRender();
-  };
-
   const syncWidget = (ctx: ExtensionContext | undefined) => {
     if (!ctx?.hasUI || ctx.mode !== "tui") return;
-    if (!resolvePanelExpanded(state.manualExpanded)) {
+    if (resolvePanelMode(state.panelMode) === "collapsed") {
       ctx.ui.setWidget(MONITOR_WIDGET_KEY, undefined);
       return;
     }
@@ -125,23 +122,21 @@ export function setupWorkspaceMonitor(
       MONITOR_WIDGET_KEY,
       (_tui, theme) => createMonitorPanelComponent(
         buildSnapshot,
-        () => state.detailExpanded,
-        toggleDetail,
+        () => state.panelMode === "full",
         theme,
       ),
       { placement: "aboveEditor" },
     );
   };
 
-  const togglePanel = (ctx: ExtensionContext | undefined, mode?: "on" | "off") => {
-    const next = mode === "on"
-      ? true
-      : mode === "off"
-        ? false
-        : !resolvePanelExpanded(state.manualExpanded);
-    state.manualExpanded = next;
-    syncWidget(ctx ?? currentCtx);
-    if (next) void refreshGit();
+  const setPanelMode = (ctx: ExtensionContext | undefined, mode?: PanelMode) => {
+    const prev = state.panelMode;
+    const next = mode ?? nextPanelMode(prev);
+    state.panelMode = next;
+    if ((prev === "collapsed") !== (next === "collapsed")) {
+      syncWidget(ctx ?? currentCtx);
+    }
+    if (next !== "collapsed") void refreshGit();
     requestRender();
   };
 
@@ -202,8 +197,8 @@ export function setupWorkspaceMonitor(
 
       const component = createMonitorFooterComponent(
         buildSnapshot,
-        () => resolvePanelExpanded(state.manualExpanded),
-        () => togglePanel(currentCtx),
+        () => resolvePanelMode(state.panelMode),
+        () => setPanelMode(currentCtx),
         theme,
       );
       return {
@@ -229,26 +224,19 @@ export function setupWorkspaceMonitor(
   };
 
   pi.registerCommand("gear:panel", {
-    description: "Toggle workspace monitor panel",
+    description: "Cycle or set workspace monitor panel mode (collapsed, compact, full)",
     handler: async (args, ctx) => {
       currentCtx = ctx;
       const normalized = args.trim().toLowerCase();
-      if (normalized === "full" || normalized === "more") {
-        state.detailExpanded = true;
-        togglePanel(ctx, "on");
-        return;
-      }
-      if (normalized === "compact" || normalized === "less") {
-        state.detailExpanded = false;
-        togglePanel(ctx, "on");
-        return;
-      }
-      const mode = normalized === "on" || normalized === "open" || normalized === "expand"
-        ? "on"
-        : normalized === "off" || normalized === "close" || normalized === "collapse"
-          ? "off"
-          : undefined;
-      togglePanel(ctx, mode);
+      const mode: PanelMode | undefined =
+        normalized === "full" || normalized === "all" || normalized === "more"
+          ? "full"
+          : normalized === "on" || normalized === "open" || normalized === "expand" || normalized === "compact"
+            ? "compact"
+            : normalized === "off" || normalized === "close" || normalized === "collapse" || normalized === "collapsed"
+              ? "collapsed"
+              : undefined;
+      setPanelMode(ctx, mode);
     },
   });
 

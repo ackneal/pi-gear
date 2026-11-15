@@ -10,6 +10,7 @@ import {
   formatCwd,
   formatTokens,
   type MonitorSnapshot,
+  type PanelMode,
 } from "./state.ts";
 
 function formatDurationCompact(ms: number): string {
@@ -74,11 +75,17 @@ function formatWorkspaceBranch(snapshot: MonitorSnapshot): string {
   return base;
 }
 
+function panelModeIcon(mode: PanelMode): string {
+  if (mode === "full") return "▾+";
+  if (mode === "compact") return "▾";
+  return "▴";
+}
+
 export function renderFooterLine1(
   snapshot: MonitorSnapshot,
   theme: Theme,
   width: number,
-  expanded: boolean,
+  panelMode: PanelMode,
   now = Date.now(),
 ): string {
   const sep = theme.fg("dim", " │ ");
@@ -102,7 +109,7 @@ export function renderFooterLine1(
     return truncateToWidth(leftText, width, "");
   }
 
-  const icon = theme.fg("accent", expanded ? "▾" : "▴");
+  const icon = theme.fg("accent", panelModeIcon(panelMode));
   const iconWidth = visibleWidth(icon);
   const maxLeftWidth = Math.max(0, width - iconWidth - 1);
   const truncatedLeft = truncateToWidth(leftText, maxLeftWidth, theme.fg("dim", "..."));
@@ -177,11 +184,11 @@ export function renderMonitorFooter(
   snapshot: MonitorSnapshot,
   theme: Theme,
   width: number,
-  expanded: boolean,
+  panelMode: PanelMode,
   now = Date.now(),
 ): string[] {
   const lines = [
-    renderFooterLine1(snapshot, theme, width, expanded, now),
+    renderFooterLine1(snapshot, theme, width, panelMode, now),
     renderFooterLine2(snapshot, theme, width),
   ];
 
@@ -199,8 +206,8 @@ export function renderMonitorFooter(
 
 export function createMonitorFooterComponent(
   getSnapshot: () => MonitorSnapshot,
-  isExpanded: () => boolean,
-  onTogglePanel: () => void,
+  getPanelMode: () => PanelMode,
+  onCyclePanelMode: () => void,
   theme: Theme,
 ): Component & {
   handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined;
@@ -209,11 +216,11 @@ export function createMonitorFooterComponent(
   return {
     invalidate() {},
     render(width: number): string[] {
-      return renderMonitorFooter(getSnapshot(), theme, width, isExpanded());
+      return renderMonitorFooter(getSnapshot(), theme, width, getPanelMode());
     },
     handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
-      if (event.type === "click" && event.button === "left" && event.y === 0 && event.x >= event.width - 3) {
-        onTogglePanel();
+      if (event.type === "click" && event.button === "left" && event.y === 0 && event.x >= event.width - 4) {
+        onCyclePanelMode();
         return { handled: true, render: true };
       }
       return undefined;

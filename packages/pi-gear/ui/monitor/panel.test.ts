@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import type { TaskRecord } from "pi-rostrix";
 import type { Theme } from "../subagent/format.ts";
-import { createMonitorPanelComponent, renderMonitorPanel } from "./panel.ts";
+import { renderMonitorPanel } from "./panel.ts";
 import type { MonitorSnapshot } from "./state.ts";
 
 const mockTheme = {
@@ -112,7 +112,7 @@ test("renderMonitorPanel renders 3-column git layout and per-tool/mcp success ra
     const joined = lines.join("\n");
 
     assert.ok(lines[0]?.startsWith("─ Monitor "), `${tc.name}: expected Monitor rule`);
-    assert.ok(lines[0]?.endsWith("[+all]"), `${tc.name}: expected [+all] toggle`);
+    assert.ok(lines[0]?.endsWith("─"), `${tc.name}: expected clean top rule without inline button`);
     assert.ok(lines.every((line) => visibleWidth(line) === tc.width), `${tc.name}: exact width`);
     assert.ok(joined.includes("Git feat/issue-27  2 files (+14 -3)"), `${tc.name}: git header`);
     assert.ok(joined.includes("Agent default"), `${tc.name}: agent header`);
@@ -165,44 +165,9 @@ test("renderMonitorPanel hides Git section when workspace is not a git repo and 
   const joined = lines.join("\n");
 
   assert.ok(!joined.includes("Git "), "must hide Git section when not a git repo");
-  assert.ok(lines[0]?.endsWith("[compact]"), "full mode shows [compact]");
   assert.ok(joined.includes("edit (6 · 100%)"), "full mode shows call count + rate");
   assert.ok(joined.includes("bash (4 · 75%)"), "full mode shows call count + rate");
   assert.ok(joined.includes("read"), "full mode includes uncalled tools");
   assert.ok(joined.includes("skill: none"));
   assert.ok(joined.includes("mcp: none"));
-});
-
-test("createMonitorPanelComponent toggles detail mode on left click over top-right toggle", () => {
-  let toggles = 0;
-  const component = createMonitorPanelComponent(
-    () => makeSnapshot(),
-    () => false,
-    () => { toggles += 1; },
-    mockTheme,
-  );
-  const baseEvent = { screenX: 0, screenY: 0, shift: false, alt: false, ctrl: false };
-
-  const hit = component.handleMouse({
-    ...baseEvent,
-    type: "click",
-    button: "left",
-    x: 96,
-    y: 0,
-    width: 100,
-    height: 8,
-  });
-  const miss = component.handleMouse({
-    ...baseEvent,
-    type: "click",
-    button: "left",
-    x: 10,
-    y: 0,
-    width: 100,
-    height: 8,
-  });
-
-  assert.deepEqual(hit, { handled: true, render: true });
-  assert.equal(miss, undefined);
-  assert.equal(toggles, 1);
 });

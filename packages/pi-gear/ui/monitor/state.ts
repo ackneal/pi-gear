@@ -4,8 +4,16 @@ import type { ResolvedAgentDefinition, TaskRecord } from "pi-rostrix";
 import type { SubagentSettings } from "../../subagents/settings.ts";
 import { EMPTY_GIT_SNAPSHOT, type WorkspaceGitSnapshot } from "./git-status.ts";
 
-export function resolvePanelExpanded(manualExpanded: boolean | undefined): boolean {
-  return manualExpanded ?? false;
+export type PanelMode = "collapsed" | "compact" | "full";
+
+export function resolvePanelMode(manualMode: PanelMode | undefined): PanelMode {
+  return manualMode ?? "collapsed";
+}
+
+export function nextPanelMode(current: PanelMode): PanelMode {
+  if (current === "collapsed") return "compact";
+  if (current === "compact") return "full";
+  return "collapsed";
 }
 
 export interface ToolCallStats {
@@ -274,8 +282,7 @@ export function buildAgentConfigSummaries(
 
 export interface MonitorState {
   git: WorkspaceGitSnapshot;
-  manualExpanded: boolean | undefined;
-  detailExpanded: boolean;
+  panelMode: PanelMode;
   footerData: ReadonlyFooterDataProvider | undefined;
   readonly toolTracker: ToolStatsTracker;
 }
@@ -283,8 +290,7 @@ export interface MonitorState {
 export function createMonitorState(): MonitorState {
   return {
     git: EMPTY_GIT_SNAPSHOT,
-    manualExpanded: undefined,
-    detailExpanded: false,
+    panelMode: "collapsed",
     footerData: undefined,
     toolTracker: createToolStatsTracker(),
   };

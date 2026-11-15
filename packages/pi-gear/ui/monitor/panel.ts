@@ -1,10 +1,4 @@
-import {
-  truncateToWidth,
-  visibleWidth,
-  type Component,
-  type TuiMouseEvent,
-  type TuiMouseEventResult,
-} from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import type { TaskRecord } from "pi-rostrix";
 import type { Theme } from "../subagent/format.ts";
 import { readableActivityName } from "../subagent/text-policy.ts";
@@ -69,14 +63,12 @@ function frameRows(
   title: string,
   rows: readonly string[],
   width: number,
-  detailExpanded: boolean,
   theme: Theme,
 ): string[] {
   const lineWidth = Math.max(24, width);
   const headerLabel = `─ ${title} `;
-  const toggleLabel = detailExpanded ? " [compact]" : " [+all]";
-  const fillCount = Math.max(1, lineWidth - visibleWidth(headerLabel) - visibleWidth(toggleLabel));
-  const topRule = `${theme.fg("dim", `${headerLabel}${"─".repeat(fillCount)}`)}${theme.fg("accent", toggleLabel)}`;
+  const fillCount = Math.max(0, lineWidth - visibleWidth(headerLabel));
+  const topRule = theme.fg("dim", `${headerLabel}${"─".repeat(fillCount)}`);
   const bottomRule = theme.fg("dim", "─".repeat(lineWidth));
 
   return [
@@ -365,7 +357,7 @@ export function renderMonitorPanel(
       "",
       ...formatSubagentsColumn(snapshot, lineWidth, now, detailExpanded, theme),
     ];
-    return frameRows("Monitor", rows, lineWidth, detailExpanded, theme);
+    return frameRows("Monitor", rows, lineWidth, theme);
   }
 
   const divider = theme.fg("dim", " │ ");
@@ -381,7 +373,7 @@ export function renderMonitorPanel(
     for (let i = 0; i < rowCount; i += 1) {
       rows.push(`${padCell(col1[i] ?? "", col1Width)}${divider}${padCell(col2[i] ?? "", col2Width)}`);
     }
-    return frameRows("Monitor", rows, lineWidth, detailExpanded, theme);
+    return frameRows("Monitor", rows, lineWidth, theme);
   }
 
   const colContentWidth = Math.max(18, lineWidth - 6);
@@ -402,28 +394,18 @@ export function renderMonitorPanel(
     rows.push(`${c1}${divider}${c2}${divider}${c3}`);
   }
 
-  return frameRows("Monitor", rows, lineWidth, detailExpanded, theme);
+  return frameRows("Monitor", rows, lineWidth, theme);
 }
 
 export function createMonitorPanelComponent(
   getSnapshot: () => MonitorSnapshot,
-  isDetailExpanded: () => boolean,
-  onToggleDetail: () => void,
+  isFullMode: () => boolean,
   theme: Theme,
-): Component & {
-  handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined;
-} {
+): Component {
   return {
     invalidate() {},
     render(width: number): string[] {
-      return renderMonitorPanel(getSnapshot(), theme, width, Date.now(), isDetailExpanded());
-    },
-    handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
-      if (event.type === "click" && event.button === "left" && event.y === 0 && event.x >= event.width - 10) {
-        onToggleDetail();
-        return { handled: true, render: true };
-      }
-      return undefined;
+      return renderMonitorPanel(getSnapshot(), theme, width, Date.now(), isFullMode());
     },
   };
 }

@@ -112,7 +112,7 @@ test("renderFooterLine1 formats workspace diff, agent, running subagent, activit
         },
         tasks: [makeTask({ agentId: "gear:worker", status: "running", startedAt: 10_000 })],
       }),
-      expanded: false,
+      panelMode: "collapsed" as const,
       now: 85_000,
       expectedParts: [
         "~/Developer/pi-gear (feat/monitor +12 -3)",
@@ -124,7 +124,7 @@ test("renderFooterLine1 formats workspace diff, agent, running subagent, activit
       forbidden: ["↑2", "↓1", "✕"],
     },
     {
-      name: "expanded with untracked-only git state and multiple running tasks",
+      name: "compact with untracked-only git state and multiple running tasks",
       snapshot: makeSnapshot({
         git: {
           isRepo: true,
@@ -147,7 +147,7 @@ test("renderFooterLine1 formats workspace diff, agent, running subagent, activit
           makeTask({ id: "t2", agentId: "gear:researcher", status: "running", startedAt: 50_000 }),
         ],
       }),
-      expanded: true,
+      panelMode: "compact" as const,
       now: 70_000,
       expectedParts: [
         "~/Developer/pi-gear (main*)",
@@ -158,10 +158,22 @@ test("renderFooterLine1 formats workspace diff, agent, running subagent, activit
       expectedSuffix: "▾",
       forbidden: ["✕"],
     },
+    {
+      name: "full mode shows ▾+ suffix",
+      snapshot: makeSnapshot(),
+      panelMode: "full" as const,
+      now: 70_000,
+      expectedParts: [
+        "~/Developer/pi-gear (main)",
+        "default",
+      ],
+      expectedSuffix: "▾+",
+      forbidden: ["✕"],
+    },
   ];
 
   for (const tc of cases) {
-    const line = renderFooterLine1(tc.snapshot, mockTheme, 160, tc.expanded, tc.now);
+    const line = renderFooterLine1(tc.snapshot, mockTheme, 160, tc.panelMode, tc.now);
 
     assert.equal(visibleWidth(line), 160, tc.name);
     for (const part of tc.expectedParts) {
@@ -180,7 +192,7 @@ test("renderFooterLine2 and renderMonitorFooter preserve native Line 2 stats and
   });
 
   const line2 = renderFooterLine2(snapshot, mockTheme, 100);
-  const lines = renderMonitorFooter(snapshot, mockTheme, 100, false, 1000);
+  const lines = renderMonitorFooter(snapshot, mockTheme, 100, "collapsed", 1000);
 
   assert.equal(visibleWidth(line2), 100);
   assert.ok(line2.includes("↑1.2k ↓340 $0.045 18.4%/200k (auto)"));
@@ -218,7 +230,7 @@ test("createMonitorFooterComponent toggles panel only on left click over toggle 
     let toggles = 0;
     const component = createMonitorFooterComponent(
       () => makeSnapshot(),
-      () => false,
+      () => "collapsed",
       () => { toggles += 1; },
       mockTheme,
     );
