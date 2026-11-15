@@ -83,7 +83,7 @@ for (const source of ["snapshot", "subscription"] as const) {
 
       const output = component.render(180).join("\n");
       assert.match(output, /1\/1 tools/);
-      assert.match(output, /↑1\.5k ↓200 · \$0\.020 · 2s/);
+      assert.match(output, /↑1\.5k ↓200 Σ1\.7k · \$0\.020 · 2s/);
       assert.doesNotMatch(output, /aborted|Not an activity row/);
       if (expanded) {
         assert.match(output, /Read · success · evidence\.txt/);

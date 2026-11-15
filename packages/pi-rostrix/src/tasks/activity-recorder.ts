@@ -49,6 +49,12 @@ export class TaskActivityRecorder {
     }
   }
 
+  recordNotice(level: "info" | "warning" | "error", text: string): void {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    this.append({ kind: "notice", level, text: this.text(trimmed) });
+  }
+
   record(event: AgentSessionEvent): void {
     if (event.type === "message_start" && event.message.role === "assistant") {
       this.messageId++;
@@ -59,6 +65,22 @@ export class TaskActivityRecorder {
       if (stream.type === "thinking_start") this.thinking(stream.contentIndex, "", false);
       if (stream.type === "thinking_delta") this.thinking(stream.contentIndex, stream.delta, true);
       if (stream.type === "thinking_end") this.thinking(stream.contentIndex, stream.content, false);
+    }
+
+    if (event.type === "auto_retry_start") {
+      this.recordNotice("warning", `Retrying (${event.attempt}/${event.maxAttempts}): ${event.errorMessage}`);
+    }
+
+    if (event.type === "auto_retry_end" && !event.success) {
+      this.recordNotice("error", event.finalError || "Retry failed");
+    }
+
+    if (event.type === "message_end" && event.message.role === "custom" && event.message.display) {
+      const content = event.message.content;
+      const text = typeof content === "string"
+        ? content
+        : content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+      this.recordNotice("info", text);
     }
 
     if (event.type === "message_end" && event.message.role === "assistant") {

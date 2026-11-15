@@ -8,6 +8,10 @@ function isActivity(value: unknown): value is SubagentActivity {
       && (activity.contentIndex === undefined || typeof activity.contentIndex === "number")
       && (activity.messageId === undefined || typeof activity.messageId === "number");
   }
+  if (activity.kind === "notice") {
+    return typeof activity.text === "string"
+      && (activity.level === "info" || activity.level === "warning" || activity.level === "error");
+  }
   return activity.kind === "tool" && typeof activity.name === "string"
     && (activity.status === "running" || activity.status === "success" || activity.status === "error")
     && (activity.id === undefined || typeof activity.id === "string")

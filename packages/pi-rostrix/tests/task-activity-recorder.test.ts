@@ -109,3 +109,49 @@ test("registry records bounded SDK events and live usage", async (t) => {
     });
   }
 });
+
+test("recorder captures notices, retry warnings/errors, and displayed custom messages", async () => {
+  const registry = new TaskController({
+    createRunner: (options) => ({
+      run: async () => {
+        options.onNotice?.({ level: "warning", text: "Blocked write on /etc/hosts" });
+        options.onEvent?.({
+          type: "auto_retry_start",
+          attempt: 1,
+          maxAttempts: 3,
+          delayMs: 1000,
+          errorMessage: "429 rate limit",
+        });
+        options.onEvent?.({
+          type: "auto_retry_end",
+          success: false,
+          attempt: 3,
+          finalError: "Rate limit persisted",
+        });
+        options.onEvent?.({
+          type: "message_end",
+          message: { role: "custom", customType: "ext:note", content: "Custom notice", display: true, timestamp: 1 },
+        });
+        options.onEvent?.({
+          type: "message_end",
+          message: { role: "custom", customType: "ext:hidden", content: "Hidden notice", display: false, timestamp: 2 },
+        });
+        return {
+          status: "completed",
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 2, cost: 0 },
+          turns: 1,
+          durationMs: 1,
+        };
+      },
+    }),
+  });
+
+  const task = registry.spawn({ agent: agent(), task: "Work" });
+  const finished = await registry.wait(task.id);
+  assert.deepEqual(finished.activities, [
+    { kind: "notice", level: "warning", text: "Blocked write on /etc/hosts" },
+    { kind: "notice", level: "warning", text: "Retrying (1/3): 429 rate limit" },
+    { kind: "notice", level: "error", text: "Rate limit persisted" },
+    { kind: "notice", level: "info", text: "Custom notice" },
+  ]);
+});

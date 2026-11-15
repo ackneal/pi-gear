@@ -51,9 +51,6 @@ function compact(text: string): string {
 }
 
 function failure(run: TaskViewSnapshot, metadata: SubagentDisplayMetadata): string {
-  const error = usefulText(run.error);
-  if (error) return compact(error);
-
   const label = metadataLabel(metadata);
   return run.status === "aborted" ? activityPhrase(metadata, "aborted", `${label} aborted`) : activityPhrase(metadata, "failed", `${label} failed`);
 }
@@ -99,9 +96,10 @@ export function formatUsage(usage: TaskViewSnapshot["usage"]): string | undefine
   if (!usage) return undefined;
   const inTokens = (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
   const outTokens = usage.output ?? 0;
+  const totalTokens = Math.max(usage.totalTokens ?? 0, inTokens + outTokens);
   const totalCost = usage.cost?.total ?? 0;
   const outStr = usage.estimated ? `~${formatTokens(outTokens)}` : formatTokens(outTokens);
-  return `↑${formatTokens(inTokens)} ↓${outStr} · ${formatCost(totalCost)}${usage.estimated ? " (est.)" : ""}`;
+  return `↑${formatTokens(inTokens)} ↓${outStr} Σ${formatTokens(totalTokens)} · ${formatCost(totalCost)}${usage.estimated ? " (est.)" : ""}`;
 }
 
 export function formatDuration(durationMs: number): string {
@@ -147,6 +145,13 @@ export function expandedDetails(run: TaskViewSnapshot | undefined, theme: Theme,
       color: (text) => theme.fg("text", text),
     });
     lines.push(...markdown.render(width));
+  }
+
+  const notices = run.activities.filter((item): item is Extract<SubagentActivity, { kind: "notice" }> => item.kind === "notice");
+  for (const notice of notices) {
+    const color = notice.level === "error" ? "error" : notice.level === "warning" ? "warning" : "muted";
+    const text = usefulText(notice.text);
+    if (text) lines.push(...text.split("\n").map((line) => theme.fg(color, line)));
   }
 
   const error = usefulText(run.error);
