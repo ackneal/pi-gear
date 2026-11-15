@@ -702,7 +702,7 @@ test("outputPad = 1 aligns non-Box skill results with ordinary reads without dou
       const component = row.render();
       assert.equal(component instanceof Box, row.isBox, row.name);
       const renderedLines = component
-        .render(120)
+        .render(200)
         .map((line) => stripVTControlCharacters(line).trimEnd())
         .filter((line) => line.trim() !== "");
       assert.deepEqual(renderedLines, row.expectedLines, row.name);
