@@ -994,3 +994,160 @@ test("runner preserves reported message_update usage when message_end usage is z
   });
 });
 
+test("runner does not overwrite reported message_update usage with delta estimate or drop it when message_end omits usage", async () => {
+  let listener: (event: AgentSessionEvent) => void = () => {};
+  const zeroUsage = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+  const runner = new InProcessSubagentRunner(
+    { agent: agent() },
+    async () => ({
+      session: {
+        bindExtensions: async () => {},
+        subscribe: (callback) => { listener = callback; return () => {}; },
+        prompt: async () => {
+          const reported = assistant({
+            usage: { input: 80, output: 15, cacheRead: 5, cacheWrite: 0, totalTokens: 100, cost: { input: 0.008, output: 0.0015, cacheRead: 0.0005, cacheWrite: 0, total: 0.01 } },
+          });
+          const trailingZero = assistant({ usage: zeroUsage });
+          const missingUsage = assistant();
+          delete (missingUsage as any).usage;
+
+          listener({ type: "message_start", message: reported });
+          listener({ type: "message_update", message: reported, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "hello", partial: reported } });
+          listener({ type: "message_update", message: trailingZero, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: " world", partial: trailingZero } });
+          listener({ type: "message_end", message: missingUsage });
+        },
+        abort: async () => {},
+        extensionRunner: { emit: async () => {} },
+        dispose: () => {},
+      },
+    }),
+  );
+
+  const result = await runner.run("Work");
+  assert.equal(result.status, "completed");
+  assert.deepEqual(result.usage, {
+    inputTokens: 80,
+    outputTokens: 15,
+    cacheReadTokens: 5,
+    cacheWriteTokens: 0,
+    totalTokens: 100,
+    cost: 0.01,
+  });
+});
+
+test("runner reads authoritative cumulative stats from session.getSessionStats like the native footer", async () => {
+  let listener: (event: AgentSessionEvent) => void = () => {};
+  const published: Array<{ inputTokens: number; outputTokens: number; totalTokens: number; cost: number }> = [];
+  let stats = {
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    cost: 0,
+  };
+  const runner = new InProcessSubagentRunner(
+    {
+      agent: agent(),
+      onUsage: (u) => published.push({ inputTokens: u.inputTokens, outputTokens: u.outputTokens, totalTokens: u.totalTokens, cost: u.cost }),
+    },
+    async () => ({
+      session: {
+        bindExtensions: async () => {},
+        subscribe: (callback) => { listener = callback; return () => {}; },
+        getSessionStats: () => stats as any,
+        prompt: async () => {
+          const msg = assistant({
+            usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          });
+          listener({ type: "message_start", message: msg });
+          listener({ type: "message_end", message: msg });
+          stats = {
+            tokens: { input: 240, output: 60, cacheRead: 100, cacheWrite: 20, total: 420 },
+            cost: 0.045,
+          };
+          listener({ type: "turn_end", message: msg, toolResults: [] });
+        },
+        abort: async () => {},
+        extensionRunner: { emit: async () => {} },
+        dispose: () => {},
+      },
+    }),
+  );
+
+  const result = await runner.run("Work");
+  assert.equal(result.status, "completed");
+  assert.deepEqual(result.usage, {
+    inputTokens: 240,
+    outputTokens: 60,
+    cacheReadTokens: 100,
+    cacheWriteTokens: 20,
+    totalTokens: 420,
+    cost: 0.045,
+  });
+  assert.deepEqual(published.at(-1), {
+    inputTokens: 240,
+    outputTokens: 60,
+    totalTokens: 420,
+    cost: 0.045,
+  });
+});
+
+test("runner estimates output and preserves totalTokens when streaming message_update only reports totalTokens", async () => {
+  let listener: (event: AgentSessionEvent) => void = () => {};
+  const published: Array<{ inputTokens: number; outputTokens: number; totalTokens: number; cost: number; estimated?: boolean }> = [];
+  const runner = new InProcessSubagentRunner(
+    {
+      agent: agent(),
+      onUsage: (u) => published.push({
+        inputTokens: u.inputTokens,
+        outputTokens: u.outputTokens,
+        totalTokens: u.totalTokens,
+        cost: u.cost,
+        ...(u.estimated ? { estimated: true } : {}),
+      }),
+    },
+    async () => ({
+      session: {
+        bindExtensions: async () => {},
+        subscribe: (callback) => { listener = callback; return () => {}; },
+        prompt: async () => {
+          const totalOnly = assistant({
+            usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 3755, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          });
+          const finalMsg = assistant({
+            usage: { input: 3000, output: 755, cacheRead: 0, cacheWrite: 0, totalTokens: 3755, cost: { input: 0.003, output: 0.003, cacheRead: 0, cacheWrite: 0, total: 0.006 } },
+          });
+          listener({ type: "message_start", message: totalOnly });
+          listener({ type: "message_update", message: totalOnly, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "12345678", partial: totalOnly } });
+          listener({ type: "message_end", message: finalMsg });
+        },
+        abort: async () => {},
+        extensionRunner: { emit: async () => {} },
+        dispose: () => {},
+      },
+    }),
+  );
+
+  const result = await runner.run("Work");
+  assert.equal(result.status, "completed");
+  assert.deepEqual(published[0], {
+    inputTokens: 0,
+    outputTokens: 2,
+    totalTokens: 3755,
+    cost: 0,
+    estimated: true,
+  });
+  assert.deepEqual(result.usage, {
+    inputTokens: 3000,
+    outputTokens: 755,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    totalTokens: 3755,
+    cost: 0.006,
+  });
+});
+

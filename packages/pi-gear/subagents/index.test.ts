@@ -217,7 +217,7 @@ test("completed evidence survives a session reload in the original agent card", 
   const output = component.render(160).join("\n");
   assert.match(output, /● Agent\(worker\)/);
   assert.match(output, /Read · success · index\.ts/);
-  assert.match(output, /↑107 ↓20 · \$0\.330 · 30ms/);
+  assert.match(output, /↑107 ↓20 Σ131 · \$0\.330 · 30ms/);
   assert.match(output, /Persisted answer/);
   assert.doesNotMatch(output, /aborted|Status unavailable/);
 });

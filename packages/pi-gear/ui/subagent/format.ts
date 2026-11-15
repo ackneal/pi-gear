@@ -96,9 +96,10 @@ export function formatUsage(usage: TaskViewSnapshot["usage"]): string | undefine
   if (!usage) return undefined;
   const inTokens = (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
   const outTokens = usage.output ?? 0;
+  const totalTokens = Math.max(usage.totalTokens ?? 0, inTokens + outTokens);
   const totalCost = usage.cost?.total ?? 0;
   const outStr = usage.estimated ? `~${formatTokens(outTokens)}` : formatTokens(outTokens);
-  return `↑${formatTokens(inTokens)} ↓${outStr} · ${formatCost(totalCost)}${usage.estimated ? " (est.)" : ""}`;
+  return `↑${formatTokens(inTokens)} ↓${outStr} Σ${formatTokens(totalTokens)} · ${formatCost(totalCost)}${usage.estimated ? " (est.)" : ""}`;
 }
 
 export function formatDuration(durationMs: number): string {

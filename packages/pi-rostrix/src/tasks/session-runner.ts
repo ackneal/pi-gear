@@ -72,6 +72,7 @@ export interface SubagentTaskResult {
 }
 
 type SubagentSession = Pick<AgentSession, "bindExtensions" | "subscribe" | "prompt" | "abort" | "dispose"> & {
+  getSessionStats?: AgentSession["getSessionStats"];
   extensionRunner: { emit(event: SessionShutdownEvent): Promise<unknown> };
 };
 
@@ -186,15 +187,70 @@ export class InProcessSubagentRunner {
     let activeTurnDeltaChars = 0;
     let activeTurnUsage: SubagentUsage | undefined;
     let lastPublishedUsage: SubagentUsage | undefined;
+    const hasDetailedUsage = (
+      u:
+        | {
+            input?: number;
+            output?: number;
+            cacheRead?: number;
+            cacheWrite?: number;
+            cost?: { total?: number };
+          }
+        | undefined,
+    ): boolean =>
+      Boolean(
+        u &&
+          ((u.input ?? 0) > 0 ||
+            (u.output ?? 0) > 0 ||
+            (u.cacheRead ?? 0) > 0 ||
+            (u.cacheWrite ?? 0) > 0 ||
+            (u.cost?.total ?? 0) > 0),
+      );
+    const hasNonZeroUsage = (
+      u:
+        | {
+            input?: number;
+            output?: number;
+            cacheRead?: number;
+            cacheWrite?: number;
+            totalTokens?: number;
+            cost?: { total?: number };
+          }
+        | undefined,
+    ): boolean => Boolean(hasDetailedUsage(u) || (u?.totalTokens ?? 0) > 0);
+    const commitTurnUsage = (u: {
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+      totalTokens: number;
+      cost: number;
+    }): void => {
+      inputTokens += u.inputTokens;
+      outputTokens += u.outputTokens;
+      cacheReadTokens += u.cacheReadTokens;
+      cacheWriteTokens += u.cacheWriteTokens;
+      totalTokens += u.totalTokens;
+      totalCost += u.cost;
+    };
     const collectUsage = (): SubagentUsage => {
+      const stats = typeof sessionResult?.session?.getSessionStats === "function"
+        ? sessionResult.session.getSessionStats()
+        : undefined;
+      const baseInput = Math.max(inputTokens, stats?.tokens.input ?? 0);
+      const baseOutput = Math.max(outputTokens, stats?.tokens.output ?? 0);
+      const baseCacheRead = Math.max(cacheReadTokens, stats?.tokens.cacheRead ?? 0);
+      const baseCacheWrite = Math.max(cacheWriteTokens, stats?.tokens.cacheWrite ?? 0);
+      const baseTotal = Math.max(totalTokens, stats?.tokens.total ?? 0);
+      const baseCost = Math.max(totalCost, stats?.cost ?? 0);
       const estimated = activeTurnUsage?.estimated === true;
       return {
-        inputTokens: inputTokens + (activeTurnUsage?.inputTokens ?? 0),
-        outputTokens: outputTokens + (activeTurnUsage?.outputTokens ?? 0),
-        cacheReadTokens: cacheReadTokens + (activeTurnUsage?.cacheReadTokens ?? 0),
-        cacheWriteTokens: cacheWriteTokens + (activeTurnUsage?.cacheWriteTokens ?? 0),
-        totalTokens: totalTokens + (activeTurnUsage?.totalTokens ?? 0),
-        cost: totalCost + (activeTurnUsage?.cost ?? 0),
+        inputTokens: baseInput + (activeTurnUsage?.inputTokens ?? 0),
+        outputTokens: baseOutput + (activeTurnUsage?.outputTokens ?? 0),
+        cacheReadTokens: baseCacheRead + (activeTurnUsage?.cacheReadTokens ?? 0),
+        cacheWriteTokens: baseCacheWrite + (activeTurnUsage?.cacheWriteTokens ?? 0),
+        totalTokens: baseTotal + (activeTurnUsage?.totalTokens ?? 0),
+        cost: baseCost + (activeTurnUsage?.cost ?? 0),
         ...(estimated ? { estimated: true } : {}),
       };
     };
@@ -224,7 +280,7 @@ export class InProcessSubagentRunner {
     // Use in-memory session manager so no session JSONL files pollute the disk
     const inMemorySessionManager = SessionManager.inMemory();
 
-    let sessionResult;
+    let sessionResult: { session: SubagentSession } | undefined;
     try {
       const thinkingLevel = this._options.thinkingLevel;
       const modelStr = this._options.model ?? this._agent.model?.preferred;
@@ -491,10 +547,7 @@ export class InProcessSubagentRunner {
         }
         if (event.message.role === "assistant") {
           const u = event.message.usage;
-          const hasReportedUsage = Boolean(
-            u && (u.input > 0 || u.output > 0 || u.cacheRead > 0 || u.cacheWrite > 0 || u.totalTokens > 0 || u.cost.total > 0),
-          );
-          if (hasReportedUsage && u) {
+          if (hasDetailedUsage(u) && u) {
             activeTurnUsage = {
               inputTokens: u.input,
               outputTokens: u.output,
@@ -504,16 +557,32 @@ export class InProcessSubagentRunner {
               cost: u.cost.total,
             };
             publishUsage();
-          } else if (activeTurnDeltaChars > 0) {
+          } else if (activeTurnDeltaChars > 0 && (!activeTurnUsage || activeTurnUsage.estimated)) {
             const estimatedOutput = Math.max(1, Math.ceil(activeTurnDeltaChars / 4));
             activeTurnUsage = {
               inputTokens: 0,
               outputTokens: estimatedOutput,
               cacheReadTokens: 0,
               cacheWriteTokens: 0,
-              totalTokens: estimatedOutput,
+              totalTokens: Math.max(u?.totalTokens ?? 0, estimatedOutput),
               cost: 0,
               estimated: true,
+            };
+            publishUsage();
+          } else if (hasNonZeroUsage(u) && u && (!activeTurnUsage || !hasDetailedUsage({
+            input: activeTurnUsage.inputTokens,
+            output: activeTurnUsage.outputTokens,
+            cacheRead: activeTurnUsage.cacheReadTokens,
+            cacheWrite: activeTurnUsage.cacheWriteTokens,
+            cost: { total: activeTurnUsage.cost },
+          }))) {
+            activeTurnUsage = {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              totalTokens: u.totalTokens,
+              cost: 0,
             };
             publishUsage();
           }
@@ -527,31 +596,19 @@ export class InProcessSubagentRunner {
           const previousTurnUsage = activeTurnUsage;
           activeTurnDeltaChars = 0;
           activeTurnUsage = undefined;
-          if (msg.usage) {
-            const hasMsgUsage =
-              msg.usage.input > 0 ||
-              msg.usage.output > 0 ||
-              msg.usage.cacheRead > 0 ||
-              msg.usage.cacheWrite > 0 ||
-              msg.usage.totalTokens > 0 ||
-              msg.usage.cost.total > 0;
-            if (hasMsgUsage) {
-              inputTokens += msg.usage.input;
-              outputTokens += msg.usage.output;
-              cacheReadTokens += msg.usage.cacheRead;
-              cacheWriteTokens += msg.usage.cacheWrite;
-              totalTokens += msg.usage.totalTokens;
-              totalCost += msg.usage.cost.total;
-              publishUsage();
-            } else if (previousTurnUsage && !previousTurnUsage.estimated) {
-              inputTokens += previousTurnUsage.inputTokens;
-              outputTokens += previousTurnUsage.outputTokens;
-              cacheReadTokens += previousTurnUsage.cacheReadTokens;
-              cacheWriteTokens += previousTurnUsage.cacheWriteTokens;
-              totalTokens += previousTurnUsage.totalTokens;
-              totalCost += previousTurnUsage.cost;
-              publishUsage();
-            }
+          if (hasNonZeroUsage(msg.usage) && msg.usage) {
+            commitTurnUsage({
+              inputTokens: msg.usage.input,
+              outputTokens: msg.usage.output,
+              cacheReadTokens: msg.usage.cacheRead,
+              cacheWriteTokens: msg.usage.cacheWrite,
+              totalTokens: msg.usage.totalTokens,
+              cost: msg.usage.cost.total,
+            });
+            publishUsage();
+          } else if (previousTurnUsage && !previousTurnUsage.estimated) {
+            commitTurnUsage(previousTurnUsage);
+            publishUsage();
           }
           if (msg.stopReason === "error" || msg.stopReason === "aborted") {
             lastAssistantError = msg.errorMessage?.trim() || `Subagent model turn ${msg.stopReason === "aborted" ? "aborted" : "failed"}`;
@@ -567,6 +624,10 @@ export class InProcessSubagentRunner {
             }
           }
         }
+      }
+
+      if (event.type === "turn_end" || event.type === "agent_end") {
+        publishUsage();
       }
     });
 

@@ -137,10 +137,14 @@ test("formatUsage formats input, cache, output, and cost", () => {
   // inTokens = 1000 + 200 + 50 = 1250 -> 1.3k (or 1.25 -> 1.3k)
   // outTokens = 450 -> 450
   // totalCost = 0.002 -> $0.002
-  assert.equal(formatUsage(usage), "↑1.3k ↓450 · $0.002");
+  assert.equal(formatUsage(usage), "↑1.3k ↓450 Σ1.7k · $0.002");
   assert.equal(
     formatUsage({ input: 1_000, output: 12, cost: { total: 0.005 }, estimated: true }),
-    "↑1.0k ↓~12 · $0.005 (est.)",
+    "↑1.0k ↓~12 Σ1.0k · $0.005 (est.)",
+  );
+  assert.equal(
+    formatUsage({ input: 0, output: 0, totalTokens: 3_755, cost: { total: 0 } }),
+    "↑0 ↓0 Σ3.8k · $0.000",
   );
 });
 
@@ -182,7 +186,7 @@ test("collapsed metadata renders tool fraction and usage accurately", () => {
     },
   };
   const collapsedUsage = collapsed(runWithUsage, researcher, theme, "✓", 2_000);
-  assert.match(collapsedUsage, /2\/2 tools · ↑1.2k ↓450 · \$0\.002 · 2s/);
+  assert.match(collapsedUsage, /2\/2 tools · ↑1\.2k ↓450 Σ1\.6k · \$0\.002 · 2s/);
 });
 
 
