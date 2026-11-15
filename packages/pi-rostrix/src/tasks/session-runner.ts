@@ -17,6 +17,7 @@ import {
   type AgentSessionEvent,
   type ExtensionAPI,
   type ExtensionFactory,
+  type ExtensionUIContext,
   type SessionShutdownEvent,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
@@ -38,6 +39,11 @@ export type SubagentUsage = {
   readonly estimated?: boolean | undefined;
 };
 
+export type SubagentNotice = {
+  readonly level: "info" | "warning" | "error";
+  readonly text: string;
+};
+
 export interface SubagentSessionOptions {
   readonly agent: ResolvedAgentDefinition;
   readonly cwd?: string | undefined;
@@ -51,6 +57,7 @@ export interface SubagentSessionOptions {
   readonly excludeExtensionPaths?: readonly string[] | undefined;
   readonly signal?: AbortSignal | undefined;
   readonly onEvent?: ((event: AgentSessionEvent) => void) | undefined;
+  readonly onNotice?: ((notice: SubagentNotice) => void) | undefined;
   readonly onTextDelta?: ((delta: string) => void) | undefined;
   readonly onUsage?: ((usage: SubagentUsage) => void) | undefined;
 }
@@ -71,6 +78,44 @@ type SubagentSession = Pick<AgentSession, "bindExtensions" | "subscribe" | "prom
 type SessionFactory = (
   options: NonNullable<Parameters<typeof createAgentSession>[0]>,
 ) => Promise<{ session: SubagentSession }>;
+
+function createSubagentUIContext(onNotice: (notice: SubagentNotice) => void): ExtensionUIContext {
+  return {
+    select: async () => undefined,
+    confirm: async () => false,
+    input: async () => undefined,
+    notify: (message, type) => {
+      const text = message.trim();
+      if (text) onNotice({ level: type ?? "info", text });
+    },
+    onTerminalInput: () => () => {},
+    setStatus: () => {},
+    setWorkingMessage: () => {},
+    setWorkingVisible: () => {},
+    setWorkingIndicator: () => {},
+    setHiddenThinkingLabel: () => {},
+    setWidget: () => {},
+    setFooter: () => {},
+    setHeader: () => {},
+    setTitle: () => {},
+    custom: (async () => undefined) as ExtensionUIContext["custom"],
+    pasteToEditor: () => {},
+    setEditorText: () => {},
+    getEditorText: () => "",
+    editor: async () => undefined,
+    addAutocompleteProvider: () => {},
+    setEditorComponent: () => {},
+    getEditorComponent: () => undefined,
+    get theme() {
+      return {} as ExtensionUIContext["theme"];
+    },
+    getAllThemes: () => [],
+    getTheme: () => undefined,
+    setTheme: () => ({ success: false, error: "UI not available" }),
+    getToolsExpanded: () => false,
+    setToolsExpanded: () => {},
+  };
+}
 
 async function disposeSession(session: SubagentSession): Promise<void> {
   try {
@@ -371,7 +416,19 @@ export class InProcessSubagentRunner {
         ...(thinkingLevel ? { thinkingLevel } : {}),
       });
 
-      await sessionResult.session.bindExtensions({ mode: "json" });
+      const onNotice = this._options.onNotice;
+      await sessionResult.session.bindExtensions({
+        mode: "json",
+        ...(onNotice
+          ? {
+              uiContext: createSubagentUIContext(onNotice),
+              onError: (err) => {
+                const text = err.error?.trim();
+                if (text) onNotice({ level: "error", text: `${err.event}: ${text}` });
+              },
+            }
+          : {}),
+      });
     } catch (createErr) {
       if (sessionResult) await disposeSession(sessionResult.session);
       if (this._options.signal?.aborted) {
@@ -467,16 +524,34 @@ export class InProcessSubagentRunner {
         const msg = event.message;
         if (msg.role === "assistant") {
           turns++;
+          const previousTurnUsage = activeTurnUsage;
           activeTurnDeltaChars = 0;
           activeTurnUsage = undefined;
           if (msg.usage) {
-            inputTokens += msg.usage.input;
-            outputTokens += msg.usage.output;
-            cacheReadTokens += msg.usage.cacheRead;
-            cacheWriteTokens += msg.usage.cacheWrite;
-            totalTokens += msg.usage.totalTokens;
-            totalCost += msg.usage.cost.total;
-            publishUsage();
+            const hasMsgUsage =
+              msg.usage.input > 0 ||
+              msg.usage.output > 0 ||
+              msg.usage.cacheRead > 0 ||
+              msg.usage.cacheWrite > 0 ||
+              msg.usage.totalTokens > 0 ||
+              msg.usage.cost.total > 0;
+            if (hasMsgUsage) {
+              inputTokens += msg.usage.input;
+              outputTokens += msg.usage.output;
+              cacheReadTokens += msg.usage.cacheRead;
+              cacheWriteTokens += msg.usage.cacheWrite;
+              totalTokens += msg.usage.totalTokens;
+              totalCost += msg.usage.cost.total;
+              publishUsage();
+            } else if (previousTurnUsage && !previousTurnUsage.estimated) {
+              inputTokens += previousTurnUsage.inputTokens;
+              outputTokens += previousTurnUsage.outputTokens;
+              cacheReadTokens += previousTurnUsage.cacheReadTokens;
+              cacheWriteTokens += previousTurnUsage.cacheWriteTokens;
+              totalTokens += previousTurnUsage.totalTokens;
+              totalCost += previousTurnUsage.cost;
+              publishUsage();
+            }
           }
           if (msg.stopReason === "error" || msg.stopReason === "aborted") {
             lastAssistantError = msg.errorMessage?.trim() || `Subagent model turn ${msg.stopReason === "aborted" ? "aborted" : "failed"}`;

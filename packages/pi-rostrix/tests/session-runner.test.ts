@@ -916,3 +916,81 @@ test("runner skips session.prompt when signal aborts during session setup", asyn
   assert.equal(result.error, "Timed out during setup");
 });
 
+test("runner forwards child uiContext notifications and extension errors to onNotice", async () => {
+  const notices: Array<{ level: string; text: string }> = [];
+  const runner = new InProcessSubagentRunner(
+    { agent: agent(), onNotice: (notice) => notices.push(notice) },
+    async () => ({
+      session: {
+        bindExtensions: async (bindings) => {
+          bindings.uiContext?.notify("Blocked read on /etc/passwd", "warning");
+          bindings.uiContext?.notify("Background info", "info");
+          bindings.onError?.({ extensionPath: "child.ts", event: "tool_call", error: "Extension crashed" });
+        },
+        subscribe: () => () => {},
+        prompt: async () => {},
+        abort: async () => {},
+        extensionRunner: { emit: async () => {} },
+        dispose: () => {},
+      },
+    }),
+  );
+
+  const result = await runner.run("Work");
+  assert.equal(result.status, "completed");
+  assert.deepEqual(notices, [
+    { level: "warning", text: "Blocked read on /etc/passwd" },
+    { level: "info", text: "Background info" },
+    { level: "error", text: "tool_call: Extension crashed" },
+  ]);
+});
+
+test("runner preserves reported message_update usage when message_end usage is zero", async () => {
+  let listener: (event: AgentSessionEvent) => void = () => {};
+  const zeroUsage = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+  const runner = new InProcessSubagentRunner(
+    { agent: agent() },
+    async () => ({
+      session: {
+        bindExtensions: async () => {},
+        subscribe: (callback) => { listener = callback; return () => {}; },
+        prompt: async () => {
+          const turn1 = assistant({
+            usage: { input: 100, output: 20, cacheRead: 10, cacheWrite: 5, totalTokens: 135, cost: { input: 0.01, output: 0.002, cacheRead: 0.001, cacheWrite: 0.001, total: 0.014 } },
+          });
+          listener({ type: "message_start", message: turn1 });
+          listener({ type: "message_update", message: turn1, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "a", partial: turn1 } });
+          listener({ type: "message_end", message: assistant({ usage: zeroUsage }) });
+
+          const turn2 = assistant({
+            usage: { input: 50, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 60, cost: { input: 0.005, output: 0.001, cacheRead: 0, cacheWrite: 0, total: 0.006 } },
+          });
+          listener({ type: "message_start", message: turn2 });
+          listener({ type: "message_end", message: turn2 });
+        },
+        abort: async () => {},
+        extensionRunner: { emit: async () => {} },
+        dispose: () => {},
+      },
+    }),
+  );
+
+  const result = await runner.run("Work");
+  assert.equal(result.status, "completed");
+  assert.deepEqual(result.usage, {
+    inputTokens: 150,
+    outputTokens: 30,
+    cacheReadTokens: 10,
+    cacheWriteTokens: 5,
+    totalTokens: 195,
+    cost: 0.02,
+  });
+});
+

@@ -23,7 +23,8 @@ export type TaskUsage = {
 export type TaskActivity =
   | { kind: "thinking"; text: string; contentIndex?: number; messageId?: number }
   | { kind: "tool"; id?: string; name: string; args?: Record<string, unknown>; status: "running" | "success" | "error"; result?: string }
-  | { kind: "message"; role: "user" | "assistant"; text: string };
+  | { kind: "message"; role: "user" | "assistant"; text: string }
+  | { kind: "notice"; level: "info" | "warning" | "error"; text: string };
 
 export interface TaskRecord {
   readonly id: string;

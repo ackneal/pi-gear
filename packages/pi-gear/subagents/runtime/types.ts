@@ -2,7 +2,8 @@ import type { CapabilitySpec } from "../../capabilities/index.ts";
 
 export type SubagentActivity =
   | { kind: "thinking"; text: string; contentIndex?: number; messageId?: number }
-  | { kind: "tool"; id?: string; name: string; args?: Record<string, unknown>; status: "running" | "success" | "error"; result?: string };
+  | { kind: "tool"; id?: string; name: string; args?: Record<string, unknown>; status: "running" | "success" | "error"; result?: string }
+  | { kind: "notice"; level: "info" | "warning" | "error"; text: string };
 export interface TaskSnapshot {
   status: "running" | "success" | "error" | "aborted";
   startedAt: number;

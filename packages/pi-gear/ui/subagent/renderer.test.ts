@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   collapsed,
+  expandedDetails,
   formatCost,
   formatDuration,
   formatTokens,
@@ -200,4 +201,28 @@ test("expanded indentation preserves every body line without slicing content", a
   } finally {
     component.dispose();
   }
+});
+
+test("notices and error details render only in expanded view, not in collapsed view", () => {
+  const run = {
+    status: "error" as const,
+    startedAt: 0,
+    finishedAt: 2_000,
+    error: "Detailed failure reason",
+    activities: [
+      { kind: "notice" as const, level: "warning" as const, text: "Blocked read on /etc/passwd" },
+      { kind: "notice" as const, level: "error" as const, text: "Extension error detail" },
+    ],
+  };
+
+  const collapsedText = collapsed(run, researcher, theme, "✗", 2_000, "Inspect");
+  assert.match(collapsedText, /Research failed/);
+  assert.doesNotMatch(collapsedText, /Detailed failure reason/);
+  assert.doesNotMatch(collapsedText, /Blocked read on \/etc\/passwd/);
+  assert.doesNotMatch(collapsedText, /Extension error detail/);
+
+  const expandedText = expandedDetails(run, theme, 80);
+  assert.match(expandedText, /Blocked read on \/etc\/passwd/);
+  assert.match(expandedText, /Extension error detail/);
+  assert.match(expandedText, /Detailed failure reason/);
 });

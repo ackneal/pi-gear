@@ -51,9 +51,6 @@ function compact(text: string): string {
 }
 
 function failure(run: TaskViewSnapshot, metadata: SubagentDisplayMetadata): string {
-  const error = usefulText(run.error);
-  if (error) return compact(error);
-
   const label = metadataLabel(metadata);
   return run.status === "aborted" ? activityPhrase(metadata, "aborted", `${label} aborted`) : activityPhrase(metadata, "failed", `${label} failed`);
 }
@@ -147,6 +144,13 @@ export function expandedDetails(run: TaskViewSnapshot | undefined, theme: Theme,
       color: (text) => theme.fg("text", text),
     });
     lines.push(...markdown.render(width));
+  }
+
+  const notices = run.activities.filter((item): item is Extract<SubagentActivity, { kind: "notice" }> => item.kind === "notice");
+  for (const notice of notices) {
+    const color = notice.level === "error" ? "error" : notice.level === "warning" ? "warning" : "muted";
+    const text = usefulText(notice.text);
+    if (text) lines.push(...text.split("\n").map((line) => theme.fg(color, line)));
   }
 
   const error = usefulText(run.error);

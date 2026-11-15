@@ -219,6 +219,10 @@ export class TaskController {
         recorder.record(event);
         this._updateTask(taskId, {});
       },
+      onNotice: (notice) => {
+        recorder.recordNotice(notice.level, notice.text);
+        this._updateTask(taskId, {});
+      },
       onUsage: (usage) => {
         this._updateTask(taskId, { usage: toTaskUsage(usage) });
       },
