@@ -1,4 +1,13 @@
-import { truncateToWidth, visibleWidth, type TUI } from "@earendil-works/pi-tui";
+import {
+  HStack,
+  isViewportTUI,
+  ScrollView,
+  truncateToWidth,
+  visibleWidth,
+  type Component,
+  type TUI,
+  type TuiAltScreen,
+} from "@earendil-works/pi-tui";
 
 const SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
 const DIVIDER = " │ ";
@@ -77,6 +86,59 @@ export interface SplitPaneHandle {
   uninstall(): void;
 }
 
+function installViewportSplitLayout(
+  altTui: TuiAltScreen,
+  isEnabled: () => boolean,
+  renderSidebar: (sidebarWidth: number) => string[],
+  dividerColor: (text: string) => string,
+  onSplitWidthChange?: (splitActive: boolean, totalWidth: number) => void,
+): SplitPaneHandle | undefined {
+  const primaryView = (altTui as unknown as { implicitScrollView?: Component }).implicitScrollView;
+  if (!primaryView) return undefined;
+
+  let lastSplitActive: boolean | undefined;
+  const isSplitVisible = (viewportWidth: number): boolean => {
+    const active = isEnabled() && computeSplitWidths(viewportWidth).splitActive;
+    if (lastSplitActive !== active) {
+      lastSplitActive = active;
+      onSplitWidthChange?.(active, viewportWidth);
+    }
+    return active;
+  };
+
+  const sidebarContent: Component = {
+    invalidate() {},
+    render(width: number): string[] {
+      const innerWidth = Math.max(20, width - 2);
+      const prefix = dividerColor("│ ");
+      return renderSidebar(innerWidth).map((line) => `${prefix}${padToExactWidth(line, innerWidth)}`);
+    },
+  };
+
+  const sidebarScrollView = new ScrollView(sidebarContent, { follow: "none" });
+  const root = new HStack(
+    [
+      { component: primaryView, grow: 1, shrink: 1, minSize: 68 },
+      {
+        component: sidebarScrollView,
+        basis: SPLIT_SIDEBAR_MAX_WIDTH,
+        minSize: SPLIT_SIDEBAR_MIN_WIDTH,
+        maxSize: SPLIT_SIDEBAR_MAX_WIDTH,
+        visible: (vp) => isSplitVisible(vp.width),
+      },
+    ],
+    { align: "stretch", gap: 1 },
+  );
+
+  altTui.setLayoutRoot(root);
+
+  return {
+    uninstall() {
+      altTui.setLayoutRoot(undefined);
+    },
+  };
+}
+
 export function installRightSidebarPatch(
   tui: TUI,
   isEnabled: () => boolean,
@@ -84,6 +146,17 @@ export function installRightSidebarPatch(
   dividerColor: (text: string) => string,
   onSplitWidthChange?: (splitActive: boolean, totalWidth: number) => void,
 ): SplitPaneHandle {
+  if (isViewportTUI(tui)) {
+    const viewportHandle = installViewportSplitLayout(
+      tui as unknown as TuiAltScreen,
+      isEnabled,
+      renderSidebar,
+      dividerColor,
+      onSplitWidthChange,
+    );
+    if (viewportHandle) return viewportHandle;
+  }
+
   const hadOwn = Object.prototype.hasOwnProperty.call(tui, "render");
   const originalRender = tui.render;
   let lastSplitActive: boolean | undefined;
