@@ -4,12 +4,7 @@ import type { ResolvedAgentDefinition, Runtime } from "pi-rostrix";
 import type { SubagentServices } from "../../subagents/index.ts";
 import { createMonitorFooterComponent } from "./footer.ts";
 import { readWorkspaceGitSnapshot } from "./git-status.ts";
-import { createMonitorPanelComponent, renderMonitorSidebar } from "./panel.ts";
-import {
-  computeSplitWidths,
-  installRightSidebarPatch,
-  type SplitPaneHandle,
-} from "./split-pane.ts";
+import { createMonitorPanelComponent } from "./panel.ts";
 import {
   buildAgentConfigSummaries,
   createMonitorState,
@@ -62,7 +57,6 @@ export function setupWorkspaceMonitor(
   let currentTui: TUI | undefined;
   let branchUnsubscribe: (() => void) | undefined;
   let tasksUnsubscribe: (() => void) | undefined;
-  let splitPaneHandle: SplitPaneHandle | undefined;
   let tickTimer: ReturnType<typeof setInterval> | undefined;
   let gitRefreshSeq = 0;
   let cachedActiveAgentId = "default";
@@ -157,15 +151,9 @@ export function setupWorkspaceMonitor(
     };
   };
 
-  const syncWidget = (ctx: ExtensionContext | undefined, splitActiveOverride?: boolean) => {
+  const syncWidget = (ctx: ExtensionContext | undefined) => {
     if (!ctx?.hasUI || ctx.mode !== "tui") return;
-    const expanded = resolvePanelMode(state.panelMode) !== "collapsed";
-    const splitActive = splitActiveOverride ?? (
-      expanded && splitPaneHandle !== undefined && currentTui
-        ? computeSplitWidths(currentTui.terminal.columns).splitActive && !currentTui.hasOverlay()
-        : false
-    );
-    if (!expanded || splitActive) {
+    if (resolvePanelMode(state.panelMode) === "collapsed") {
       ctx.ui.setWidget(MONITOR_WIDGET_KEY, undefined);
       return;
     }
@@ -222,8 +210,6 @@ export function setupWorkspaceMonitor(
       clearInterval(tickTimer);
       tickTimer = undefined;
     }
-    splitPaneHandle?.uninstall();
-    splitPaneHandle = undefined;
     branchUnsubscribe?.();
     branchUnsubscribe = undefined;
     tasksUnsubscribe?.();
@@ -251,28 +237,6 @@ export function setupWorkspaceMonitor(
       });
       branchUnsubscribe = localBranchUnsubscribe;
 
-      splitPaneHandle?.uninstall();
-      const localSplitHandle = installRightSidebarPatch(
-        tui,
-        () => resolvePanelMode(state.panelMode) !== "collapsed" && !tui.hasOverlay(),
-        (sidebarWidth) => renderMonitorSidebar(
-          buildSnapshot(),
-          theme,
-          sidebarWidth,
-          Date.now(),
-          state.panelMode === "full",
-        ),
-        (text) => theme.fg("dim", text),
-        (splitActive) => {
-          queueMicrotask(() => {
-            if (splitPaneHandle !== localSplitHandle) return;
-            syncWidget(currentCtx, splitActive);
-            requestRender();
-          });
-        },
-      );
-      splitPaneHandle = localSplitHandle;
-
       const component = createMonitorFooterComponent(
         buildSnapshot,
         () => resolvePanelMode(state.panelMode),
@@ -285,10 +249,6 @@ export function setupWorkspaceMonitor(
           localBranchUnsubscribe();
           if (branchUnsubscribe === localBranchUnsubscribe) {
             branchUnsubscribe = undefined;
-          }
-          localSplitHandle?.uninstall();
-          if (splitPaneHandle === localSplitHandle) {
-            splitPaneHandle = undefined;
           }
           component.dispose?.();
         },

@@ -340,28 +340,6 @@ function formatSubagentsColumn(
   return lines;
 }
 
-export function renderMonitorSidebar(
-  snapshot: MonitorSnapshot,
-  theme: Theme,
-  width: number,
-  now = Date.now(),
-  detailExpanded = false,
-): string[] {
-  const colWidth = Math.max(24, width);
-  const headerLabel = "─ Monitor ";
-  const fillCount = Math.max(0, colWidth - visibleWidth(headerLabel));
-  const headerRule = theme.fg("dim", `${headerLabel}${"─".repeat(fillCount)}`);
-
-  const sections: string[] = [headerRule];
-  if (snapshot.git.isRepo) {
-    sections.push(...formatGitColumn(snapshot, colWidth, detailExpanded, theme), "");
-  }
-  sections.push(...formatMainAgentColumn(snapshot, colWidth, detailExpanded, theme));
-  sections.push("", ...formatSubagentsColumn(snapshot, colWidth, now, detailExpanded, theme));
-
-  return sections.map((row) => padCell(row, colWidth));
-}
-
 export function renderMonitorPanel(
   snapshot: MonitorSnapshot,
   theme: Theme,
