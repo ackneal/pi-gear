@@ -63,7 +63,7 @@ export function composeSideBySideLines(
   const styledDivider = dividerColor(DIVIDER);
   const emptySidebar = " ".repeat(sidebarWidth);
 
-  for (let i = 0; i < result.length; i += 1) {
+  for (let i = viewportTop; i < result.length; i += 1) {
     const leftLine = result[i] ?? "";
     if (isImageLine(leftLine)) continue;
 

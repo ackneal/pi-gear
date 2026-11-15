@@ -32,9 +32,10 @@ test("composeSideBySideLines joins left and right columns, anchors viewport, and
   const composed = composeSideBySideLines(mainLines, sidebarLines, 20, 14, 3);
 
   assert.equal(composed.length, 4);
+  assert.equal(composed[0], "history-1");
   assert.equal(composed[1], "\x1b_Gi=1;AAAA\x1b\\");
-  assert.ok(composed[0]?.includes(" │ "));
-  assert.equal(visibleWidth(composed[0] ?? ""), 37);
+  assert.ok(composed[2]?.includes(" │ "));
+  assert.equal(visibleWidth(composed[2] ?? ""), 37);
   assert.ok(composed[2]?.includes("Git main"));
   assert.ok(composed[3]?.includes("Agent default"));
 });

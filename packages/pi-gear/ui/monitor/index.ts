@@ -17,9 +17,12 @@ import {
   nextPanelMode,
   resolvePanelMode,
   summarizeSessionUsage,
+  type AgentConfigSummary,
+  type MainAgentResources,
   type MonitorSnapshot,
   type PanelMode,
   type SessionEntryLike,
+  type SessionUsageSnapshot,
 } from "./state.ts";
 
 export interface WorkspaceMonitorServices {
@@ -62,9 +65,46 @@ export function setupWorkspaceMonitor(
   let splitPaneHandle: SplitPaneHandle | undefined;
   let tickTimer: ReturnType<typeof setInterval> | undefined;
   let gitRefreshSeq = 0;
+  let cachedActiveAgentId = "default";
+  let cachedAgents: AgentConfigSummary[] = [];
+  let cachedMainResources: MainAgentResources = { toolsCount: 0, tools: [], skills: [], mcpServers: [] };
+  let cachedSessionUsage: SessionUsageSnapshot = {
+    turns: 0,
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    cost: 0,
+    contextTokens: null,
+    contextWindow: 0,
+    contextPercent: null,
+  };
 
   const requestRender = () => {
     currentTui?.requestRender();
+  };
+
+  const refreshSessionCache = (ctx: ExtensionContext | undefined) => {
+    const activeAgent = services.runtime.getActiveAgent();
+    if (ctx) {
+      const summary = resolveAgentSummaries(services.runtime, services.subagents, ctx);
+      cachedActiveAgentId = summary.activeAgentId;
+      cachedAgents = summary.agents;
+      const entries = ctx.sessionManager.getEntries() as readonly SessionEntryLike[];
+      cachedSessionUsage = summarizeSessionUsage(
+        entries,
+        ctx.getContextUsage(),
+        ctx.model?.contextWindow ?? 0,
+      );
+    } else {
+      cachedActiveAgentId = activeAgent?.id ?? "default";
+      cachedAgents = [];
+    }
+    cachedMainResources = extractMainAgentResources(
+      pi.getActiveTools(),
+      pi.getCommands(),
+      Object.keys(activeAgent?.mcpServers ?? {}),
+    );
   };
 
   const refreshGit = async () => {
@@ -79,29 +119,28 @@ export function setupWorkspaceMonitor(
 
   const buildSnapshot = (): MonitorSnapshot => {
     const ctx = currentCtx;
-    const entries = (ctx?.sessionManager.getEntries() ?? []) as readonly SessionEntryLike[];
     const contextUsage = ctx?.getContextUsage();
     const model = ctx?.model;
-    const activeAgent = services.runtime.getActiveAgent();
-    const { activeAgentId, agents } = ctx
-      ? resolveAgentSummaries(services.runtime, services.subagents, ctx)
-      : { activeAgentId: "default", agents: [] };
+    const contextWindow = contextUsage?.contextWindow ?? model?.contextWindow ?? cachedSessionUsage.contextWindow;
+    const contextTokens = contextUsage ? contextUsage.tokens : cachedSessionUsage.contextTokens;
+    const contextPercent = contextUsage ? contextUsage.percent : cachedSessionUsage.contextPercent;
 
     return {
       cwd: ctx?.cwd ?? process.cwd(),
       home: process.env.HOME || process.env.USERPROFILE,
       sessionName: pi.getSessionName(),
       git: state.git,
-      activeAgent: activeAgentId,
-      mainResources: extractMainAgentResources(
-        pi.getActiveTools(),
-        pi.getCommands(),
-        Object.keys(activeAgent?.mcpServers ?? {}),
-      ),
-      agents,
+      activeAgent: cachedActiveAgentId,
+      mainResources: cachedMainResources,
+      agents: cachedAgents,
       tasks: services.runtime.tasks.listTasks(),
       tools: state.toolTracker.snapshot(),
-      sessionUsage: summarizeSessionUsage(entries, contextUsage, model?.contextWindow ?? 0),
+      sessionUsage: {
+        ...cachedSessionUsage,
+        contextTokens,
+        contextWindow,
+        contextPercent,
+      },
       ...(model
         ? {
             model: {
@@ -148,7 +187,10 @@ export function setupWorkspaceMonitor(
     if ((prev === "collapsed") !== (next === "collapsed")) {
       syncWidget(ctx ?? currentCtx);
     }
-    if (next !== "collapsed") void refreshGit();
+    if (next !== "collapsed") {
+      refreshSessionCache(ctx ?? currentCtx);
+      void refreshGit();
+    }
     requestRender();
   };
 
@@ -257,6 +299,7 @@ export function setupWorkspaceMonitor(
     state.toolTracker.resetFromEntries(
       ctx.sessionManager.getEntries() as readonly SessionEntryLike[],
     );
+    refreshSessionCache(ctx);
     tasksUnsubscribe = services.runtime.tasks.subscribe("*", () => {
       syncTicker();
       requestRender();
@@ -291,12 +334,14 @@ export function setupWorkspaceMonitor(
     state.toolTracker.resetFromEntries(
       ctx.sessionManager.getEntries() as readonly SessionEntryLike[],
     );
+    refreshSessionCache(ctx);
     void refreshGit();
     requestRender();
   });
 
   pi.on("session_compact", (_event, ctx) => {
     currentCtx = ctx;
+    refreshSessionCache(ctx);
     requestRender();
   });
 
@@ -319,8 +364,10 @@ export function setupWorkspaceMonitor(
 
   pi.on("turn_end", (_event, ctx) => {
     currentCtx = ctx;
+    refreshSessionCache(ctx);
     syncTicker();
     void refreshGit();
+    requestRender();
   });
 
   pi.on("session_shutdown", () => {
