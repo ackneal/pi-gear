@@ -161,7 +161,7 @@ export function setupWorkspaceMonitor(
     if (!ctx?.hasUI || ctx.mode !== "tui") return;
     const expanded = resolvePanelMode(state.panelMode) !== "collapsed";
     const splitActive = splitActiveOverride ?? (
-      expanded && currentTui
+      expanded && splitPaneHandle !== undefined && currentTui
         ? computeSplitWidths(currentTui.terminal.columns).splitActive && !currentTui.hasOverlay()
         : false
     );
@@ -286,7 +286,7 @@ export function setupWorkspaceMonitor(
           if (branchUnsubscribe === localBranchUnsubscribe) {
             branchUnsubscribe = undefined;
           }
-          localSplitHandle.uninstall();
+          localSplitHandle?.uninstall();
           if (splitPaneHandle === localSplitHandle) {
             splitPaneHandle = undefined;
           }
