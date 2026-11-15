@@ -36,8 +36,8 @@ function makeSnapshot(overrides: Partial<MonitorSnapshot> = {}): MonitorSnapshot
     home: "/Users/alice",
     activeAgent: "default",
     agents: [
-      { id: "gear:researcher", model: "anthropic/claude-haiku" },
-      { id: "gear:worker", model: "anthropic/claude-sonnet-4-6" },
+      { id: "gear:researcher", model: "anthropic/claude-haiku", thinkingLevel: "low" },
+      { id: "gear:worker", model: "anthropic/claude-sonnet-4-6", thinkingLevel: "medium" },
     ],
     mainResources: {
       toolsCount: 8,
@@ -101,18 +101,54 @@ test("renderMonitorPanel renders full-width 3-column layout when width >= 95 and
     const lines = renderMonitorPanel(makeSnapshot(), mockTheme, tc.width, 70_000);
     const joined = lines.join("\n");
 
-    assert.ok(lines[0]?.startsWith("┌─ Monitor "), `${tc.name}: expected Monitor title`);
-    assert.ok(lines.every((line) => visibleWidth(line) === tc.width), `${tc.name}: exact box width`);
-    assert.ok(joined.includes("Git feat/issue-27 2 files · +14 -3"), `${tc.name}: git header`);
+    assert.ok(lines[0]?.startsWith("─ Monitor "), `${tc.name}: expected Monitor rule`);
+    assert.ok(lines.every((line) => visibleWidth(line) === tc.width), `${tc.name}: exact width`);
+    assert.ok(joined.includes("Git feat/issue-27  2 files · +14 -3"), `${tc.name}: git header`);
     assert.ok(joined.includes("Agent default"), `${tc.name}: agent header`);
-    assert.ok(joined.includes("tool: 8 (10 calls (90%))"), `${tc.name}: tool success rate`);
-    assert.ok(joined.includes("skill: 3 (plan, debug +1)"), `${tc.name}: skill summary`);
+    assert.ok(joined.includes("tool: 8"), `${tc.name}: tool count`);
+    assert.ok(joined.includes("└ 10 calls (90%)"), `${tc.name}: tool usage child line`);
+    assert.ok(joined.includes("skill: 3"), `${tc.name}: skill count`);
+    assert.ok(joined.includes("└ plan, debug, docs"), `${tc.name}: skill list child line`);
+    assert.ok(joined.includes("mcp: 1"), `${tc.name}: mcp count`);
+    assert.ok(joined.includes("└ pi-agy-bridge_pi"), `${tc.name}: mcp list child line`);
     assert.ok(joined.includes("Subagent (1 running)"), `${tc.name}: subagent header`);
-    assert.ok(joined.includes("● worker claude-sonnet-4-6"), `${tc.name}: active worker`);
+    assert.ok(joined.includes("● worker") && joined.includes("• medium"), `${tc.name}: active worker with level`);
+    assert.ok(joined.includes("○ researcher") && joined.includes("• low"), `${tc.name}: researcher with level`);
     assert.ok(joined.includes("└ ◌ 1m · Edit"), `${tc.name}: running task tool`);
     assert.ok(joined.includes("○ custom"), `${tc.name}: finished fallback agent uses dim marker`);
 
     const headerRow = lines.find((line) => line.includes("Git ") && line.includes("Agent "));
     assert.equal(Boolean(headerRow), tc.expectColumnsOnSameRow, `${tc.name}: column placement`);
   }
+});
+
+test("renderMonitorPanel omits 'clean' on empty git diff and renders 'none' for empty agent resources", () => {
+  const snapshot = makeSnapshot({
+    git: {
+      isRepo: true,
+      branch: "main",
+      ahead: 0,
+      behind: 0,
+      totalInsertions: 0,
+      totalDeletions: 0,
+      files: [],
+    },
+    mainResources: {
+      toolsCount: 4,
+      skills: [],
+      mcpServers: [],
+    },
+    tools: {
+      total: 0,
+      errors: 0,
+      activeTools: [],
+      counts: {},
+    },
+  });
+
+  const joined = renderMonitorPanel(snapshot, mockTheme, 110, 70_000).join("\n");
+
+  assert.ok(!joined.includes("clean"), "must not render 'clean'");
+  assert.ok(joined.includes("skill: none"));
+  assert.ok(joined.includes("mcp: none"));
 });

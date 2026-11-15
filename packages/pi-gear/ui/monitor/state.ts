@@ -18,6 +18,7 @@ export interface ToolStatsSnapshot {
 export interface AgentConfigSummary {
   readonly id: string;
   readonly model?: string | undefined;
+  readonly thinkingLevel?: string | undefined;
 }
 
 export interface SessionUsageSnapshot {
@@ -242,9 +243,11 @@ export function buildAgentConfigSummaries(
   return definitions.map((def) => {
     const override = settingsById.get(def.id);
     const model = override?.modelSelection.model ?? def.model?.preferred;
+    const thinkingLevel = override?.modelSelection.thinkingLevel;
     return {
       id: def.id,
       ...(model ? { model } : {}),
+      ...(thinkingLevel ? { thinkingLevel } : {}),
     };
   });
 }

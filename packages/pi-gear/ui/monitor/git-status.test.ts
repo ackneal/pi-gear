@@ -127,6 +127,23 @@ test("readWorkspaceGitSnapshot reads a real temporary git repo and handles non-r
     ]);
     assert.equal(snapshot.totalInsertions, 2);
     assert.equal(snapshot.totalDeletions, 0);
+
+    execFileSync("git", ["add", "a.txt", "b.txt"], { cwd: repoDir });
+    execFileSync("git", ["commit", "-m", "main base"], { cwd: repoDir });
+    execFileSync("git", ["checkout", "-b", "feat/diff-base"], { cwd: repoDir });
+    writeFileSync(join(repoDir, "c.txt"), "committed on branch\n");
+    execFileSync("git", ["add", "c.txt"], { cwd: repoDir });
+    execFileSync("git", ["commit", "-m", "branch commit"], { cwd: repoDir });
+    writeFileSync(join(repoDir, "a.txt"), "line1\nline2\nline3\nline4\nunstaged\n");
+
+    const branchSnapshot = await readWorkspaceGitSnapshot(repoDir);
+    assert.equal(branchSnapshot.branch, "feat/diff-base");
+    assert.deepEqual(branchSnapshot.files, [
+      { path: "a.txt", state: "M", insertions: 1, deletions: 0, binary: false },
+      { path: "c.txt", state: "A", insertions: 1, deletions: 0, binary: false },
+    ]);
+    assert.equal(branchSnapshot.totalInsertions, 2);
+    assert.equal(branchSnapshot.totalDeletions, 0);
   } finally {
     rmSync(nonRepoDir, { recursive: true, force: true });
     rmSync(repoDir, { recursive: true, force: true });

@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-export type GitFileState = "S" | "M" | "SM" | "?" | "U";
+export type GitFileState = "S" | "M" | "SM" | "?" | "U" | "A" | "D";
 
 export interface GitStatusEntry {
   readonly path: string;
@@ -225,16 +225,76 @@ async function runGit(cwd: string, args: readonly string[]): Promise<string | un
   }
 }
 
+async function resolveDiffBase(cwd: string): Promise<string | undefined> {
+  const head = await runGit(cwd, ["rev-parse", "--verify", "--quiet", "HEAD"]);
+  if (!head) return undefined;
+
+  const candidates = ["origin/main", "main", "origin/master", "master"];
+  for (const ref of candidates) {
+    const exists = await runGit(cwd, ["rev-parse", "--verify", "--quiet", ref]);
+    if (!exists) continue;
+    const base = await runGit(cwd, ["merge-base", "HEAD", ref]);
+    if (base?.trim()) return base.trim();
+  }
+  return "HEAD";
+}
+
+function parseGitNameStatus(output: string): GitStatusEntry[] {
+  const entries: GitStatusEntry[] = [];
+  for (const line of output.split(/\r?\n/)) {
+    if (!line) continue;
+    const parts = line.split("\t");
+    const code = parts[0]?.[0];
+    const rawPath = parts.length >= 3 ? parts[2] : parts[1];
+    if (!code || !rawPath) continue;
+    const path = unquoteGitPath(rawPath.trim());
+    if (!path) continue;
+    const state: GitFileState = code === "A" ? "A" : code === "D" ? "D" : "M";
+    entries.push({ path, state });
+  }
+  return entries;
+}
+
 export async function readWorkspaceGitSnapshot(cwd: string): Promise<WorkspaceGitSnapshot> {
   const statusOutput = await runGit(cwd, ["status", "--porcelain=v1", "-b"]);
   if (statusOutput === undefined) return EMPTY_GIT_SNAPSHOT;
+
+  const status = parseGitStatusPorcelain(statusOutput);
+  const baseSha = await resolveDiffBase(cwd);
+
+  if (baseSha) {
+    const [diffNumstatOutput, diffNameStatusOutput] = await Promise.all([
+      runGit(cwd, ["diff", "--numstat", baseSha]),
+      runGit(cwd, ["diff", "--name-status", baseSha]),
+    ]);
+    const baseStats = diffNumstatOutput ? parseGitNumstat(diffNumstatOutput) : [];
+    const baseEntries = diffNameStatusOutput ? parseGitNameStatus(diffNameStatusOutput) : [];
+
+    const entryByPath = new Map<string, GitStatusEntry>();
+    for (const entry of baseEntries) {
+      entryByPath.set(entry.path, entry);
+    }
+    for (const entry of status.entries) {
+      entryByPath.set(entry.path, entry);
+    }
+
+    const merged = mergeGitDiffs([...entryByPath.values()], baseStats, []);
+    return {
+      isRepo: true,
+      branch: status.branch,
+      ahead: status.ahead,
+      behind: status.behind,
+      files: merged.files,
+      totalInsertions: merged.totalInsertions,
+      totalDeletions: merged.totalDeletions,
+    };
+  }
 
   const [unstagedOutput, stagedOutput] = await Promise.all([
     runGit(cwd, ["diff", "--numstat"]),
     runGit(cwd, ["diff", "--cached", "--numstat"]),
   ]);
 
-  const status = parseGitStatusPorcelain(statusOutput);
   const unstaged = unstagedOutput ? parseGitNumstat(unstagedOutput) : [];
   const staged = stagedOutput ? parseGitNumstat(stagedOutput) : [];
   const merged = mergeGitDiffs(status.entries, unstaged, staged);
