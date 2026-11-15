@@ -1,15 +1,15 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { OverlayHandle, TUI } from "@earendil-works/pi-tui";
+import type { TUI } from "@earendil-works/pi-tui";
 import type { ResolvedAgentDefinition, Runtime } from "pi-rostrix";
 import type { SubagentServices } from "../../subagents/index.ts";
 import { createMonitorFooterComponent } from "./footer.ts";
 import { readWorkspaceGitSnapshot } from "./git-status.ts";
-import { createSidebarComponent, sidebarOverlayOptions } from "./sidebar.ts";
+import { createMonitorPanelComponent } from "./panel.ts";
 import {
   buildAgentConfigSummaries,
   createMonitorState,
   extractMainAgentResources,
-  resolveSidebarExpanded,
+  resolvePanelExpanded,
   summarizeSessionUsage,
   type MonitorSnapshot,
   type SessionEntryLike,
@@ -20,6 +20,7 @@ export interface WorkspaceMonitorServices {
   readonly subagents: SubagentServices;
 }
 
+const MONITOR_WIDGET_KEY = "pi-gear.monitor";
 const MUTATING_TOOLS = new Set(["write", "edit", "bash"]);
 
 function resolveAgentSummaries(
@@ -51,8 +52,6 @@ export function setupWorkspaceMonitor(
   let currentTui: TUI | undefined;
   let branchUnsubscribe: (() => void) | undefined;
   let tasksUnsubscribe: (() => void) | undefined;
-  let sidebarHandle: OverlayHandle | undefined;
-  let mountGeneration = 0;
   let tickTimer: ReturnType<typeof setInterval> | undefined;
   let gitRefreshSeq = 0;
 
@@ -111,6 +110,31 @@ export function setupWorkspaceMonitor(
     };
   };
 
+  const syncWidget = (ctx: ExtensionContext | undefined) => {
+    if (!ctx?.hasUI || ctx.mode !== "tui") return;
+    if (!resolvePanelExpanded(state.manualExpanded)) {
+      ctx.ui.setWidget(MONITOR_WIDGET_KEY, undefined);
+      return;
+    }
+    ctx.ui.setWidget(
+      MONITOR_WIDGET_KEY,
+      (_tui, theme) => createMonitorPanelComponent(buildSnapshot, theme),
+      { placement: "aboveEditor" },
+    );
+  };
+
+  const togglePanel = (ctx: ExtensionContext | undefined, mode?: "on" | "off") => {
+    const next = mode === "on"
+      ? true
+      : mode === "off"
+        ? false
+        : !resolvePanelExpanded(state.manualExpanded);
+    state.manualExpanded = next;
+    syncWidget(ctx ?? currentCtx);
+    if (next) void refreshGit();
+    requestRender();
+  };
+
   const syncTicker = () => {
     const hasRunning = services.runtime.tasks
       .listTasks()
@@ -134,7 +158,6 @@ export function setupWorkspaceMonitor(
   };
 
   const disposeUi = (restoreFooter = false) => {
-    mountGeneration += 1;
     gitRefreshSeq += 1;
     if (tickTimer) {
       clearInterval(tickTimer);
@@ -144,10 +167,11 @@ export function setupWorkspaceMonitor(
     branchUnsubscribe = undefined;
     tasksUnsubscribe?.();
     tasksUnsubscribe = undefined;
-    sidebarHandle?.hide();
-    sidebarHandle = undefined;
-    if (restoreFooter) {
-      currentCtx?.ui.setFooter(undefined);
+    if (currentCtx?.hasUI && currentCtx.mode === "tui") {
+      currentCtx.ui.setWidget(MONITOR_WIDGET_KEY, undefined);
+      if (restoreFooter) {
+        currentCtx.ui.setFooter(undefined);
+      }
     }
     state.footerData = undefined;
     currentTui = undefined;
@@ -158,7 +182,6 @@ export function setupWorkspaceMonitor(
     if (!ctx.hasUI || ctx.mode !== "tui") return;
 
     disposeUi(false);
-    const generation = mountGeneration;
 
     ctx.ui.setFooter((tui, theme, footerData) => {
       currentTui = tui;
@@ -169,7 +192,8 @@ export function setupWorkspaceMonitor(
 
       const component = createMonitorFooterComponent(
         buildSnapshot,
-        () => state.manualExpanded,
+        () => resolvePanelExpanded(state.manualExpanded),
+        () => togglePanel(currentCtx),
         theme,
       );
       return {
@@ -182,21 +206,7 @@ export function setupWorkspaceMonitor(
       };
     });
 
-    void ctx.ui.custom<void>(
-      (_tui, theme) => createSidebarComponent(buildSnapshot, theme),
-      {
-        overlay: true,
-        overlayOptions: sidebarOverlayOptions(() => state.manualExpanded),
-        onHandle: (handle) => {
-          if (generation !== mountGeneration) {
-            handle.hide();
-            return;
-          }
-          sidebarHandle = handle;
-        },
-      },
-    );
-
+    syncWidget(ctx);
     state.toolTracker.resetFromEntries(
       ctx.sessionManager.getEntries() as readonly SessionEntryLike[],
     );
@@ -209,20 +219,16 @@ export function setupWorkspaceMonitor(
   };
 
   pi.registerCommand("gear:panel", {
-    description: "Toggle workspace monitor sidebar",
+    description: "Toggle workspace monitor panel",
     handler: async (args, ctx) => {
       currentCtx = ctx;
       const normalized = args.trim().toLowerCase();
-      const termWidth = currentTui?.terminal.columns ?? 120;
-      if (normalized === "on" || normalized === "open" || normalized === "expand") {
-        state.manualExpanded = true;
-      } else if (normalized === "off" || normalized === "close" || normalized === "collapse") {
-        state.manualExpanded = false;
-      } else {
-        state.manualExpanded = !resolveSidebarExpanded(state.manualExpanded, termWidth);
-      }
-      void refreshGit();
-      requestRender();
+      const mode = normalized === "on" || normalized === "open" || normalized === "expand"
+        ? "on"
+        : normalized === "off" || normalized === "close" || normalized === "collapse"
+          ? "off"
+          : undefined;
+      togglePanel(ctx, mode);
     },
   });
 

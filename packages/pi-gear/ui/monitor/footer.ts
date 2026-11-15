@@ -1,10 +1,14 @@
-import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
+import {
+  truncateToWidth,
+  visibleWidth,
+  type Component,
+  type TuiMouseEvent,
+  type TuiMouseEventResult,
+} from "@earendil-works/pi-tui";
 import type { Theme } from "../subagent/format.ts";
 import {
   formatCwd,
   formatTokens,
-  isSidebarAvailable,
-  resolveSidebarExpanded,
   type MonitorSnapshot,
 } from "./state.ts";
 
@@ -21,9 +25,11 @@ function formatTurnsAndToolsSummary(snapshot: MonitorSnapshot): string | undefin
   const { total, errors, activeTools } = snapshot.tools;
   if (turns === 0 && total === 0 && activeTools.length === 0) return undefined;
 
-  const errSuffix = errors > 0 ? ` ✕${errors}` : "";
   const activeSuffix = activeTools.length > 0 ? ` (+${activeTools.length})` : "";
-  return `↻ step ${turns} · ⚙ activity ${total}${activeSuffix}${errSuffix}`;
+  const rateSuffix = total > 0
+    ? ` (${Math.round(((total - errors) / total) * 100)}%)`
+    : "";
+  return `↻ step ${turns} · ⚙ activity ${total}${activeSuffix}${rateSuffix}`;
 }
 
 function shortAgentLabel(id: string): string {
@@ -54,12 +60,13 @@ function formatWorkspaceBranch(snapshot: MonitorSnapshot): string {
   let base = formatCwd(snapshot.cwd, snapshot.home);
   const branch = snapshot.git.branch;
   if (branch) {
-    const dirty = snapshot.git.files.length > 0 ? "*" : "";
-    const tracking: string[] = [];
-    if (snapshot.git.ahead > 0) tracking.push(`↑${snapshot.git.ahead}`);
-    if (snapshot.git.behind > 0) tracking.push(`↓${snapshot.git.behind}`);
-    const suffix = tracking.length > 0 ? ` ${tracking.join(" ")}` : "";
-    base = `${base} (${branch}${dirty}${suffix})`;
+    const { totalInsertions, totalDeletions, files } = snapshot.git;
+    const diffSummary = totalInsertions > 0 || totalDeletions > 0
+      ? ` +${totalInsertions} -${totalDeletions}`
+      : files.length > 0
+        ? "*"
+        : "";
+    base = `${base} (${branch}${diffSummary})`;
   }
   if (snapshot.sessionName) {
     base = `${base} • ${snapshot.sessionName}`;
@@ -71,7 +78,7 @@ export function renderFooterLine1(
   snapshot: MonitorSnapshot,
   theme: Theme,
   width: number,
-  manualExpanded: boolean | undefined,
+  expanded: boolean,
   now = Date.now(),
 ): string {
   const sep = theme.fg("dim", " │ ");
@@ -91,12 +98,11 @@ export function renderFooterLine1(
   }
 
   const leftText = parts.join(sep);
-  if (!isSidebarAvailable(width)) {
-    return truncateToWidth(leftText, width, theme.fg("dim", "..."));
+  if (width < 20) {
+    return truncateToWidth(leftText, width, "");
   }
 
-  const expanded = resolveSidebarExpanded(manualExpanded, width);
-  const icon = theme.fg("accent", expanded ? "▸" : "◂");
+  const icon = theme.fg("accent", expanded ? "▾" : "▴");
   const iconWidth = visibleWidth(icon);
   const maxLeftWidth = Math.max(0, width - iconWidth - 1);
   const truncatedLeft = truncateToWidth(leftText, maxLeftWidth, theme.fg("dim", "..."));
@@ -171,11 +177,11 @@ export function renderMonitorFooter(
   snapshot: MonitorSnapshot,
   theme: Theme,
   width: number,
-  manualExpanded: boolean | undefined,
+  expanded: boolean,
   now = Date.now(),
 ): string[] {
   const lines = [
-    renderFooterLine1(snapshot, theme, width, manualExpanded, now),
+    renderFooterLine1(snapshot, theme, width, expanded, now),
     renderFooterLine2(snapshot, theme, width),
   ];
 
@@ -193,13 +199,24 @@ export function renderMonitorFooter(
 
 export function createMonitorFooterComponent(
   getSnapshot: () => MonitorSnapshot,
-  getManualExpanded: () => boolean | undefined,
+  isExpanded: () => boolean,
+  onTogglePanel: () => void,
   theme: Theme,
-): Component & { dispose?(): void } {
+): Component & {
+  handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined;
+  dispose?(): void;
+} {
   return {
     invalidate() {},
     render(width: number): string[] {
-      return renderMonitorFooter(getSnapshot(), theme, width, getManualExpanded());
+      return renderMonitorFooter(getSnapshot(), theme, width, isExpanded());
+    },
+    handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+      if (event.type === "click" && event.button === "left" && event.y === 0 && event.x >= event.width - 3) {
+        onTogglePanel();
+        return { handled: true, render: true };
+      }
+      return undefined;
     },
   };
 }

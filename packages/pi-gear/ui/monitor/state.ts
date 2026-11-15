@@ -4,8 +4,9 @@ import type { ResolvedAgentDefinition, TaskRecord } from "pi-rostrix";
 import type { SubagentSettings } from "../../subagents/settings.ts";
 import { EMPTY_GIT_SNAPSHOT, type WorkspaceGitSnapshot } from "./git-status.ts";
 
-export const SIDEBAR_MIN_WIDTH = 95;
-export const SIDEBAR_DEFAULT_EXPANDED_WIDTH = 130;
+export function resolvePanelExpanded(manualExpanded: boolean | undefined): boolean {
+  return manualExpanded ?? false;
+}
 
 export interface ToolStatsSnapshot {
   readonly total: number;
@@ -84,15 +85,6 @@ export interface UsageLike {
   readonly cacheRead?: number | undefined;
   readonly cacheWrite?: number | undefined;
   readonly cost?: { readonly total?: number | undefined } | undefined;
-}
-
-export function isSidebarAvailable(terminalWidth: number): boolean {
-  return terminalWidth >= SIDEBAR_MIN_WIDTH;
-}
-
-export function resolveSidebarExpanded(manualExpanded: boolean | undefined, terminalWidth: number): boolean {
-  if (!isSidebarAvailable(terminalWidth)) return false;
-  return manualExpanded ?? terminalWidth >= SIDEBAR_DEFAULT_EXPANDED_WIDTH;
 }
 
 export function formatTokens(count: number): string {

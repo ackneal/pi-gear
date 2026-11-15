@@ -1,16 +1,13 @@
-import { truncateToWidth, visibleWidth, type Component, type OverlayOptions } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import type { TaskRecord } from "pi-rostrix";
 import type { Theme } from "../subagent/format.ts";
 import { readableActivityName } from "../subagent/text-policy.ts";
-import {
-  resolveSidebarExpanded,
-  type MonitorSnapshot,
-} from "./state.ts";
+import type { MonitorSnapshot } from "./state.ts";
 
-export const SIDEBAR_WIDTH = 38;
-const MAX_DIFF_FILES = 6;
-const MAX_SUBAGENT_DEFS = 5;
+const MAX_DIFF_FILES = 5;
+const MAX_SUBAGENT_DEFS = 4;
 const MAX_TASKS_PER_AGENT = 2;
+const THREE_COL_MIN_WIDTH = 95;
 
 function formatDuration(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -20,14 +17,14 @@ function formatDuration(ms: number): string {
   return rem === 0 ? `${minutes}m` : `${minutes}m ${rem}s`;
 }
 
-function padLine(text: string, innerWidth: number): string {
-  const truncated = truncateToWidth(text, innerWidth, "...");
-  const pad = " ".repeat(Math.max(0, innerWidth - visibleWidth(truncated)));
+function padCell(text: string, width: number): string {
+  const truncated = truncateToWidth(text, width, "...");
+  const pad = " ".repeat(Math.max(0, width - visibleWidth(truncated)));
   return `${truncated}${pad}`;
 }
 
 function frameRows(title: string, rows: readonly string[], width: number, theme: Theme): string[] {
-  const boxWidth = Math.max(16, width);
+  const boxWidth = Math.max(20, width);
   const innerWidth = boxWidth - 4;
   const headerLabel = ` ${title} `;
   const fillCount = Math.max(0, boxWidth - 3 - visibleWidth(headerLabel));
@@ -36,39 +33,23 @@ function frameRows(title: string, rows: readonly string[], width: number, theme:
 
   const lines = [topBorder];
   for (const row of rows) {
-    lines.push(`${theme.fg("dim", "│")} ${padLine(row, innerWidth)} ${theme.fg("dim", "│")}`);
+    lines.push(`${theme.fg("dim", "│")} ${padCell(row, innerWidth)} ${theme.fg("dim", "│")}`);
   }
   lines.push(bottomBorder);
   return lines;
 }
 
-function formatGitSection(snapshot: MonitorSnapshot, innerWidth: number, theme: Theme): string[] {
+function formatGitColumn(snapshot: MonitorSnapshot, colWidth: number, theme: Theme): string[] {
   const git = snapshot.git;
   if (!git.isRepo) {
-    return [theme.bold("Git"), theme.fg("dim", "  (not a git repository)")];
+    return [theme.bold("Git"), theme.fg("dim", " (not a git repository)")];
   }
 
-  const tracking: string[] = [];
-  if (git.ahead > 0) tracking.push(`↑${git.ahead}`);
-  if (git.behind > 0) tracking.push(`↓${git.behind}`);
-  const trackText = tracking.length > 0 ? ` ${tracking.join(" ")}` : "";
-  const branchText = `${git.branch ?? "HEAD"}${trackText}`;
-
-  const lines: string[] = [
-    `${theme.bold("Git")} ${theme.fg("accent", branchText)}`,
-  ];
-
-  if (git.files.length === 0) {
-    lines.push(theme.fg("dim", "  clean working tree"));
-    return lines;
-  }
-
-  lines.push(
-    theme.fg(
-      "dim",
-      `  ${git.files.length} changed · +${git.totalInsertions} -${git.totalDeletions}`,
-    ),
-  );
+  const branchText = git.branch ?? "HEAD";
+  const summary = git.files.length === 0
+    ? theme.fg("dim", "clean")
+    : theme.fg("dim", `${git.files.length} files · +${git.totalInsertions} -${git.totalDeletions}`);
+  const lines: string[] = [`${theme.bold("Git")} ${theme.fg("accent", branchText)} ${summary}`];
 
   for (const file of git.files.slice(0, MAX_DIFF_FILES)) {
     const stat = file.binary
@@ -85,34 +66,34 @@ function formatGitSection(snapshot: MonitorSnapshot, innerWidth: number, theme: 
           : "warning";
     const badge = theme.fg(badgeColor, file.state.padEnd(2));
     const statWidth = visibleWidth(stat);
-    const maxPathWidth = Math.max(8, innerWidth - 5 - statWidth);
+    const maxPathWidth = Math.max(8, colWidth - 4 - statWidth);
     const pathText = truncateToWidth(file.path, maxPathWidth, "...");
-    const gap = " ".repeat(Math.max(1, innerWidth - 4 - visibleWidth(pathText) - statWidth));
-    lines.push(` ${badge} ${pathText}${gap}${theme.fg("dim", stat)}`);
+    const gap = " ".repeat(Math.max(1, colWidth - 3 - visibleWidth(pathText) - statWidth));
+    lines.push(`${badge} ${pathText}${gap}${theme.fg("dim", stat)}`);
   }
 
   if (git.files.length > MAX_DIFF_FILES) {
-    lines.push(theme.fg("dim", `  +${git.files.length - MAX_DIFF_FILES} more files`));
+    lines.push(theme.fg("dim", ` +${git.files.length - MAX_DIFF_FILES} more files`));
   }
   return lines;
 }
 
 function formatNamedList(label: string, items: readonly string[], theme: Theme): string {
-  if (items.length === 0) return `  ${label}: ${theme.fg("dim", "none")}`;
+  if (items.length === 0) return ` ${label}: ${theme.fg("dim", "none")}`;
   const preview = items.slice(0, 2).join(", ");
   const extra = items.length > 2 ? ` +${items.length - 2}` : "";
-  return `  ${label}: ${items.length} ${theme.fg("dim", `(${preview}${extra})`)}`;
+  return ` ${label}: ${items.length} ${theme.fg("dim", `(${preview}${extra})`)}`;
 }
 
-function formatMainAgentSection(snapshot: MonitorSnapshot, theme: Theme): string[] {
+function formatMainAgentColumn(snapshot: MonitorSnapshot, theme: Theme): string[] {
   const { toolsCount, skills, mcpServers } = snapshot.mainResources;
   const { total, errors } = snapshot.tools;
-  const errPart = errors > 0 ? theme.fg("error", ` · ${errors} err`) : "";
-  const callsPart = total > 0 ? theme.fg("dim", ` (${total} calls)`) : "";
+  const rateText = total > 0 ? ` (${Math.round(((total - errors) / total) * 100)}%)` : "";
+  const callsPart = total > 0 ? theme.fg("dim", ` (${total} calls${rateText})`) : "";
 
   return [
     `${theme.bold("Agent")} ${theme.fg("accent", snapshot.activeAgent)}`,
-    `  tool: ${toolsCount}${callsPart}${errPart}`,
+    ` tool: ${toolsCount}${callsPart}`,
     formatNamedList("skill", skills, theme),
     formatNamedList("mcp", mcpServers, theme),
   ];
@@ -142,10 +123,10 @@ function formatTaskChildLine(task: TaskRecord, now: number, theme: Theme): strin
   const duration = task.startedAt !== undefined ? formatDuration(elapsedMs) : "";
   const tool = lastToolLabel(task);
   const details = [duration, tool].filter(Boolean).join(" · ");
-  return `  └ ${icon} ${details || task.status}`;
+  return ` └ ${icon} ${details || task.status}`;
 }
 
-function formatSubagentsSection(snapshot: MonitorSnapshot, now: number, theme: Theme): string[] {
+function formatSubagentsColumn(snapshot: MonitorSnapshot, now: number, theme: Theme): string[] {
   const runningCount = snapshot.tasks.filter((t) => t.status === "running" || t.status === "pending").length;
   const headerSuffix = runningCount > 0 ? ` (${runningCount} running)` : "";
   const lines: string[] = [`${theme.bold("Subagent")}${theme.fg("warning", headerSuffix)}`];
@@ -165,7 +146,7 @@ function formatSubagentsSection(snapshot: MonitorSnapshot, now: number, theme: T
     const hasRunning = agentTasks.some((t) => t.status === "running" || t.status === "pending");
     const marker = hasRunning ? theme.fg("warning", "●") : theme.fg("dim", "○");
     const modelShort = agent.model ? ` ${theme.fg("dim", agent.model.split("/").pop() ?? agent.model)}` : "";
-    lines.push(` ${marker} ${shortAgentLabel(agent.id)}${modelShort}`);
+    lines.push(`${marker} ${shortAgentLabel(agent.id)}${modelShort}`);
 
     for (const task of agentTasks.slice(0, MAX_TASKS_PER_AGENT)) {
       lines.push(formatTaskChildLine(task, now, theme));
@@ -176,56 +157,69 @@ function formatSubagentsSection(snapshot: MonitorSnapshot, now: number, theme: T
     if (seenAgents.has(agentId)) continue;
     const hasRunning = agentTasks.some((t) => t.status === "running" || t.status === "pending");
     const marker = hasRunning ? theme.fg("warning", "●") : theme.fg("dim", "○");
-    lines.push(` ${marker} ${shortAgentLabel(agentId)}`);
+    lines.push(`${marker} ${shortAgentLabel(agentId)}`);
     for (const task of agentTasks.slice(0, MAX_TASKS_PER_AGENT)) {
       lines.push(formatTaskChildLine(task, now, theme));
     }
   }
 
   if (snapshot.agents.length === 0 && snapshot.tasks.length === 0) {
-    lines.push(theme.fg("dim", "  none"));
+    lines.push(theme.fg("dim", " none"));
   }
   return lines;
 }
 
-export function renderSidebar(
+export function renderMonitorPanel(
   snapshot: MonitorSnapshot,
   theme: Theme,
-  width = SIDEBAR_WIDTH,
+  width: number,
   now = Date.now(),
 ): string[] {
-  const innerWidth = Math.max(12, width - 4);
-  const rows: string[] = [
-    ...formatGitSection(snapshot, innerWidth, theme),
-    "",
-    ...formatMainAgentSection(snapshot, theme),
-    "",
-    ...formatSubagentsSection(snapshot, now, theme),
-  ];
+  const boxWidth = Math.max(24, width);
+  const innerWidth = boxWidth - 4;
 
-  return frameRows("Monitor", rows, width, theme);
+  if (boxWidth < THREE_COL_MIN_WIDTH) {
+    const rows = [
+      ...formatGitColumn(snapshot, innerWidth, theme),
+      "",
+      ...formatMainAgentColumn(snapshot, theme),
+      "",
+      ...formatSubagentsColumn(snapshot, now, theme),
+    ];
+    return frameRows("Monitor", rows, boxWidth, theme);
+  }
+
+  // Divide inner width across 3 columns with two 3-char " │ " dividers.
+  const colContentWidth = Math.max(18, innerWidth - 6);
+  const col1Width = Math.floor(colContentWidth * 0.38);
+  const col2Width = Math.floor(colContentWidth * 0.30);
+  const col3Width = colContentWidth - col1Width - col2Width;
+
+  const col1 = formatGitColumn(snapshot, col1Width, theme);
+  const col2 = formatMainAgentColumn(snapshot, theme);
+  const col3 = formatSubagentsColumn(snapshot, now, theme);
+  const rowCount = Math.max(col1.length, col2.length, col3.length);
+  const divider = theme.fg("dim", " │ ");
+
+  const rows: string[] = [];
+  for (let i = 0; i < rowCount; i += 1) {
+    const c1 = padCell(col1[i] ?? "", col1Width);
+    const c2 = padCell(col2[i] ?? "", col2Width);
+    const c3 = padCell(col3[i] ?? "", col3Width);
+    rows.push(`${c1}${divider}${c2}${divider}${c3}`);
+  }
+
+  return frameRows("Monitor", rows, boxWidth, theme);
 }
 
-export function sidebarOverlayOptions(
-  getManualExpanded: () => boolean | undefined,
-): OverlayOptions {
-  return {
-    width: SIDEBAR_WIDTH,
-    anchor: "top-right",
-    margin: { top: 1, right: 0, bottom: 2 },
-    nonCapturing: true,
-    visible: (termWidth: number) => resolveSidebarExpanded(getManualExpanded(), termWidth),
-  };
-}
-
-export function createSidebarComponent(
+export function createMonitorPanelComponent(
   getSnapshot: () => MonitorSnapshot,
   theme: Theme,
 ): Component {
   return {
     invalidate() {},
     render(width: number): string[] {
-      return renderSidebar(getSnapshot(), theme, width);
+      return renderMonitorPanel(getSnapshot(), theme, width);
     },
   };
 }
