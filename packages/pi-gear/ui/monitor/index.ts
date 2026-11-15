@@ -110,6 +110,11 @@ export function setupWorkspaceMonitor(
     };
   };
 
+  const toggleDetail = () => {
+    state.detailExpanded = !state.detailExpanded;
+    requestRender();
+  };
+
   const syncWidget = (ctx: ExtensionContext | undefined) => {
     if (!ctx?.hasUI || ctx.mode !== "tui") return;
     if (!resolvePanelExpanded(state.manualExpanded)) {
@@ -118,7 +123,12 @@ export function setupWorkspaceMonitor(
     }
     ctx.ui.setWidget(
       MONITOR_WIDGET_KEY,
-      (_tui, theme) => createMonitorPanelComponent(buildSnapshot, theme),
+      (_tui, theme) => createMonitorPanelComponent(
+        buildSnapshot,
+        () => state.detailExpanded,
+        toggleDetail,
+        theme,
+      ),
       { placement: "aboveEditor" },
     );
   };
@@ -223,6 +233,16 @@ export function setupWorkspaceMonitor(
     handler: async (args, ctx) => {
       currentCtx = ctx;
       const normalized = args.trim().toLowerCase();
+      if (normalized === "full" || normalized === "more") {
+        state.detailExpanded = true;
+        togglePanel(ctx, "on");
+        return;
+      }
+      if (normalized === "compact" || normalized === "less") {
+        state.detailExpanded = false;
+        togglePanel(ctx, "on");
+        return;
+      }
       const mode = normalized === "on" || normalized === "open" || normalized === "expand"
         ? "on"
         : normalized === "off" || normalized === "close" || normalized === "collapse"

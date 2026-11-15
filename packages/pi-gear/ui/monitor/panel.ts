@@ -1,4 +1,10 @@
-import { truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
+import {
+  truncateToWidth,
+  visibleWidth,
+  type Component,
+  type TuiMouseEvent,
+  type TuiMouseEventResult,
+} from "@earendil-works/pi-tui";
 import type { TaskRecord } from "pi-rostrix";
 import type { Theme } from "../subagent/format.ts";
 import { readableActivityName } from "../subagent/text-policy.ts";
@@ -7,7 +13,9 @@ import type { MonitorSnapshot } from "./state.ts";
 const MAX_DIFF_FILES = 5;
 const MAX_SUBAGENT_DEFS = 4;
 const MAX_TASKS_PER_AGENT = 2;
+const MAX_COMPACT_DETAIL_LINES = 2;
 const THREE_COL_MIN_WIDTH = 95;
+const TWO_COL_MIN_WIDTH = 70;
 
 function formatDuration(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -23,11 +31,52 @@ function padCell(text: string, width: number): string {
   return `${truncated}${pad}`;
 }
 
-function frameRows(title: string, rows: readonly string[], width: number, theme: Theme): string[] {
+function wrapCommaItems(
+  items: readonly string[],
+  maxLineWidth: number,
+  maxLines?: number,
+): string[] {
+  if (items.length === 0) return [];
+  const lines: string[] = [];
+  let current = "";
+  let consumed = 0;
+
+  for (const item of items) {
+    const candidate = current ? `${current}, ${item}` : item;
+    if (current && visibleWidth(candidate) > maxLineWidth) {
+      lines.push(current);
+      if (maxLines !== undefined && lines.length >= maxLines) {
+        const remaining = items.length - consumed;
+        const suffix = ` +${remaining}`;
+        const last = lines[lines.length - 1] ?? "";
+        lines[lines.length - 1] = `${truncateToWidth(last, Math.max(4, maxLineWidth - visibleWidth(suffix)), "...")}${suffix}`;
+        return lines;
+      }
+      current = item;
+    } else {
+      current = candidate;
+    }
+    consumed += 1;
+  }
+
+  if (current) {
+    lines.push(truncateToWidth(current, maxLineWidth, "..."));
+  }
+  return lines;
+}
+
+function frameRows(
+  title: string,
+  rows: readonly string[],
+  width: number,
+  detailExpanded: boolean,
+  theme: Theme,
+): string[] {
   const lineWidth = Math.max(24, width);
   const headerLabel = `─ ${title} `;
-  const fillCount = Math.max(0, lineWidth - visibleWidth(headerLabel));
-  const topRule = theme.fg("dim", `${headerLabel}${"─".repeat(fillCount)}`);
+  const toggleLabel = detailExpanded ? " [compact]" : " [+all]";
+  const fillCount = Math.max(1, lineWidth - visibleWidth(headerLabel) - visibleWidth(toggleLabel));
+  const topRule = `${theme.fg("dim", `${headerLabel}${"─".repeat(fillCount)}`)}${theme.fg("accent", toggleLabel)}`;
   const bottomRule = theme.fg("dim", "─".repeat(lineWidth));
 
   return [
@@ -37,26 +86,29 @@ function frameRows(title: string, rows: readonly string[], width: number, theme:
   ];
 }
 
-function formatGitColumn(snapshot: MonitorSnapshot, colWidth: number, theme: Theme): string[] {
+function formatGitColumn(
+  snapshot: MonitorSnapshot,
+  colWidth: number,
+  detailExpanded: boolean,
+  theme: Theme,
+): string[] {
   const git = snapshot.git;
-  if (!git.isRepo) {
-    return [theme.bold("Git"), theme.fg("dim", " (not a git repository)")];
-  }
-
+  const contentWidth = Math.max(18, colWidth - 1);
   const branchText = git.branch ?? "HEAD";
   const summaryPlain = git.files.length > 0
-    ? `${git.files.length} files · +${git.totalInsertions} -${git.totalDeletions}`
+    ? `${git.files.length} files (+${git.totalInsertions} -${git.totalDeletions})`
     : "";
   const headerPrefix = `${theme.bold("Git")} `;
   const summaryWidth = summaryPlain ? visibleWidth(summaryPlain) + 2 : 0;
-  const maxBranchWidth = Math.max(8, colWidth - 4 - summaryWidth);
+  const maxBranchWidth = Math.max(8, contentWidth - 4 - summaryWidth);
   const branchDisplay = theme.fg("accent", truncateToWidth(branchText, maxBranchWidth, "..."));
   const header = summaryPlain
     ? `${headerPrefix}${branchDisplay}  ${theme.fg("dim", summaryPlain)}`
     : `${headerPrefix}${branchDisplay}`;
   const lines: string[] = [header];
 
-  for (const file of git.files.slice(0, MAX_DIFF_FILES)) {
+  const visibleFiles = detailExpanded ? git.files : git.files.slice(0, MAX_DIFF_FILES);
+  for (const file of visibleFiles) {
     const stat = file.binary
       ? "bin"
       : file.state === "?"
@@ -71,13 +123,13 @@ function formatGitColumn(snapshot: MonitorSnapshot, colWidth: number, theme: The
           : "warning";
     const badge = theme.fg(badgeColor, file.state.padEnd(2));
     const statWidth = visibleWidth(stat);
-    const maxPathWidth = Math.max(8, colWidth - 4 - statWidth);
+    const maxPathWidth = Math.max(8, contentWidth - 5 - statWidth);
     const pathText = truncateToWidth(file.path, maxPathWidth, "...");
-    const gap = " ".repeat(Math.max(1, colWidth - 3 - visibleWidth(pathText) - statWidth));
+    const gap = " ".repeat(Math.max(2, contentWidth - 3 - visibleWidth(pathText) - statWidth));
     lines.push(`${badge} ${pathText}${gap}${theme.fg("dim", stat)}`);
   }
 
-  if (git.files.length > MAX_DIFF_FILES) {
+  if (!detailExpanded && git.files.length > MAX_DIFF_FILES) {
     lines.push(theme.fg("dim", ` +${git.files.length - MAX_DIFF_FILES} more files`));
   }
   return lines;
@@ -87,38 +139,116 @@ function formatNamedResource(
   label: string,
   items: readonly string[],
   colWidth: number,
+  detailExpanded: boolean,
   theme: Theme,
 ): string[] {
   if (items.length === 0) {
     return [` ${label}: ${theme.fg("dim", "none")}`];
   }
 
-  const maxDetailWidth = Math.max(12, colWidth - 4);
-  const joined = truncateToWidth(items.join(", "), maxDetailWidth, "...");
+  const maxDetailWidth = Math.max(12, colWidth - 5);
+  const wrapped = wrapCommaItems(
+    items,
+    maxDetailWidth,
+    detailExpanded ? undefined : MAX_COMPACT_DETAIL_LINES,
+  );
   return [
     ` ${label}: ${items.length}`,
-    `  ${theme.fg("dim", `└ ${joined}`)}`,
+    ...wrapped.map((line) => `  ${theme.fg("dim", `└ ${line}`)}`),
   ];
 }
 
-function formatMainAgentColumn(snapshot: MonitorSnapshot, colWidth: number, theme: Theme): string[] {
-  const { toolsCount, skills, mcpServers } = snapshot.mainResources;
-  const { total, errors, activeTools } = snapshot.tools;
-
-  const lines: string[] = [
-    `${theme.bold("Agent")} ${theme.fg("accent", snapshot.activeAgent)}`,
-    ` tool: ${toolsCount}`,
-  ];
-
-  if (total > 0 || activeTools.length > 0) {
-    const rateText = total > 0 ? ` (${Math.round(((total - errors) / total) * 100)}%)` : "";
-    const activeText = activeTools.length > 0 ? ` · ${activeTools.length} running` : "";
-    lines.push(`  ${theme.fg("dim", `└ ${total} calls${rateText}${activeText}`)}`);
+function formatToolItems(
+  snapshot: MonitorSnapshot,
+  detailExpanded: boolean,
+): string[] {
+  const { byTool } = snapshot.tools;
+  const seen = new Set<string>(snapshot.mainResources.tools);
+  for (const name of Object.keys(byTool)) {
+    if (!name.startsWith("mcp__")) {
+      seen.add(name);
+    }
   }
 
-  lines.push(...formatNamedResource("skill", skills, colWidth, theme));
-  lines.push(...formatNamedResource("mcp", mcpServers, colWidth, theme));
-  return lines;
+  const ordered = [...seen].sort((a, b) => {
+    const callsDiff = (byTool[b]?.calls ?? 0) - (byTool[a]?.calls ?? 0);
+    return callsDiff !== 0 ? callsDiff : a.localeCompare(b);
+  });
+
+  return ordered.map((name) => {
+    const stats = byTool[name];
+    if (!stats || stats.calls === 0) return name;
+    const rate = Math.round(((stats.calls - stats.errors) / stats.calls) * 100);
+    return detailExpanded
+      ? `${name} (${stats.calls} · ${rate}%)`
+      : `${name} ${rate}%`;
+  });
+}
+
+function formatMcpItems(
+  snapshot: MonitorSnapshot,
+  detailExpanded: boolean,
+): string[] {
+  const serverStats = new Map<string, { calls: number; errors: number }>();
+  for (const server of snapshot.mainResources.mcpServers) {
+    serverStats.set(server, { calls: 0, errors: 0 });
+  }
+  for (const [toolName, stats] of Object.entries(snapshot.tools.byTool)) {
+    const match = toolName.match(/^mcp__([^_]+(?:_[^_]+)*)__/);
+    if (!match?.[1]) continue;
+    const prev = serverStats.get(match[1]) ?? { calls: 0, errors: 0 };
+    prev.calls += stats.calls;
+    prev.errors += stats.errors;
+    serverStats.set(match[1], prev);
+  }
+
+  const ordered = [...serverStats.entries()].sort(([aName, a], [bName, b]) => {
+    const callsDiff = b.calls - a.calls;
+    return callsDiff !== 0 ? callsDiff : aName.localeCompare(bName);
+  });
+
+  return ordered.map(([server, stats]) => {
+    if (stats.calls === 0) return server;
+    const rate = Math.round(((stats.calls - stats.errors) / stats.calls) * 100);
+    return detailExpanded
+      ? `${server} (${stats.calls} · ${rate}%)`
+      : `${server} ${rate}%`;
+  });
+}
+
+function formatMainAgentColumn(
+  snapshot: MonitorSnapshot,
+  colWidth: number,
+  detailExpanded: boolean,
+  theme: Theme,
+): string[] {
+  const { toolsCount, skills } = snapshot.mainResources;
+  const { total, errors, activeTools } = snapshot.tools;
+  const rateText = total > 0 ? `${Math.round(((total - errors) / total) * 100)}%` : undefined;
+  const summaryParts: string[] = [];
+  if (total > 0) summaryParts.push(`${total} calls · ${rateText}`);
+  if (activeTools.length > 0) summaryParts.push(`${activeTools.length} running`);
+  const toolSummary = summaryParts.length > 0
+    ? `  ${theme.fg("dim", `(${summaryParts.join(" · ")})`)}`
+    : "";
+
+  const toolItems = formatToolItems(snapshot, detailExpanded);
+  const maxDetailWidth = Math.max(12, colWidth - 5);
+  const toolLines = wrapCommaItems(
+    toolItems,
+    maxDetailWidth,
+    detailExpanded ? undefined : MAX_COMPACT_DETAIL_LINES,
+  );
+
+  const mcpItems = formatMcpItems(snapshot, detailExpanded);
+
+  return [
+    `${theme.bold("Agent")} ${theme.fg("accent", snapshot.activeAgent)}`,
+    ` tool: ${toolsCount}${toolSummary}`,
+    ...toolLines.map((line) => `  ${theme.fg("dim", `└ ${line}`)}`),
+    ...formatNamedResource("skill", skills, colWidth, detailExpanded, theme),
+    ...formatNamedResource("mcp", mcpItems, colWidth, detailExpanded, theme),
+  ];
 }
 
 function shortAgentLabel(id: string): string {
@@ -167,6 +297,7 @@ function formatSubagentsColumn(
   snapshot: MonitorSnapshot,
   colWidth: number,
   now: number,
+  detailExpanded: boolean,
   theme: Theme,
 ): string[] {
   const runningCount = snapshot.tasks.filter((t) => t.status === "running" || t.status === "pending").length;
@@ -182,7 +313,8 @@ function formatSubagentsColumn(
   }
 
   const seenAgents = new Set<string>();
-  for (const agent of snapshot.agents.slice(0, MAX_SUBAGENT_DEFS)) {
+  const visibleAgents = detailExpanded ? snapshot.agents : snapshot.agents.slice(0, MAX_SUBAGENT_DEFS);
+  for (const agent of visibleAgents) {
     seenAgents.add(agent.id);
     const agentTasks = tasksByAgent.get(agent.id) ?? [];
     const hasRunning = agentTasks.some((t) => t.status === "running" || t.status === "pending");
@@ -193,7 +325,8 @@ function formatSubagentsColumn(
     const metaPart = meta ? ` ${theme.fg("dim", meta)}` : "";
     lines.push(`${marker} ${label}${metaPart}`);
 
-    for (const task of agentTasks.slice(0, MAX_TASKS_PER_AGENT)) {
+    const visibleTasks = detailExpanded ? agentTasks : agentTasks.slice(0, MAX_TASKS_PER_AGENT);
+    for (const task of visibleTasks) {
       lines.push(formatTaskChildLine(task, now, theme));
     }
   }
@@ -203,7 +336,8 @@ function formatSubagentsColumn(
     const hasRunning = agentTasks.some((t) => t.status === "running" || t.status === "pending");
     const marker = hasRunning ? theme.fg("warning", "●") : theme.fg("dim", "○");
     lines.push(`${marker} ${shortAgentLabel(agentId)}`);
-    for (const task of agentTasks.slice(0, MAX_TASKS_PER_AGENT)) {
+    const visibleTasks = detailExpanded ? agentTasks : agentTasks.slice(0, MAX_TASKS_PER_AGENT);
+    for (const task of visibleTasks) {
       lines.push(formatTaskChildLine(task, now, theme));
     }
   }
@@ -219,31 +353,46 @@ export function renderMonitorPanel(
   theme: Theme,
   width: number,
   now = Date.now(),
+  detailExpanded = false,
 ): string[] {
   const lineWidth = Math.max(24, width);
+  const showGit = snapshot.git.isRepo;
 
-  if (lineWidth < THREE_COL_MIN_WIDTH) {
+  if ((showGit && lineWidth < THREE_COL_MIN_WIDTH) || (!showGit && lineWidth < TWO_COL_MIN_WIDTH)) {
     const rows = [
-      ...formatGitColumn(snapshot, lineWidth, theme),
+      ...(showGit ? [...formatGitColumn(snapshot, lineWidth, detailExpanded, theme), ""] : []),
+      ...formatMainAgentColumn(snapshot, lineWidth, detailExpanded, theme),
       "",
-      ...formatMainAgentColumn(snapshot, lineWidth, theme),
-      "",
-      ...formatSubagentsColumn(snapshot, lineWidth, now, theme),
+      ...formatSubagentsColumn(snapshot, lineWidth, now, detailExpanded, theme),
     ];
-    return frameRows("Monitor", rows, lineWidth, theme);
+    return frameRows("Monitor", rows, lineWidth, detailExpanded, theme);
   }
 
-  // Divide full width across 3 columns with two 3-char " │ " dividers.
+  const divider = theme.fg("dim", " │ ");
+  if (!showGit) {
+    const colContentWidth = Math.max(18, lineWidth - 3);
+    const col1Width = Math.floor(colContentWidth * 0.52);
+    const col2Width = colContentWidth - col1Width;
+
+    const col1 = formatMainAgentColumn(snapshot, col1Width, detailExpanded, theme);
+    const col2 = formatSubagentsColumn(snapshot, col2Width, now, detailExpanded, theme);
+    const rowCount = Math.max(col1.length, col2.length);
+    const rows: string[] = [];
+    for (let i = 0; i < rowCount; i += 1) {
+      rows.push(`${padCell(col1[i] ?? "", col1Width)}${divider}${padCell(col2[i] ?? "", col2Width)}`);
+    }
+    return frameRows("Monitor", rows, lineWidth, detailExpanded, theme);
+  }
+
   const colContentWidth = Math.max(18, lineWidth - 6);
   const col1Width = Math.floor(colContentWidth * 0.34);
-  const col2Width = Math.floor(colContentWidth * 0.30);
+  const col2Width = Math.floor(colContentWidth * 0.32);
   const col3Width = colContentWidth - col1Width - col2Width;
 
-  const col1 = formatGitColumn(snapshot, col1Width, theme);
-  const col2 = formatMainAgentColumn(snapshot, col2Width, theme);
-  const col3 = formatSubagentsColumn(snapshot, col3Width, now, theme);
+  const col1 = formatGitColumn(snapshot, col1Width, detailExpanded, theme);
+  const col2 = formatMainAgentColumn(snapshot, col2Width, detailExpanded, theme);
+  const col3 = formatSubagentsColumn(snapshot, col3Width, now, detailExpanded, theme);
   const rowCount = Math.max(col1.length, col2.length, col3.length);
-  const divider = theme.fg("dim", " │ ");
 
   const rows: string[] = [];
   for (let i = 0; i < rowCount; i += 1) {
@@ -253,17 +402,28 @@ export function renderMonitorPanel(
     rows.push(`${c1}${divider}${c2}${divider}${c3}`);
   }
 
-  return frameRows("Monitor", rows, lineWidth, theme);
+  return frameRows("Monitor", rows, lineWidth, detailExpanded, theme);
 }
 
 export function createMonitorPanelComponent(
   getSnapshot: () => MonitorSnapshot,
+  isDetailExpanded: () => boolean,
+  onToggleDetail: () => void,
   theme: Theme,
-): Component {
+): Component & {
+  handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined;
+} {
   return {
     invalidate() {},
     render(width: number): string[] {
-      return renderMonitorPanel(getSnapshot(), theme, width);
+      return renderMonitorPanel(getSnapshot(), theme, width, Date.now(), isDetailExpanded());
+    },
+    handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+      if (event.type === "click" && event.button === "left" && event.y === 0 && event.x >= event.width - 10) {
+        onToggleDetail();
+        return { handled: true, render: true };
+      }
+      return undefined;
     },
   };
 }

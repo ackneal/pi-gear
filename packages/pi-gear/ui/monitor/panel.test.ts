@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import type { TaskRecord } from "pi-rostrix";
 import type { Theme } from "../subagent/format.ts";
-import { renderMonitorPanel } from "./panel.ts";
+import { createMonitorPanelComponent, renderMonitorPanel } from "./panel.ts";
 import type { MonitorSnapshot } from "./state.ts";
 
 const mockTheme = {
@@ -40,9 +40,10 @@ function makeSnapshot(overrides: Partial<MonitorSnapshot> = {}): MonitorSnapshot
       { id: "gear:worker", model: "anthropic/claude-sonnet-4-6", thinkingLevel: "medium" },
     ],
     mainResources: {
-      toolsCount: 8,
+      toolsCount: 4,
+      tools: ["read", "edit", "bash", "grep"],
       skills: ["plan", "debug", "docs"],
-      mcpServers: ["pi-agy-bridge_pi"],
+      mcpServers: ["pi_agy_bridge_pi"],
     },
     model: undefined,
     availableProviderCount: 1,
@@ -70,10 +71,19 @@ function makeSnapshot(overrides: Partial<MonitorSnapshot> = {}): MonitorSnapshot
       ],
     },
     tools: {
-      total: 10,
+      total: 12,
       errors: 1,
       activeTools: [],
-      counts: { edit: 10 },
+      counts: {
+        edit: 6,
+        bash: 4,
+        mcp__pi_agy_bridge_pi__read_file: 2,
+      },
+      byTool: {
+        edit: { calls: 6, errors: 0 },
+        bash: { calls: 4, errors: 1 },
+        mcp__pi_agy_bridge_pi__read_file: { calls: 2, errors: 0 },
+      },
     },
     tasks: [
       makeTask({ id: "t1", agentId: "gear:worker", status: "running", startedAt: 10_000 }),
@@ -91,26 +101,27 @@ function makeSnapshot(overrides: Partial<MonitorSnapshot> = {}): MonitorSnapshot
   };
 }
 
-test("renderMonitorPanel renders full-width 3-column layout when width >= 95 and stacked layout when narrow", () => {
+test("renderMonitorPanel renders 3-column git layout and per-tool/mcp success rates", () => {
   const cases = [
-    { name: "wide 3-column layout", width: 110, expectColumnsOnSameRow: true },
+    { name: "wide 3-column layout", width: 120, expectColumnsOnSameRow: true },
     { name: "narrow stacked layout", width: 72, expectColumnsOnSameRow: false },
   ];
 
   for (const tc of cases) {
-    const lines = renderMonitorPanel(makeSnapshot(), mockTheme, tc.width, 70_000);
+    const lines = renderMonitorPanel(makeSnapshot(), mockTheme, tc.width, 70_000, false);
     const joined = lines.join("\n");
 
     assert.ok(lines[0]?.startsWith("─ Monitor "), `${tc.name}: expected Monitor rule`);
+    assert.ok(lines[0]?.endsWith("[+all]"), `${tc.name}: expected [+all] toggle`);
     assert.ok(lines.every((line) => visibleWidth(line) === tc.width), `${tc.name}: exact width`);
-    assert.ok(joined.includes("Git feat/issue-27  2 files · +14 -3"), `${tc.name}: git header`);
+    assert.ok(joined.includes("Git feat/issue-27  2 files (+14 -3)"), `${tc.name}: git header`);
     assert.ok(joined.includes("Agent default"), `${tc.name}: agent header`);
-    assert.ok(joined.includes("tool: 8"), `${tc.name}: tool count`);
-    assert.ok(joined.includes("└ 10 calls (90%)"), `${tc.name}: tool usage child line`);
+    assert.ok(joined.includes("tool: 4  (12 calls · 92%)"), `${tc.name}: tool summary`);
+    assert.ok(joined.includes("edit 100%") && joined.includes("bash 75%"), `${tc.name}: per-tool rates`);
     assert.ok(joined.includes("skill: 3"), `${tc.name}: skill count`);
     assert.ok(joined.includes("└ plan, debug, docs"), `${tc.name}: skill list child line`);
     assert.ok(joined.includes("mcp: 1"), `${tc.name}: mcp count`);
-    assert.ok(joined.includes("└ pi-agy-bridge_pi"), `${tc.name}: mcp list child line`);
+    assert.ok(joined.includes("└ pi_agy_bridge_pi 100%"), `${tc.name}: mcp rate child line`);
     assert.ok(joined.includes("Subagent (1 running)"), `${tc.name}: subagent header`);
     assert.ok(joined.includes("● worker") && joined.includes("• medium"), `${tc.name}: active worker with level`);
     assert.ok(joined.includes("○ researcher") && joined.includes("• low"), `${tc.name}: researcher with level`);
@@ -122,11 +133,10 @@ test("renderMonitorPanel renders full-width 3-column layout when width >= 95 and
   }
 });
 
-test("renderMonitorPanel omits 'clean' on empty git diff and renders 'none' for empty agent resources", () => {
+test("renderMonitorPanel hides Git section when workspace is not a git repo and supports full detail mode", () => {
   const snapshot = makeSnapshot({
     git: {
-      isRepo: true,
-      branch: "main",
+      isRepo: false,
       ahead: 0,
       behind: 0,
       totalInsertions: 0,
@@ -134,21 +144,65 @@ test("renderMonitorPanel omits 'clean' on empty git diff and renders 'none' for 
       files: [],
     },
     mainResources: {
-      toolsCount: 4,
+      toolsCount: 3,
+      tools: ["read", "edit", "bash"],
       skills: [],
       mcpServers: [],
     },
     tools: {
-      total: 0,
-      errors: 0,
+      total: 10,
+      errors: 1,
       activeTools: [],
-      counts: {},
+      counts: { edit: 6, bash: 4 },
+      byTool: {
+        edit: { calls: 6, errors: 0 },
+        bash: { calls: 4, errors: 1 },
+      },
     },
   });
 
-  const joined = renderMonitorPanel(snapshot, mockTheme, 110, 70_000).join("\n");
+  const lines = renderMonitorPanel(snapshot, mockTheme, 100, 70_000, true);
+  const joined = lines.join("\n");
 
-  assert.ok(!joined.includes("clean"), "must not render 'clean'");
+  assert.ok(!joined.includes("Git "), "must hide Git section when not a git repo");
+  assert.ok(lines[0]?.endsWith("[compact]"), "full mode shows [compact]");
+  assert.ok(joined.includes("edit (6 · 100%)"), "full mode shows call count + rate");
+  assert.ok(joined.includes("bash (4 · 75%)"), "full mode shows call count + rate");
+  assert.ok(joined.includes("read"), "full mode includes uncalled tools");
   assert.ok(joined.includes("skill: none"));
   assert.ok(joined.includes("mcp: none"));
+});
+
+test("createMonitorPanelComponent toggles detail mode on left click over top-right toggle", () => {
+  let toggles = 0;
+  const component = createMonitorPanelComponent(
+    () => makeSnapshot(),
+    () => false,
+    () => { toggles += 1; },
+    mockTheme,
+  );
+  const baseEvent = { screenX: 0, screenY: 0, shift: false, alt: false, ctrl: false };
+
+  const hit = component.handleMouse({
+    ...baseEvent,
+    type: "click",
+    button: "left",
+    x: 96,
+    y: 0,
+    width: 100,
+    height: 8,
+  });
+  const miss = component.handleMouse({
+    ...baseEvent,
+    type: "click",
+    button: "left",
+    x: 10,
+    y: 0,
+    width: 100,
+    height: 8,
+  });
+
+  assert.deepEqual(hit, { handled: true, render: true });
+  assert.equal(miss, undefined);
+  assert.equal(toggles, 1);
 });

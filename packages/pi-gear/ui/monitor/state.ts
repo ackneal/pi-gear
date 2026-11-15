@@ -8,11 +8,17 @@ export function resolvePanelExpanded(manualExpanded: boolean | undefined): boole
   return manualExpanded ?? false;
 }
 
+export interface ToolCallStats {
+  readonly calls: number;
+  readonly errors: number;
+}
+
 export interface ToolStatsSnapshot {
   readonly total: number;
   readonly errors: number;
   readonly activeTools: readonly string[];
   readonly counts: Readonly<Record<string, number>>;
+  readonly byTool: Readonly<Record<string, ToolCallStats>>;
 }
 
 export interface AgentConfigSummary {
@@ -36,6 +42,7 @@ export interface SessionUsageSnapshot {
 
 export interface MainAgentResources {
   readonly toolsCount: number;
+  readonly tools: readonly string[];
   readonly skills: readonly string[];
   readonly mcpServers: readonly string[];
 }
@@ -109,8 +116,19 @@ export function formatCwd(cwd: string, home?: string): string {
 export function createToolStatsTracker(): ToolStatsTracker {
   const active = new Map<string, string>();
   const counts: Record<string, number> = {};
+  const byTool: Record<string, { calls: number; errors: number }> = {};
   let total = 0;
   let errors = 0;
+
+  const recordToolResult = (toolName: string, isError: boolean) => {
+    total += 1;
+    if (isError) errors += 1;
+    counts[toolName] = (counts[toolName] ?? 0) + 1;
+    const entry = byTool[toolName] ?? { calls: 0, errors: 0 };
+    entry.calls += 1;
+    if (isError) entry.errors += 1;
+    byTool[toolName] = entry;
+  };
 
   return {
     recordStart(toolCallId, toolName) {
@@ -118,13 +136,12 @@ export function createToolStatsTracker(): ToolStatsTracker {
     },
     recordEnd(toolCallId, toolName, isError) {
       active.delete(toolCallId);
-      total += 1;
-      if (isError) errors += 1;
-      counts[toolName] = (counts[toolName] ?? 0) + 1;
+      recordToolResult(toolName, isError);
     },
     resetFromEntries(entries) {
       active.clear();
       for (const key of Object.keys(counts)) delete counts[key];
+      for (const key of Object.keys(byTool)) delete byTool[key];
       total = 0;
       errors = 0;
 
@@ -132,18 +149,20 @@ export function createToolStatsTracker(): ToolStatsTracker {
         if (entry.type !== "message" || entry.message?.role !== "toolResult") continue;
         const name = entry.message.toolName;
         if (!name) continue;
-        const isError = Boolean(entry.message.isError);
-        total += 1;
-        if (isError) errors += 1;
-        counts[name] = (counts[name] ?? 0) + 1;
+        recordToolResult(name, Boolean(entry.message.isError));
       }
     },
     snapshot() {
+      const byToolSnapshot: Record<string, ToolCallStats> = {};
+      for (const [name, stats] of Object.entries(byTool)) {
+        byToolSnapshot[name] = { ...stats };
+      }
       return {
         total,
         errors,
         activeTools: [...active.values()],
         counts: { ...counts },
+        byTool: byToolSnapshot,
       };
     },
   };
@@ -209,13 +228,13 @@ export function extractMainAgentResources(
   configuredMcpServers: readonly string[] = [],
 ): MainAgentResources {
   const mcpSet = new Set<string>(configuredMcpServers);
-  let nonMcpTools = 0;
+  const tools: string[] = [];
   for (const toolName of activeTools) {
     const match = toolName.match(/^mcp__([^_]+(?:_[^_]+)*)__/);
     if (match?.[1]) {
       mcpSet.add(match[1]);
     } else {
-      nonMcpTools += 1;
+      tools.push(toolName);
     }
   }
 
@@ -224,7 +243,8 @@ export function extractMainAgentResources(
     .map((cmd) => (cmd.name.startsWith("skill:") ? cmd.name.slice("skill:".length) : cmd.name));
 
   return {
-    toolsCount: nonMcpTools,
+    toolsCount: tools.length,
+    tools,
     skills,
     mcpServers: [...mcpSet].sort(),
   };
@@ -255,6 +275,7 @@ export function buildAgentConfigSummaries(
 export interface MonitorState {
   git: WorkspaceGitSnapshot;
   manualExpanded: boolean | undefined;
+  detailExpanded: boolean;
   footerData: ReadonlyFooterDataProvider | undefined;
   readonly toolTracker: ToolStatsTracker;
 }
@@ -263,6 +284,7 @@ export function createMonitorState(): MonitorState {
   return {
     git: EMPTY_GIT_SNAPSHOT,
     manualExpanded: undefined,
+    detailExpanded: false,
     footerData: undefined,
     toolTracker: createToolStatsTracker(),
   };
