@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import type { TaskRecord } from "pi-rostrix";
 import type { Theme } from "../subagent/format.ts";
-import { renderMonitorPanel } from "./panel.ts";
+import { renderMonitorPanel, renderMonitorSidebar } from "./panel.ts";
 import type { MonitorSnapshot } from "./state.ts";
 
 const mockTheme = {
@@ -170,4 +170,15 @@ test("renderMonitorPanel hides Git section when workspace is not a git repo and 
   assert.ok(joined.includes("read"), "full mode includes uncalled tools");
   assert.ok(joined.includes("skill: none"));
   assert.ok(joined.includes("mcp: none"));
+});
+
+test("renderMonitorSidebar renders vertical sidebar sections within exact sidebar width", () => {
+  const lines = renderMonitorSidebar(makeSnapshot(), mockTheme, 38, 70_000, false);
+  const joined = lines.join("\n");
+
+  assert.ok(lines[0]?.startsWith("─ Monitor "));
+  assert.ok(lines.every((line) => visibleWidth(line) === 38), "exact sidebar width");
+  assert.ok(joined.includes("Git feat/issue-27"));
+  assert.ok(joined.includes("Agent default"));
+  assert.ok(joined.includes("Subagent (1 running)"));
 });
