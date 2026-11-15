@@ -197,20 +197,20 @@ export function setupWorkspaceMonitor(
   };
 
   const mountUi = (ctx: ExtensionContext) => {
+    disposeUi(false);
     currentCtx = ctx;
     if (!ctx.hasUI || ctx.mode !== "tui") return;
-
-    disposeUi(false);
 
     ctx.ui.setFooter((tui, theme, footerData) => {
       currentTui = tui;
       state.footerData = footerData;
-      branchUnsubscribe = footerData.onBranchChange(() => {
+      const localBranchUnsubscribe = footerData.onBranchChange(() => {
         void refreshGit();
       });
+      branchUnsubscribe = localBranchUnsubscribe;
 
       splitPaneHandle?.uninstall();
-      splitPaneHandle = installRightSidebarPatch(
+      const localSplitHandle = installRightSidebarPatch(
         tui,
         () => resolvePanelMode(state.panelMode) !== "collapsed" && !tui.hasOverlay(),
         (sidebarWidth) => renderMonitorSidebar(
@@ -223,11 +223,13 @@ export function setupWorkspaceMonitor(
         (text) => theme.fg("dim", text),
         (splitActive) => {
           queueMicrotask(() => {
+            if (splitPaneHandle !== localSplitHandle) return;
             syncWidget(currentCtx, splitActive);
             requestRender();
           });
         },
       );
+      splitPaneHandle = localSplitHandle;
 
       const component = createMonitorFooterComponent(
         buildSnapshot,
@@ -238,8 +240,14 @@ export function setupWorkspaceMonitor(
       return {
         ...component,
         dispose() {
-          branchUnsubscribe?.();
-          branchUnsubscribe = undefined;
+          localBranchUnsubscribe();
+          if (branchUnsubscribe === localBranchUnsubscribe) {
+            branchUnsubscribe = undefined;
+          }
+          localSplitHandle.uninstall();
+          if (splitPaneHandle === localSplitHandle) {
+            splitPaneHandle = undefined;
+          }
           component.dispose?.();
         },
       };
@@ -303,10 +311,9 @@ export function setupWorkspaceMonitor(
     currentCtx = ctx;
     state.toolTracker.recordEnd(event.toolCallId, event.toolName, event.isError);
     syncTicker();
+    requestRender();
     if (MUTATING_TOOLS.has(event.toolName)) {
       void refreshGit();
-    } else {
-      requestRender();
     }
   });
 
