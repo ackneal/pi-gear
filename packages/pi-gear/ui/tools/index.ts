@@ -190,10 +190,9 @@ function isRegularFile(path: string): boolean {
 
 function resolveSkillTarget(args: Record<string, unknown>, cwd: string): SkillTarget | undefined {
   const raw = args.file_path ?? args.path ?? args.filepath;
-  if (typeof raw !== "string" || !raw) return undefined;
+  if (typeof raw !== "string" || !raw || raw === "@") return undefined;
 
-  const expanded = raw.startsWith("~/") ? resolve(homedir(), raw.slice(2)) : raw;
-  const absolute = isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
+  const absolute = resolveFilePath(raw, cwd);
   if (basename(absolute) === "SKILL.md") {
     const skillDir = dirname(absolute);
     return { skillName: basename(skillDir), skillDir, relativePath: undefined };
@@ -222,18 +221,6 @@ function skillBox(component: Component, theme: Theme, previous?: unknown): Box {
 function fileCall(label: string) {
   return (rawArgs: unknown, theme: Theme, context: AnyContext) => {
     const args = parseArgsObject(rawArgs ?? context?.args);
-    const skill = label === "READ" ? resolveSkillTarget(args, context.cwd) : undefined;
-    if (skill) {
-      const status = toolStatus(context);
-      const state = status === "success" ? "" : `${statusMark(status, theme)} `;
-      const badge = theme.fg("customMessageLabel", theme.bold("[skill]"));
-      const target = skill.relativePath ? `${skill.skillName}: ${skill.relativePath}` : skill.skillName;
-      const name = state + theme.fg("customMessageText", `${target}${readRange(args)}`);
-      const expandedStatus = state || readRange(args) || skill.relativePath ? ` ${name}` : "";
-      return skillBox(new Text(
-        "\n" + badge + (context.expanded ? expandedStatus : ` ${name}${theme.fg("dim", ` (${keyText("app.tools.expand")} to expand)`)}\n`), 0, 0,
-      ), theme, context.lastComponent);
-    }
     if (label === "READ" && !context.isError) {
       const rawTarget = clean(args.file_path ?? args.path ?? args.filepath);
       const state = contextState(context);
@@ -245,6 +232,18 @@ function fileCall(label: string) {
         if (!context.expanded || !absolutePath) return new CompactText(title, "wrap");
         return CompactText.headerAndDetail(title, theme.fg("muted", `Path: ${absolutePath}`), undefined, "wrap");
       }
+    }
+    const skill = label === "READ" ? resolveSkillTarget(args, context.cwd) : undefined;
+    if (skill) {
+      const status = toolStatus(context);
+      const state = status === "success" ? "" : `${statusMark(status, theme)} `;
+      const badge = theme.fg("customMessageLabel", theme.bold("[skill]"));
+      const target = skill.relativePath ? `${skill.skillName}: ${skill.relativePath}` : skill.skillName;
+      const name = state + theme.fg("customMessageText", `${target}${readRange(args)}`);
+      const expandedStatus = state || readRange(args) || skill.relativePath ? ` ${name}` : "";
+      return skillBox(new Text(
+        "\n" + badge + (context.expanded ? expandedStatus : ` ${name}${theme.fg("dim", ` (${keyText("app.tools.expand")} to expand)`)}\n`), 0, 0,
+      ), theme, context.lastComponent);
     }
 
     const suffix = label === "READ" ? readRange(args) : "";

@@ -666,6 +666,36 @@ test("outputPad = 1 aligns non-Box skill results with ordinary reads without dou
         isBox: true,
         expectedLines: [" to-artifact", ` References are relative to ${skillDir}.`, " Body"],
       },
+      {
+        name: "@-prefixed supplementary file resolves skill target",
+        render: () => read.renderCall!(
+          { path: "@skills/to-artifact/references/jira.md" },
+          theme,
+          { ...context({ path: "@skills/to-artifact/references/jira.md" }), cwd: root },
+        ),
+        isBox: true,
+        expectedLines: [` [skill] to-artifact: references/jira.md${expandHint}`],
+      },
+      {
+        name: "unnormalized absolute SKILL.md path normalizes skill name",
+        render: () => read.renderCall!(
+          { path: join(skillDir, "references", "..", "SKILL.md") },
+          theme,
+          { ...context({ path: join(skillDir, "references", "..", "SKILL.md") }), cwd: root },
+        ),
+        isBox: true,
+        expectedLines: [` [skill] to-artifact${expandHint}`],
+      },
+      {
+        name: "image inside skill directory uses image-read UI instead of skill Box",
+        render: () => read.renderCall!(
+          { path: "skills/to-artifact/assets/diagram.png" },
+          theme,
+          { ...context({ path: "skills/to-artifact/assets/diagram.png" }), cwd: root },
+        ),
+        isBox: false,
+        expectedLines: [" ● Read(diagram.png)"],
+      },
     ];
 
     for (const row of cases) {
