@@ -2,15 +2,12 @@ import {
   truncateToWidth,
   visibleWidth,
   type Component,
-  type TuiMouseEvent,
-  type TuiMouseEventResult,
 } from "@earendil-works/pi-tui";
 import type { Theme } from "../subagent/format.ts";
 import {
   formatCwd,
   formatTokens,
   type MonitorSnapshot,
-  type PanelMode,
 } from "./state.ts";
 
 function formatDurationCompact(ms: number): string {
@@ -57,64 +54,56 @@ function formatRunningAgentsSummary(snapshot: MonitorSnapshot, now: number): str
   return longestMs > 0 ? `${prefix} (${formatDurationCompact(longestMs)})` : prefix;
 }
 
-function formatWorkspaceBranch(snapshot: MonitorSnapshot): string {
-  let base = formatCwd(snapshot.cwd, snapshot.home);
+function formatBranchDiff(snapshot: MonitorSnapshot): string | undefined {
   const branch = snapshot.git.branch;
-  if (branch) {
-    const { totalInsertions, totalDeletions, files } = snapshot.git;
-    const diffSummary = totalInsertions > 0 || totalDeletions > 0
-      ? ` +${totalInsertions} -${totalDeletions}`
-      : files.length > 0
-        ? "*"
-        : "";
-    base = `${base} (${branch}${diffSummary})`;
-  }
-  if (snapshot.sessionName) {
-    base = `${base} • ${snapshot.sessionName}`;
-  }
-  return base;
-}
+  if (!branch) return undefined;
 
-function panelModeIcon(mode: PanelMode): string {
-  if (mode === "full") return "▾+";
-  if (mode === "compact") return "▾";
-  return "▴";
+  const { totalInsertions, totalDeletions, files } = snapshot.git;
+  const diffSummary = totalInsertions > 0 || totalDeletions > 0
+    ? ` +${totalInsertions} -${totalDeletions}`
+    : files.length > 0
+      ? "*"
+      : "";
+  return `⎇ ${branch}${diffSummary}`;
 }
 
 export function renderFooterLine1(
   snapshot: MonitorSnapshot,
   theme: Theme,
   width: number,
-  panelMode: PanelMode,
   now = Date.now(),
 ): string {
   const sep = theme.fg("dim", " │ ");
-  const parts: string[] = [
-    theme.fg("dim", formatWorkspaceBranch(snapshot)),
-    theme.fg("accent", snapshot.activeAgent),
-  ];
+  const cwdText = formatCwd(snapshot.cwd, snapshot.home);
+  const workspace = `${theme.fg("accent", `(${snapshot.activeAgent})`)} ${theme.fg("dim", cwdText)}${snapshot.sessionName ? theme.fg("dim", ` • ${snapshot.sessionName}`) : ""}`;
+  const parts: string[] = [workspace];
+
+  const branchDiff = formatBranchDiff(snapshot);
+  if (branchDiff) {
+    parts.push(theme.fg("dim", branchDiff));
+  }
 
   const runningText = formatRunningAgentsSummary(snapshot, now);
   if (runningText) {
     parts.push(theme.fg("warning", runningText));
   }
 
+  const leftText = parts.join(sep);
   const activityText = formatTurnsAndToolsSummary(snapshot);
-  if (activityText) {
-    parts.push(theme.fg(snapshot.tools.activeTools.length > 0 ? "accent" : "dim", activityText));
+  if (!activityText) {
+    return truncateToWidth(leftText, width, width >= 20 ? theme.fg("dim", "...") : "");
   }
 
-  const leftText = parts.join(sep);
-  if (width < 20) {
+  const rightText = theme.fg(snapshot.tools.activeTools.length > 0 ? "accent" : "dim", activityText);
+  const rightWidth = visibleWidth(rightText);
+  if (width < rightWidth + 2) {
     return truncateToWidth(leftText, width, "");
   }
 
-  const icon = theme.fg("accent", panelModeIcon(panelMode));
-  const iconWidth = visibleWidth(icon);
-  const maxLeftWidth = Math.max(0, width - iconWidth - 1);
+  const maxLeftWidth = Math.max(0, width - rightWidth - 1);
   const truncatedLeft = truncateToWidth(leftText, maxLeftWidth, theme.fg("dim", "..."));
-  const padding = " ".repeat(Math.max(1, width - visibleWidth(truncatedLeft) - iconWidth));
-  return `${truncatedLeft}${padding}${icon}`;
+  const padding = " ".repeat(Math.max(1, width - visibleWidth(truncatedLeft) - rightWidth));
+  return `${truncatedLeft}${padding}${rightText}`;
 }
 
 export function renderFooterLine2(snapshot: MonitorSnapshot, theme: Theme, width: number): string {
@@ -184,11 +173,10 @@ export function renderMonitorFooter(
   snapshot: MonitorSnapshot,
   theme: Theme,
   width: number,
-  panelMode: PanelMode,
   now = Date.now(),
 ): string[] {
   const lines = [
-    renderFooterLine1(snapshot, theme, width, panelMode, now),
+    renderFooterLine1(snapshot, theme, width, now),
     renderFooterLine2(snapshot, theme, width),
   ];
 
@@ -206,24 +194,14 @@ export function renderMonitorFooter(
 
 export function createMonitorFooterComponent(
   getSnapshot: () => MonitorSnapshot,
-  getPanelMode: () => PanelMode,
-  onCyclePanelMode: () => void,
   theme: Theme,
 ): Component & {
-  handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined;
   dispose?(): void;
 } {
   return {
     invalidate() {},
     render(width: number): string[] {
-      return renderMonitorFooter(getSnapshot(), theme, width, getPanelMode());
-    },
-    handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
-      if (event.type === "click" && event.button === "left" && event.y === 0 && event.x >= event.width - 4) {
-        onCyclePanelMode();
-        return { handled: true, render: true };
-      }
-      return undefined;
+      return renderMonitorFooter(getSnapshot(), theme, width);
     },
   };
 }

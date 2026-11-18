@@ -1,52 +1,21 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
-import type { ResolvedAgentDefinition, Runtime } from "pi-rostrix";
-import type { SubagentServices } from "../../subagents/index.ts";
+import type { Runtime } from "pi-rostrix";
 import { createMonitorFooterComponent } from "./footer.ts";
 import { readWorkspaceGitSnapshot } from "./git-status.ts";
-import { createMonitorPanelComponent } from "./panel.ts";
 import {
-  buildAgentConfigSummaries,
   createMonitorState,
-  extractMainAgentResources,
-  nextPanelMode,
-  resolvePanelMode,
   summarizeSessionUsage,
-  type AgentConfigSummary,
-  type MainAgentResources,
   type MonitorSnapshot,
-  type PanelMode,
   type SessionEntryLike,
   type SessionUsageSnapshot,
 } from "./state.ts";
 
 export interface WorkspaceMonitorServices {
   readonly runtime: Runtime;
-  readonly subagents: SubagentServices;
 }
 
-const MONITOR_WIDGET_KEY = "pi-gear.monitor";
 const MUTATING_TOOLS = new Set(["write", "edit", "bash"]);
-
-function resolveAgentSummaries(
-  runtime: Runtime,
-  subagents: SubagentServices,
-  ctx: ExtensionContext,
-) {
-  const activeAgent = runtime.getActiveAgent();
-  const resolved: ResolvedAgentDefinition[] = [];
-  for (const agent of runtime.getAllAgents()) {
-    try {
-      resolved.push(runtime.resolveAgent(agent.id));
-    } catch {
-      // Skip invalid or partially resolved agent definitions in monitor summary.
-    }
-  }
-  return {
-    activeAgentId: activeAgent?.id ?? "default",
-    agents: buildAgentConfigSummaries(resolved, subagents.settings, ctx),
-  };
-}
 
 export function setupWorkspaceMonitor(
   pi: ExtensionAPI,
@@ -60,8 +29,6 @@ export function setupWorkspaceMonitor(
   let tickTimer: ReturnType<typeof setInterval> | undefined;
   let gitRefreshSeq = 0;
   let cachedActiveAgentId = "default";
-  let cachedAgents: AgentConfigSummary[] = [];
-  let cachedMainResources: MainAgentResources = { toolsCount: 0, tools: [], skills: [], mcpServers: [] };
   let cachedSessionUsage: SessionUsageSnapshot = {
     turns: 0,
     input: 0,
@@ -79,25 +46,14 @@ export function setupWorkspaceMonitor(
   };
 
   const refreshSessionCache = (ctx: ExtensionContext | undefined) => {
-    const activeAgent = services.runtime.getActiveAgent();
-    if (ctx) {
-      const summary = resolveAgentSummaries(services.runtime, services.subagents, ctx);
-      cachedActiveAgentId = summary.activeAgentId;
-      cachedAgents = summary.agents;
-      const entries = ctx.sessionManager.getEntries() as readonly SessionEntryLike[];
-      cachedSessionUsage = summarizeSessionUsage(
-        entries,
-        ctx.getContextUsage(),
-        ctx.model?.contextWindow ?? 0,
-      );
-    } else {
-      cachedActiveAgentId = activeAgent?.id ?? "default";
-      cachedAgents = [];
-    }
-    cachedMainResources = extractMainAgentResources(
-      pi.getActiveTools(),
-      pi.getCommands(),
-      Object.keys(activeAgent?.mcpServers ?? {}),
+    cachedActiveAgentId = services.runtime.getActiveAgent()?.id ?? "default";
+    if (!ctx) return;
+
+    const entries = ctx.sessionManager.getEntries() as readonly SessionEntryLike[];
+    cachedSessionUsage = summarizeSessionUsage(
+      entries,
+      ctx.getContextUsage(),
+      ctx.model?.contextWindow ?? 0,
     );
   };
 
@@ -125,8 +81,6 @@ export function setupWorkspaceMonitor(
       sessionName: pi.getSessionName(),
       git: state.git,
       activeAgent: cachedActiveAgentId,
-      mainResources: cachedMainResources,
-      agents: cachedAgents,
       tasks: services.runtime.tasks.listTasks(),
       tools: state.toolTracker.snapshot(),
       sessionUsage: {
@@ -149,37 +103,6 @@ export function setupWorkspaceMonitor(
       availableProviderCount: state.footerData?.getAvailableProviderCount() ?? 1,
       extensionStatuses: state.footerData?.getExtensionStatuses() ?? new Map(),
     };
-  };
-
-  const syncWidget = (ctx: ExtensionContext | undefined) => {
-    if (!ctx?.hasUI || ctx.mode !== "tui") return;
-    if (resolvePanelMode(state.panelMode) === "collapsed") {
-      ctx.ui.setWidget(MONITOR_WIDGET_KEY, undefined);
-      return;
-    }
-    ctx.ui.setWidget(
-      MONITOR_WIDGET_KEY,
-      (_tui, theme) => createMonitorPanelComponent(
-        buildSnapshot,
-        () => state.panelMode === "full",
-        theme,
-      ),
-      { placement: "aboveEditor" },
-    );
-  };
-
-  const setPanelMode = (ctx: ExtensionContext | undefined, mode?: PanelMode) => {
-    const prev = state.panelMode;
-    const next = mode ?? nextPanelMode(prev);
-    state.panelMode = next;
-    if ((prev === "collapsed") !== (next === "collapsed")) {
-      syncWidget(ctx ?? currentCtx);
-    }
-    if (next !== "collapsed") {
-      refreshSessionCache(ctx ?? currentCtx);
-      void refreshGit();
-    }
-    requestRender();
   };
 
   const syncTicker = () => {
@@ -215,7 +138,6 @@ export function setupWorkspaceMonitor(
     tasksUnsubscribe?.();
     tasksUnsubscribe = undefined;
     if (currentCtx?.hasUI && currentCtx.mode === "tui") {
-      currentCtx.ui.setWidget(MONITOR_WIDGET_KEY, undefined);
       if (restoreFooter) {
         currentCtx.ui.setFooter(undefined);
       }
@@ -237,12 +159,7 @@ export function setupWorkspaceMonitor(
       });
       branchUnsubscribe = localBranchUnsubscribe;
 
-      const component = createMonitorFooterComponent(
-        buildSnapshot,
-        () => resolvePanelMode(state.panelMode),
-        () => setPanelMode(currentCtx),
-        theme,
-      );
+      const component = createMonitorFooterComponent(buildSnapshot, theme);
       return {
         ...component,
         dispose() {
@@ -255,7 +172,6 @@ export function setupWorkspaceMonitor(
       };
     });
 
-    syncWidget(ctx);
     state.toolTracker.resetFromEntries(
       ctx.sessionManager.getEntries() as readonly SessionEntryLike[],
     );
@@ -267,23 +183,6 @@ export function setupWorkspaceMonitor(
     syncTicker();
     void refreshGit();
   };
-
-  pi.registerCommand("gear:panel", {
-    description: "Cycle or set workspace monitor panel mode (collapsed, compact, full)",
-    handler: async (args, ctx) => {
-      currentCtx = ctx;
-      const normalized = args.trim().toLowerCase();
-      const mode: PanelMode | undefined =
-        normalized === "full" || normalized === "all" || normalized === "more"
-          ? "full"
-          : normalized === "on" || normalized === "open" || normalized === "expand" || normalized === "compact"
-            ? "compact"
-            : normalized === "off" || normalized === "close" || normalized === "collapse" || normalized === "collapsed"
-              ? "collapsed"
-              : undefined;
-      setPanelMode(ctx, mode);
-    },
-  });
 
   pi.on("session_start", (_event, ctx) => {
     mountUi(ctx);

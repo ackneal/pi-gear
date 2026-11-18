@@ -101,7 +101,7 @@ for (const order of [["gear", "rostrix"], ["rostrix", "gear"]] as const) {
       assert.notStrictEqual(nextRuntime, runtime);
       assert.notStrictEqual(nextRuntime.tasks, runtime.tasks);
       assert.deepEqual(reloaded.extensions.flatMap((extension: Extension) => [...extension.tools.keys()]).sort(), [...gearTools, ...rostrixTools].sort());
-      assert.deepEqual(reloaded.extensions.flatMap((extension: Extension) => [...extension.commands.keys()]).sort(), ["gear:agents", "gear:doctor", "gear:panel", "gear:plan", "gear:subagent-model", "rostrix:agents"]);
+      assert.deepEqual(reloaded.extensions.flatMap((extension: Extension) => [...extension.commands.keys()]).sort(), ["gear:agents", "gear:doctor", "gear:plan", "gear:subagent-model", "rostrix:agents"]);
     } finally {
       try {
         const cleanup = await Promise.allSettled(loaded.filter((extension) => !stopped.has(extension)).map((extension) => stop(extension)));

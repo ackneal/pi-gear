@@ -58,6 +58,6 @@ export async function setupExtension(
   if (child) return;
 
   const subagents = setupSubagents(pi, workspace, runtime, config);
-  setupWorkspaceMonitor(pi, { runtime, subagents });
+  setupWorkspaceMonitor(pi, { runtime });
   setupCommands(pi, { execution, subagents, lsp, workspace, runtime });
 }

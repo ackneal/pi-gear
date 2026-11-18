@@ -1,38 +1,12 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import type { ExtensionContext, ReadonlyFooterDataProvider } from "@earendil-works/pi-coding-agent";
-import type { ResolvedAgentDefinition, TaskRecord } from "pi-rostrix";
-import type { SubagentSettings } from "../../subagents/settings.ts";
+import type { ReadonlyFooterDataProvider } from "@earendil-works/pi-coding-agent";
+import type { TaskRecord } from "pi-rostrix";
 import { EMPTY_GIT_SNAPSHOT, type WorkspaceGitSnapshot } from "./git-status.ts";
-
-export type PanelMode = "collapsed" | "compact" | "full";
-
-export function resolvePanelMode(manualMode: PanelMode | undefined): PanelMode {
-  return manualMode ?? "collapsed";
-}
-
-export function nextPanelMode(current: PanelMode): PanelMode {
-  if (current === "collapsed") return "compact";
-  if (current === "compact") return "full";
-  return "collapsed";
-}
-
-export interface ToolCallStats {
-  readonly calls: number;
-  readonly errors: number;
-}
 
 export interface ToolStatsSnapshot {
   readonly total: number;
   readonly errors: number;
   readonly activeTools: readonly string[];
-  readonly counts: Readonly<Record<string, number>>;
-  readonly byTool: Readonly<Record<string, ToolCallStats>>;
-}
-
-export interface AgentConfigSummary {
-  readonly id: string;
-  readonly model?: string | undefined;
-  readonly thinkingLevel?: string | undefined;
 }
 
 export interface SessionUsageSnapshot {
@@ -48,21 +22,12 @@ export interface SessionUsageSnapshot {
   readonly contextPercent: number | null;
 }
 
-export interface MainAgentResources {
-  readonly toolsCount: number;
-  readonly tools: readonly string[];
-  readonly skills: readonly string[];
-  readonly mcpServers: readonly string[];
-}
-
 export interface MonitorSnapshot {
   readonly cwd: string;
   readonly home?: string | undefined;
   readonly sessionName?: string | undefined;
   readonly git: WorkspaceGitSnapshot;
   readonly activeAgent: string;
-  readonly mainResources: MainAgentResources;
-  readonly agents: readonly AgentConfigSummary[];
   readonly tasks: readonly TaskRecord[];
   readonly tools: ToolStatsSnapshot;
   readonly sessionUsage: SessionUsageSnapshot;
@@ -123,54 +88,38 @@ export function formatCwd(cwd: string, home?: string): string {
 
 export function createToolStatsTracker(): ToolStatsTracker {
   const active = new Map<string, string>();
-  const counts: Record<string, number> = {};
-  const byTool: Record<string, { calls: number; errors: number }> = {};
   let total = 0;
   let errors = 0;
 
-  const recordToolResult = (toolName: string, isError: boolean) => {
+  const recordToolResult = (isError: boolean) => {
     total += 1;
     if (isError) errors += 1;
-    counts[toolName] = (counts[toolName] ?? 0) + 1;
-    const entry = byTool[toolName] ?? { calls: 0, errors: 0 };
-    entry.calls += 1;
-    if (isError) entry.errors += 1;
-    byTool[toolName] = entry;
   };
 
   return {
     recordStart(toolCallId, toolName) {
       active.set(toolCallId, toolName);
     },
-    recordEnd(toolCallId, toolName, isError) {
+    recordEnd(toolCallId, _toolName, isError) {
       active.delete(toolCallId);
-      recordToolResult(toolName, isError);
+      recordToolResult(isError);
     },
     resetFromEntries(entries) {
       active.clear();
-      for (const key of Object.keys(counts)) delete counts[key];
-      for (const key of Object.keys(byTool)) delete byTool[key];
       total = 0;
       errors = 0;
 
       for (const entry of entries) {
         if (entry.type !== "message" || entry.message?.role !== "toolResult") continue;
-        const name = entry.message.toolName;
-        if (!name) continue;
-        recordToolResult(name, Boolean(entry.message.isError));
+        if (!entry.message.toolName) continue;
+        recordToolResult(Boolean(entry.message.isError));
       }
     },
     snapshot() {
-      const byToolSnapshot: Record<string, ToolCallStats> = {};
-      for (const [name, stats] of Object.entries(byTool)) {
-        byToolSnapshot[name] = { ...stats };
-      }
       return {
         total,
         errors,
         activeTools: [...active.values()],
-        counts: { ...counts },
-        byTool: byToolSnapshot,
       };
     },
   };
@@ -230,59 +179,8 @@ export function summarizeSessionUsage(
   };
 }
 
-export function extractMainAgentResources(
-  activeTools: readonly string[],
-  commands: ReadonlyArray<{ readonly name: string; readonly source: string }>,
-  configuredMcpServers: readonly string[] = [],
-): MainAgentResources {
-  const mcpSet = new Set<string>(configuredMcpServers);
-  const tools: string[] = [];
-  for (const toolName of activeTools) {
-    const match = toolName.match(/^mcp__([^_]+(?:_[^_]+)*)__/);
-    if (match?.[1]) {
-      mcpSet.add(match[1]);
-    } else {
-      tools.push(toolName);
-    }
-  }
-
-  const skills = commands
-    .filter((cmd) => cmd.source === "skill")
-    .map((cmd) => (cmd.name.startsWith("skill:") ? cmd.name.slice("skill:".length) : cmd.name));
-
-  return {
-    toolsCount: tools.length,
-    tools,
-    skills,
-    mcpServers: [...mcpSet].sort(),
-  };
-}
-
-export function buildAgentConfigSummaries(
-  definitions: readonly ResolvedAgentDefinition[],
-  subagentSettings?: SubagentSettings,
-  settingsCtx?: ExtensionContext,
-): AgentConfigSummary[] {
-  const settingsById = new Map(
-    (subagentSettings && settingsCtx ? subagentSettings.summaries(settingsCtx) : [])
-      .map((item) => [`gear:${item.id}`, item]),
-  );
-
-  return definitions.map((def) => {
-    const override = settingsById.get(def.id);
-    const model = override?.modelSelection.model ?? def.model?.preferred;
-    const thinkingLevel = override?.modelSelection.thinkingLevel;
-    return {
-      id: def.id,
-      ...(model ? { model } : {}),
-      ...(thinkingLevel ? { thinkingLevel } : {}),
-    };
-  });
-}
-
 export interface MonitorState {
   git: WorkspaceGitSnapshot;
-  panelMode: PanelMode;
   footerData: ReadonlyFooterDataProvider | undefined;
   readonly toolTracker: ToolStatsTracker;
 }
@@ -290,7 +188,6 @@ export interface MonitorState {
 export function createMonitorState(): MonitorState {
   return {
     git: EMPTY_GIT_SNAPSHOT,
-    panelMode: "collapsed",
     footerData: undefined,
     toolTracker: createToolStatsTracker(),
   };
