@@ -10,6 +10,7 @@ import { setupLsp } from "./lsp/index.ts";
 import { BUILTIN_AGENT_DEFINITIONS } from "./agents/definitions.ts";
 import { setupSubagents } from "./subagents/index.ts";
 import { setupThinkingDisplay } from "./ui/thinking/index.ts";
+import { setupWorkspaceMonitor } from "./ui/monitor/index.ts";
 import { setupWorkspace } from "./workspace/setup.ts";
 
 export default async function extension(pi: ExtensionAPI): Promise<void> {
@@ -57,5 +58,6 @@ export async function setupExtension(
   if (child) return;
 
   const subagents = setupSubagents(pi, workspace, runtime, config);
+  setupWorkspaceMonitor(pi, { runtime });
   setupCommands(pi, { execution, subagents, lsp, workspace, runtime });
 }
